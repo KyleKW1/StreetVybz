@@ -6,8 +6,18 @@ from password_reset import forgot_password_page, reset_password_page
 import json
 
 def main():
-    # ... existing code ...
-    
+    # Initialize session state FIRST (before page config)
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+    if 'user' not in st.session_state:
+        st.session_state.user = None
+    if 'page' not in st.session_state:
+        st.session_state.page = 'login'
+    if 'selected_feature' not in st.session_state:
+        st.session_state.selected_feature = None
+    if 'file_page' not in st.session_state:
+        st.session_state.file_page = 0
+        
     if not st.session_state.authenticated:
         # Auth pages
         if st.session_state.page == 'register':
