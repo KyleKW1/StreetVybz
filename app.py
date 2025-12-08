@@ -17,7 +17,9 @@ def main():
         st.session_state.selected_feature = None
     if 'file_page' not in st.session_state:
         st.session_state.file_page = 0
-        
+    
+    apply_custom_styles()  
+    
     if not st.session_state.authenticated:
         # Auth pages
         if st.session_state.page == 'register':
