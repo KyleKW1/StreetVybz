@@ -20,10 +20,6 @@ APP_EMAIL_PASSWORD = "myhdkbyrzmpvwjyb"
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
-# ============================================
-# DATABASE CONFIGURATION (same as Test3.py)
-# ============================================
-
 
 # ============================================
 # DATABASE FUNCTIONS
