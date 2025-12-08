@@ -1,3 +1,7 @@
+import streamlit as st
+from auth import authenticate_user, register_user, validate_email
+
+
 def login_page():
     """Render login page"""
     col1, col2, col3 = st.columns([1, 2, 1])
