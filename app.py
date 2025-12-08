@@ -42,3 +42,7 @@ def main():
         else:
             from pages.dashboard import dashboard_page
             dashboard_page()
+
+
+if __name__ == "__main__":
+    main()
