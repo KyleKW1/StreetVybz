@@ -7,3 +7,5 @@ numpy
 matplotlib
 seaborn
 python-dateutil
+anthropic
+requests
