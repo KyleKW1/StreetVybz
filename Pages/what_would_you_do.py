@@ -1,154 +1,25 @@
 """
 Pages/what_would_you_do.py
-Kink & desire profile quiz — 10 indirect scenario questions, no Reddit needed.
-Profiles across 6 dimensions and surfaces matched kink tags.
+AI-generated desire & fantasy profile quiz.
+Claude generates 10 fresh indirect scenario questions every session.
+Profiles across 6 dimensions and returns personalised exploration recommendations.
 """
 
 import streamlit as st
+import anthropic
 import json
-
-# ─── QUESTIONS ────────────────────────────────────────────────────────────────
-
-QUESTIONS = [
-    {
-        "tag": "Power play",
-        "text": "You're planning a surprise for someone you're deeply attracted to. Which direction do you take it?",
-        "dims": {"control": [0, 1, 2, 3], "sensory": [0, 0, 1, 1]},
-        "opts": [
-            "A thoughtful note and their favourite meal — I like making people feel cared for.",
-            "Something they've mentioned wanting but never asked for — I pay attention.",
-            "Blindfold them, lead them somewhere unexpected — the not-knowing is the point.",
-            "I tell them exactly what's going to happen, step by step, before it does.",
-        ],
-    },
-    {
-        "tag": "Atmosphere",
-        "text": "Which setting makes you feel most… switched on?",
-        "dims": {"exhib": [0, 1, 2, 3], "sensory": [1, 0, 2, 0]},
-        "opts": [
-            "Completely private. Just us, no possibility of interruption.",
-            "Somewhere semi-public — a balcony, a quiet corner — where getting caught is theoretically possible.",
-            "Honestly? An audience wouldn't bother me. The attention is part of it.",
-            "Sensory overload: music, low light, textures — I want every sense involved.",
-        ],
-    },
-    {
-        "tag": "Fantasy check",
-        "text": "A movie scene that unexpectedly does something for you usually involves:",
-        "dims": {"control": [0, 2, 1, 3], "dynamic": [0, 1, 2, 3]},
-        "opts": [
-            "Two people completely equal — no one leads, no one follows, just chemistry.",
-            "Someone taking charge in a way that's confident but not aggressive.",
-            "Roleplay or a character dynamic — the 'character' part matters as much as the act.",
-            "Clear power — one person completely in control, the other completely surrendered.",
-        ],
-    },
-    {
-        "tag": "Comfort zone",
-        "text": "You're with someone you trust completely. They suggest something new. Your gut says:",
-        "dims": {"openness": [0, 1, 2, 3], "control": [1, 0, 2, 0]},
-        "opts": [
-            "Hard pass — I know what I like and I'm not experimenting tonight.",
-            "Tell me more first. I need to understand it before I decide.",
-            "Curious. I'll try most things once if I'm comfortable with the person.",
-            "Yes before they finish the sentence. That's what trust is for.",
-        ],
-    },
-    {
-        "tag": "The language of want",
-        "text": "How do you prefer desire to be communicated?",
-        "dims": {"verbal": [0, 3, 1, 2], "control": [0, 1, 2, 1]},
-        "opts": [
-            "Actions only — words kill the mood for me.",
-            "Tell me exactly. Specific, explicit, no ambiguity.",
-            "Whispered, close — tone matters more than content.",
-            "I want to be asked permission. The asking is the thing.",
-        ],
-    },
-    {
-        "tag": "Slow burn or fast fire",
-        "text": "Your ideal pace from first contact to peak intensity is:",
-        "dims": {"sensory": [3, 1, 0, 2], "dynamic": [1, 0, 2, 1]},
-        "opts": [
-            "Agonisingly slow. I want anticipation that feels almost unbearable.",
-            "Gradual. Let it build naturally without forcing it.",
-            "Fast. The urgency is the turn-on.",
-            "Unpredictable — slow then suddenly fast — I like losing the rhythm.",
-        ],
-    },
-    {
-        "tag": "Imagination",
-        "text": "If you were writing the scenario in your head right now, the other person is:",
-        "dims": {"dynamic": [0, 1, 3, 2], "control": [0, 2, 3, 1]},
-        "opts": [
-            "Completely equal — we're discovering it together.",
-            "Slightly unpredictable — I don't know exactly what they'll do next.",
-            "Dominant and deliberate — they know exactly what they want from me.",
-            "Waiting for my lead — I decide everything.",
-        ],
-    },
-    {
-        "tag": "Sensation",
-        "text": "Which physical element features most in what you find genuinely exciting?",
-        "dims": {"sensory": [3, 2, 1, 0], "control": [1, 2, 0, 3]},
-        "opts": [
-            "Touch and texture — what things feel like against skin.",
-            "Restraint — not necessarily literal, but the feeling of being held.",
-            "Eye contact and presence — being completely seen.",
-            "Pain-adjacent sensation — that line where pleasure gets complicated.",
-        ],
-    },
-    {
-        "tag": "The reveal",
-        "text": "When it comes to being truly known by someone intimately, you:",
-        "dims": {"openness": [0, 1, 2, 3], "verbal": [1, 0, 2, 3]},
-        "opts": [
-            "Keep a lot private — some things are just mine.",
-            "Share selectively, over time, when trust is solid.",
-            "Open book — I'd rather someone know everything and react honestly.",
-            "Want to be figured out. I like someone reading me without being told.",
-        ],
-    },
-    {
-        "tag": "After everything",
-        "text": "What matters most to you once the intensity fades?",
-        "dims": {"dynamic": [0, 1, 2, 3], "openness": [2, 1, 0, 3]},
-        "opts": [
-            "Quiet — no processing, no talking, just being present.",
-            "Closeness — physical, warm, uncomplicated.",
-            "Conversation — I want to talk about what just happened.",
-            "Honesty — even if something was unexpected or complicated, I want it said.",
-        ],
-    },
-]
+import random
 
 # ─── DIMENSIONS ───────────────────────────────────────────────────────────────
 
 DIMS = {
-    "control":  {"label": "Power & control",     "color": "#D85A30"},
-    "sensory":  {"label": "Sensory depth",        "color": "#ff2d78"},
-    "exhib":    {"label": "Exhibitionism",         "color": "#ffb300"},
-    "dynamic":  {"label": "Role dynamics",         "color": "#7F77DD"},
-    "openness": {"label": "Sexual openness",       "color": "#00e5ff"},
-    "verbal":   {"label": "Verbal intensity",      "color": "#c6ff00"},
+    "control":  {"label": "Power & control",   "color": "#D85A30"},
+    "sensory":  {"label": "Sensory depth",      "color": "#ff2d78"},
+    "exhib":    {"label": "Exhibitionism",       "color": "#ffb300"},
+    "dynamic":  {"label": "Role dynamics",       "color": "#7F77DD"},
+    "openness": {"label": "Sexual openness",     "color": "#00e5ff"},
+    "verbal":   {"label": "Verbal intensity",    "color": "#c6ff00"},
 }
-
-# ─── KINK TAGS ────────────────────────────────────────────────────────────────
-
-KINK_MAP = [
-    {"label": "Dominance / submission", "dims": {"control": 0.6, "dynamic": 0.4}, "threshold": 0.55},
-    {"label": "Sensory play",           "dims": {"sensory": 0.8, "control": 0.2}, "threshold": 0.50},
-    {"label": "Roleplay",               "dims": {"dynamic": 0.7, "verbal": 0.3},  "threshold": 0.45},
-    {"label": "Exhibitionism",          "dims": {"exhib": 1.0},                   "threshold": 0.40},
-    {"label": "Restraint",              "dims": {"control": 0.5, "sensory": 0.5}, "threshold": 0.50},
-    {"label": "Verbal intensity",       "dims": {"verbal": 0.8, "dynamic": 0.2},  "threshold": 0.50},
-    {"label": "Slow anticipation",      "dims": {"sensory": 0.4, "openness": 0.6},"threshold": 0.50},
-    {"label": "Power exchange",         "dims": {"control": 0.7, "dynamic": 0.3}, "threshold": 0.60},
-    {"label": "Emotional intimacy",     "dims": {"openness": 0.7, "verbal": 0.3}, "threshold": 0.45},
-    {"label": "Unpredictability",       "dims": {"openness": 0.5, "dynamic": 0.5},"threshold": 0.50},
-]
-
-# ─── RESULT PROFILES ─────────────────────────────────────────────────────────
 
 PROFILES = [
     {
@@ -156,72 +27,124 @@ PROFILES = [
         "icon": "🌙",
         "name": "The Intimate Minimalist",
         "meta": "Real > elaborate.",
-        "desc": "You don't need complexity. What you want is genuine, simple, and deeply felt. The fewer variables the better — you find more in a moment of authentic closeness than in any elaborate setup.",
+        "desc": "You don't need complexity. What you want is genuine, simple, and deeply felt. You find more in a moment of authentic closeness than in any elaborate setup.",
     },
     {
         "range": [21, 42],
         "icon": "🌿",
         "name": "The Calibrated Explorer",
         "meta": "Trust unlocks everything.",
-        "desc": "You know what you like but you're still curious about the edges. You don't chase novelty for its own sake — but with the right person and enough trust, you'll go further than most people realise.",
+        "desc": "You know what you like but you're still curious about the edges. With the right person and enough trust, you'll go further than most people realise.",
     },
     {
         "range": [43, 62],
         "icon": "🔺",
         "name": "The Dynamic Architect",
         "meta": "Power and pace are the whole thing.",
-        "desc": "Structure, dynamic, and control matter to you enormously. You're drawn to clear roles — whether you're the one creating them or surrendering to them. The setup is part of the pleasure.",
+        "desc": "Structure, dynamic, and roles matter to you enormously. Whether you're creating that structure or surrendering to it — the setup is part of the pleasure.",
     },
     {
         "range": [63, 999],
         "icon": "⚡",
         "name": "The Full-Spectrum Player",
         "meta": "You want all of it.",
-        "desc": "You're not afraid of complexity. Sensation, dynamic, honesty, and edge — you want the full range. You've probably thought about this more than most people have, and you know exactly what that means.",
+        "desc": "You're not afraid of complexity. Sensation, dynamic, honesty, and edge — you want the full range. You know exactly what that means.",
     },
 ]
 
+# ─── PROMPTS ──────────────────────────────────────────────────────────────────
+
+GENERATION_PROMPT = """You write questions for an adult desire-discovery quiz called "Read Between The Lines" inside a lifestyle app called Vice Vault.
+
+The quiz reveals intimate preferences WITHOUT asking about anything directly.
+Every question must feel like a lifestyle or personality scenario on the surface.
+The person should not immediately realise what each question is measuring.
+
+Generate exactly 10 unique scenario-based questions. Each must:
+- Sound like an innocent preference or gut-reaction question on the surface
+- Actually measure one or more of these hidden dimensions:
+    control (dominant/submissive energy)
+    sensory (sensation and texture seeking)
+    exhib (exhibitionism / being watched)
+    dynamic (roleplay / persona / power games)
+    openness (willingness to experiment)
+    verbal (explicit communication / dirty talk)
+- Have exactly 4 answer options from least adventurous (score 0) to most (score 3)
+- Cover DIFFERENT scenarios — vary the settings, framings, moods
+- Feel fun, cheeky, a little daring — never clinical or medical
+
+Return ONLY valid JSON. No markdown fences, no explanation. Format:
+[
+  {
+    "tag": "Short 2-3 word category label",
+    "text": "The question text",
+    "dims": {"dim_name": [score_for_opt0, score_for_opt1, score_for_opt2, score_for_opt3]},
+    "opts": ["Option A text", "Option B text", "Option C text", "Option D text"]
+  }
+]
+
+Scores are integers 0-3. Map 1-2 dims per question.
+Make questions feel like something people would screenshot and send to a partner.
+"""
+
+RECOMMENDATION_PROMPT = """You are a knowledgeable, sex-positive, non-judgmental desire analyst for Vice Vault, an adult lifestyle app.
+
+A user just completed a desire profile quiz. Based on their dimension scores, write 5 personalised recommendations for experiences, scenarios, or dynamics they might genuinely enjoy exploring.
+
+Dimension scores (0-100%):
+{scores}
+
+Profile type: {profile_name} — {profile_desc}
+
+Guidelines:
+- Be specific and evocative, not vague or generic
+- Frame each as something to explore or try — curious and inviting, not prescriptive
+- Scale from approachable to more adventurous based on their highest-scoring dims
+- Write like a knowledgeable, cool friend — not a therapist or a textbook
+- Each recommendation: 1-2 sentences max
+- Do NOT use bullet point characters or numbering in the strings themselves
+
+Return ONLY a JSON array of exactly 5 recommendation strings. No markdown, no preamble.
+Example format: ["Recommendation one.", "Recommendation two.", ...]
+"""
+
 # ─── HELPERS ─────────────────────────────────────────────────────────────────
 
-def _dim_maxes() -> dict:
+def get_client():
+    try:
+        return anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+    except Exception:
+        return anthropic.Anthropic()
+
+
+def _dim_maxes(questions: list) -> dict:
     mx = {d: 0 for d in DIMS}
-    for q in QUESTIONS:
-        for d, vals in q["dims"].items():
-            mx[d] += max(vals)
+    for q in questions:
+        for d, vals in q.get("dims", {}).items():
+            if d in mx:
+                mx[d] += max(vals)
     return mx
 
-DIM_MAX = _dim_maxes()
 
-
-def _compute_scores(answers: list) -> dict:
+def _compute_scores(questions: list, answers: list) -> dict:
     sc = {d: 0 for d in DIMS}
     for qi, ai in enumerate(answers):
-        if ai is None:
+        if ai is None or qi >= len(questions):
             continue
-        for d, vals in QUESTIONS[qi]["dims"].items():
-            sc[d] += vals[ai]
+        for d, vals in questions[qi].get("dims", {}).items():
+            if d in sc and ai < len(vals):
+                sc[d] += vals[ai]
     return sc
 
 
-def _total_pct(scores: dict) -> int:
+def _total_pct(scores: dict, dim_max: dict) -> int:
     tot = sum(scores.values())
-    mx  = sum(DIM_MAX.values())
+    mx  = sum(v for v in dim_max.values() if v > 0)
     return round((tot / mx) * 100) if mx else 0
 
 
-def _dim_pct(scores: dict, d: str) -> int:
-    return round((scores[d] / DIM_MAX[d]) * 100) if DIM_MAX[d] else 0
-
-
-def _kink_score(scores: dict, k: dict) -> float:
-    s = 0.0
-    for d, w in k["dims"].items():
-        s += (scores[d] / DIM_MAX[d]) * w if DIM_MAX[d] else 0
-    return s
-
-
-def _active_kinks(scores: dict) -> list:
-    return [k["label"] for k in KINK_MAP if _kink_score(scores, k) >= k["threshold"]]
+def _dim_pct(scores: dict, dim_max: dict, d: str) -> int:
+    return round((scores[d] / dim_max[d]) * 100) if dim_max.get(d) else 0
 
 # ─── CSS ─────────────────────────────────────────────────────────────────────
 
@@ -281,9 +204,15 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 
 def init_state():
     defaults = {
-        "kq_phase":   "start",
-        "kq_cur":     0,
-        "kq_answers": [None] * len(QUESTIONS),
+        "kq_phase":     "start",
+        "kq_cur":       0,
+        "kq_answers":   [],
+        "kq_questions": [],
+        "kq_scores":    {},
+        "kq_dimmax":    {},
+        "kq_profile":   {},
+        "kq_recs":      [],
+        "kq_error":     "",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -311,69 +240,144 @@ def render_header():
     READ<br><span style="color:var(--magenta);">BETWEEN</span><br>THE LINES
   </div>
   <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
-              letter-spacing:2px; text-transform:uppercase;">10 questions · Your real profile</div>
+              letter-spacing:2px; text-transform:uppercase;">AI-generated · Different every time</div>
 </div>
 """)
 
 # ─── START ────────────────────────────────────────────────────────────────────
 
 def render_start():
+    if st.session_state.kq_error:
+        st.warning(st.session_state.kq_error)
+        st.session_state.kq_error = ""
+
     st.html("""
-<div style="background:var(--card); border:1px solid var(--border); border-radius:4px; padding:28px; margin-bottom:16px;">
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:28px; margin-bottom:16px;">
   <p style="font-family:'DM Sans',sans-serif; font-size:15px; color:var(--soft);
              line-height:1.9; text-align:center; margin-bottom:20px; font-style:italic;">
     No direct questions.<br>
     No obvious answers.<br>
-    Just scenarios — and what your choices reveal.
+    Just scenarios — and what your choices reveal about what you actually want.
   </p>
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted); margin-bottom:8px;">What you get</div>
   <p style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); line-height:1.8; margin:0;">
-    A desire profile across 6 dimensions — power, sensation, dynamic, openness, verbal intensity,
-    and exhibitionism — plus a set of kink tags that match your pattern.
-    Nothing is assumed. Everything is inferred.
+    Claude generates 10 brand-new scenarios every session — no two quizzes are the same.
+    Your answers build a desire profile across 6 hidden dimensions, then Claude writes
+    personalised exploration recommendations just for you.
   </p>
 </div>
 """)
-    if st.button("Begin →", use_container_width=True, type="primary"):
-        st.session_state.kq_phase = "quiz"
+
+    if st.button("Generate My Quiz →", use_container_width=True, type="primary"):
+        st.session_state.kq_phase = "loading"
+        st.rerun()
+
+# ─── LOADING — question generation ───────────────────────────────────────────
+
+def render_loading():
+    ph_title  = st.empty()
+    ph_bar    = st.empty()
+    ph_status = st.empty()
+
+    def upd(t, p, s):
+        ph_title.markdown(f"**{t}**")
+        ph_bar.progress(p)
+        ph_status.caption(s)
+
+    try:
+        upd("Generating your quiz…", 10, "Claude is writing fresh scenarios for you")
+        client = get_client()
+
+        resp = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4000,
+            messages=[{"role": "user", "content": GENERATION_PROMPT}],
+        )
+
+        upd("Parsing questions…", 80, "Validating and shuffling")
+        raw = resp.content[0].text.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        questions = json.loads(raw)
+
+        # Validate
+        valid = []
+        for q in questions:
+            if not all(k in q for k in ("tag", "text", "dims", "opts")):
+                continue
+            if len(q["opts"]) != 4:
+                continue
+            # ensure all dim keys are known
+            q["dims"] = {d: v for d, v in q["dims"].items() if d in DIMS}
+            if not q["dims"]:
+                continue
+            valid.append(q)
+
+        if len(valid) < 5:
+            raise ValueError(f"Only {len(valid)} valid questions generated — try again.")
+
+        random.shuffle(valid)
+        final = valid[:10]
+
+        upd("Ready.", 100, "Let's go")
+
+        st.session_state.kq_questions = final
+        st.session_state.kq_answers   = [None] * len(final)
+        st.session_state.kq_cur       = 0
+        st.session_state.kq_phase     = "quiz"
+        st.rerun()
+
+    except Exception as e:
+        st.session_state.kq_error = f"Couldn't generate questions: {e}"
+        st.session_state.kq_phase = "start"
         st.rerun()
 
 # ─── QUIZ ─────────────────────────────────────────────────────────────────────
 
 def render_quiz():
-    cur     = st.session_state.kq_cur
-    answers = st.session_state.kq_answers
-    q       = QUESTIONS[cur]
-    total   = len(QUESTIONS)
-    is_last = cur == total - 1
-    sel     = answers[cur]
+    cur       = st.session_state.kq_cur
+    answers   = st.session_state.kq_answers
+    questions = st.session_state.kq_questions
 
-    # Progress segments
+    if not questions or cur >= len(questions):
+        hard_reset()
+        return
+
+    q       = questions[cur]
+    total   = len(questions)
+    is_last = cur == total - 1
+    sel     = answers[cur] if cur < len(answers) else None
+
     segs = "".join(
         f'<div style="flex:1; height:2px; border-radius:1px; '
         f'background:{"var(--magenta)" if i < cur else "rgba(255,45,120,0.5)" if i == cur else "var(--border)"}"></div>'
         for i in range(total)
     )
+
     st.html(f"""
 <div style="display:flex; gap:3px; margin-bottom:20px;">{segs}</div>
 <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
             text-align:right; margin-bottom:12px; letter-spacing:1px;">
   {cur + 1} / {total}
 </div>
-<div style="background:var(--card); border:1px solid var(--border); border-radius:4px; padding:24px; margin-bottom:16px;">
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:24px; margin-bottom:16px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
               text-transform:uppercase; color:var(--magenta); margin-bottom:8px;">{q['tag']}</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:16px; color:var(--text);
-              line-height:1.6; margin-bottom:0;">{q['text']}</div>
+              line-height:1.6;">{q['text']}</div>
 </div>
 """)
 
     for i, opt in enumerate(q["opts"]):
         is_sel = sel == i
-        label  = ("◆  " if is_sel else "") + opt
-        if st.button(label, key=f"kq_{cur}_{i}", use_container_width=True,
-                     type="primary" if is_sel else "secondary"):
+        if st.button(
+            ("◆  " if is_sel else "") + opt,
+            key=f"kq_{cur}_{i}",
+            use_container_width=True,
+            type="primary" if is_sel else "secondary",
+        ):
             st.session_state.kq_answers[cur] = i
             st.rerun()
 
@@ -389,33 +393,88 @@ def render_quiz():
         if st.button(label, key="kq_next", disabled=(sel is None),
                      use_container_width=True, type="primary"):
             if is_last:
-                st.session_state.kq_phase = "result"
+                st.session_state.kq_phase = "generating_result"
             else:
                 st.session_state.kq_cur += 1
             st.rerun()
 
+# ─── GENERATING RESULT ────────────────────────────────────────────────────────
+
+def render_generating_result():
+    ph_title  = st.empty()
+    ph_bar    = st.empty()
+    ph_status = st.empty()
+
+    def upd(t, p, s):
+        ph_title.markdown(f"**{t}**")
+        ph_bar.progress(p)
+        ph_status.caption(s)
+
+    try:
+        upd("Reading between the lines…", 20, "Analysing your answers")
+
+        questions = st.session_state.kq_questions
+        answers   = st.session_state.kq_answers
+        scores    = _compute_scores(questions, answers)
+        dim_max   = _dim_maxes(questions)
+        tot       = _total_pct(scores, dim_max)
+        profile   = next(
+            (p for p in PROFILES if p["range"][0] <= tot <= p["range"][1]),
+            PROFILES[-1],
+        )
+
+        score_str = "\n".join(
+            f'  {DIMS[d]["label"]}: {_dim_pct(scores, dim_max, d)}%'
+            for d in DIMS
+        )
+
+        upd("Generating your recommendations…", 55, "Claude is writing your personalised profile")
+
+        client = get_client()
+        rec_prompt = RECOMMENDATION_PROMPT.format(
+            scores=score_str,
+            profile_name=profile["name"],
+            profile_desc=profile["desc"],
+        )
+
+        resp = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": rec_prompt}],
+        )
+
+        upd("Finishing up…", 90, "Almost there")
+
+        raw = resp.content[0].text.strip().replace("```json", "").replace("```", "").strip()
+        recs = json.loads(raw)
+        if not isinstance(recs, list):
+            recs = []
+
+        st.session_state.kq_scores  = scores
+        st.session_state.kq_dimmax  = dim_max
+        st.session_state.kq_profile = profile
+        st.session_state.kq_recs    = recs
+        st.session_state.kq_phase   = "result"
+        st.rerun()
+
+    except Exception as e:
+        st.session_state.kq_error = f"Something went wrong building your profile: {e}"
+        st.session_state.kq_phase = "quiz"
+        st.session_state.kq_cur   = len(st.session_state.kq_questions) - 1
+        st.rerun()
+
 # ─── RESULT ───────────────────────────────────────────────────────────────────
 
 def render_result():
-    answers = st.session_state.kq_answers
-    scores  = _compute_scores(answers)
-    tot     = _total_pct(scores)
-    profile = next((p for p in PROFILES if p["range"][0] <= tot <= p["range"][1]), PROFILES[-1])
-    active  = _active_kinks(scores)
+    profile = st.session_state.get("kq_profile", PROFILES[0])
+    scores  = st.session_state.get("kq_scores", {d: 0 for d in DIMS})
+    dim_max = st.session_state.get("kq_dimmax", {d: 1 for d in DIMS})
+    recs    = st.session_state.get("kq_recs", [])
 
-    # Kink pills
-    pills = "".join(
-        f'<span style="font-family:\'Space Mono\',monospace; font-size:9px; '
-        f'padding:4px 10px; border-radius:99px; '
-        f'border:1px solid {"var(--magenta)" if k["label"] in active else "var(--border)"}; '
-        f'color:{"var(--magenta)" if k["label"] in active else "var(--muted)"}; '
-        f'background:{"rgba(255,45,120,0.08)" if k["label"] in active else "transparent"}; '
-        f'margin:3px;">{k["label"]}</span>'
-        for k in KINK_MAP
-    )
-
+    # Profile card
     st.html(f"""
-<div style="background:var(--card); border:1px solid var(--border); border-radius:4px; padding:32px 28px; margin-bottom:16px;">
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:32px 28px; margin-bottom:16px;">
   <div style="font-size:48px; text-align:center; margin-bottom:12px;">{profile['icon']}</div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(30px,6vw,48px);
               letter-spacing:3px; color:var(--text); text-align:center; line-height:1.05; margin-bottom:4px;">
@@ -426,24 +485,21 @@ def render_result():
     {profile['meta']}
   </div>
   <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
-             line-height:1.9; text-align:center; margin-bottom:24px;">
+             line-height:1.9; text-align:center; margin-bottom:0;">
     {profile['desc']}
   </p>
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:10px;">Your kink tags</div>
-  <div style="display:flex; flex-wrap:wrap; gap:6px;">{pills}</div>
 </div>
 """)
 
-    # Dimension bars
+    # Dimension bars — sorted highest first
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Dimension breakdown</div>
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
+  Dimension breakdown
+</div>
 """)
-
-    sorted_dims = sorted(DIMS.keys(), key=lambda d: -_dim_pct(scores, d))
-    for d in sorted_dims:
-        pct   = _dim_pct(scores, d)
+    for d in sorted(DIMS.keys(), key=lambda d: -_dim_pct(scores, dim_max, d)):
+        pct   = _dim_pct(scores, dim_max, d)
         color = DIMS[d]["color"]
         label = DIMS[d]["label"]
         st.html(f"""
@@ -458,20 +514,48 @@ def render_result():
 </div>
 """)
 
+    # Recommendations
+    if recs:
+        st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+            text-transform:uppercase; color:var(--muted); margin:20px 0 12px;">
+  Things worth exploring
+</div>
+""")
+        dim_colors = [v["color"] for v in DIMS.values()]
+        for i, rec in enumerate(recs):
+            color = dim_colors[i % len(dim_colors)]
+            st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-left:2px solid {color}; border-radius:0 4px 4px 0;
+            padding:14px 16px; margin-bottom:8px;">
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75;">
+    {rec}
+  </div>
+</div>
+""")
+
     st.html("<br>")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("↺ Try Again", use_container_width=True):
+        if st.button("↺ New Quiz", use_container_width=True):
             hard_reset()
     with col2:
+        share_recs = "\n".join(f"· {r}" for r in recs[:3])
         share = (
-            f'Took the Vice Vault desire quiz\n\n'
-            f'Profile: {profile["name"]}\n'
-            f'"{profile["meta"]}"\n\n'
-            f'Active kinks: {", ".join(active) if active else "still figuring it out"}'
+            f"Vice Vault — Desire Profile\n\n"
+            f"Profile: {profile.get('name', '')}\n"
+            f"\"{profile.get('meta', '')}\"\n\n"
+            f"{profile.get('desc', '')}\n\n"
+            f"Top suggestions:\n{share_recs}"
         )
-        st.download_button("↓ Save Result", data=share, file_name="my_desire_profile.txt",
-                           mime="text/plain", use_container_width=True)
+        st.download_button(
+            "↓ Save Result",
+            data=share,
+            file_name="my_desire_profile.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
@@ -482,6 +566,8 @@ def what_would_you_do_page():
     with col:
         render_header()
         phase = st.session_state.kq_phase
-        if   phase == "start":  render_start()
-        elif phase == "quiz":   render_quiz()
-        elif phase == "result": render_result()
+        if   phase == "start":             render_start()
+        elif phase == "loading":           render_loading()
+        elif phase == "quiz":              render_quiz()
+        elif phase == "generating_result": render_generating_result()
+        elif phase == "result":            render_result()
