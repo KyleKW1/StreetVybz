@@ -55,3 +55,19 @@ except Exception as e:
 
 APP_TITLE = "Vice"
 APP_ICON = "X"
+[server]
+enableCORS = false
+enableXsrfProtection = false
+
+[client]
+showErrorDetails = true
+
+[theme]
+base = "dark"
+backgroundColor = "#0a0a0b"
+secondaryBackgroundColor = "#18181d"
+textColor = "#f0f0f5"
+primaryColor = "#c6ff00"
+
+[runner]
+fastReruns = true
