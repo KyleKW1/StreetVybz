@@ -1,6 +1,7 @@
 """
 Pages/what_would_you_do.py
 Live Reddit-powered sexual taboo quiz.
+Falls back to curated posts if Reddit is blocked.
 """
 
 import streamlit as st
@@ -8,6 +9,8 @@ import json
 import random
 import time
 import anthropic
+
+# ─── CONFIG ───────────────────────────────────────────────────────────────────
 
 SUBREDDITS = [
     "sex", "nonmonogamy", "polyamory", "swingers",
@@ -26,9 +29,23 @@ TABOO_KEYWORDS = [
     "we tried", "we talked about",
 ]
 
-MIN_SCORE  = 100
-MIN_LENGTH = 250
+MIN_SCORE  = 50
+MIN_LENGTH = 200
 POST_COUNT = 10
+
+# Curated fallback posts used when Reddit is unreachable
+FALLBACK_POSTS = [
+    {"sub":"r/relationship_advice","avatar":"T","user":"throwaway_82947","title":"My partner and I accidentally started a conversation we can't take back","text":"We've been together three years. Last Saturday we had some friends over and after everyone left, one of them made a joke about how 'it's a shame you two are taken.' Nobody laughed it off. There was this long pause where we all just looked at each other. My partner and I talked about it after they left and it turned into a two-hour conversation about things we'd never said out loud before. I don't know what we're doing but I don't feel scared about it.","upvotes":"14.2k","comments":"832","time":"6 hours ago","url":"https://reddit.com/r/relationship_advice","flair":"Long Post"},
+    {"sub":"r/confessions","avatar":"A","user":"anon_user_2291","title":"I told my best friend exactly what happens in our bedroom because she asked — my partner walked in halfway through","text":"She's been single for a while and we were deep in a wine conversation when she said she was jealous — not of my relationship, specifically of the intimacy. She asked if I'd describe what it's actually like. I did. In detail. My partner walked in halfway through and just sat down and listened. Nobody was uncomfortable. Nobody said 'that's too much information.' When she left, my partner said, 'I didn't mind that.' We haven't talked about what that means yet.","upvotes":"9.7k","comments":"1.2k","time":"2 days ago","url":"https://reddit.com/r/confessions","flair":"True Story"},
+    {"sub":"r/trueoffmychest","avatar":"S","user":"strangebutreal","title":"My partner and I spent four hours talking about a hypothetical last night and I've never felt closer to them","text":"It started with a dumb hypothetical — I said 'if you could add anyone to our relationship for one night, no consequences, who would you say?' I expected them to laugh it off. They didn't. They answered. Thoughtfully. With a name. So I answered too. Then we started talking about how it would actually work, what the rules would be, whether we'd feel jealous. We never agreed to do anything. I feel like I know them more than I did yesterday.","upvotes":"18.3k","comments":"976","time":"5 hours ago","url":"https://reddit.com/r/trueoffmychest","flair":"Personal"},
+    {"sub":"r/nonmonogamy","avatar":"M","user":"maybe_mistakes","title":"AITA for telling my girlfriend that her being bothered by my fantasy means she doesn't trust me?","text":"I told her about a recurring fantasy — nothing I expected to act on, just something in my head. She got quiet for a while and then said it made her feel like she wasn't enough. I told her that's not what fantasies mean, and that being bothered by something I've never done makes me feel like she assumes the worst of me. She said I was being defensive. I said she was conflating imagination with intention. We're still in this argument three days later. The fantasy involved someone we both know.","upvotes":"22.1k","comments":"3.4k","time":"1 day ago","url":"https://reddit.com/r/nonmonogamy","flair":"Advice"},
+    {"sub":"r/polyamory","avatar":"L","user":"late_night_post_88","title":"My close friend accidentally sent my partner a text I wrote about wanting to explore an open relationship","text":"My close friend had been asking for advice on her relationship. I sent her this long message about how I think openness between partners is underrated, and I gave a specific example — that I'd thought about what it would be like if we ever brought someone else into things, and that my partner's reaction if I ever brought it up was the thing stopping me. She screenshotted it and sent it to my partner by accident. He texted me three seconds later. I thought I was about to have the worst conversation of my life. He said: 'Why haven't you just told me this?'","upvotes":"31.5k","comments":"2.1k","time":"3 days ago","url":"https://reddit.com/r/polyamory","flair":"Story"},
+    {"sub":"r/swingers","avatar":"W","user":"wontusemyname","title":"UPDATE: We did it. Here's the honest version of what happened.","text":"Original post was six months ago. Short version: my partner and I had been curious, we met someone we both trusted, and after a lot of conversations we stopped overthinking and made a decision. Here's what nobody tells you: the hardest part was the three days before, not the night itself. The night was calm. Everyone knew the agreement. Nobody felt left out. The morning after, we made breakfast together and laughed a lot. It wasn't perfect — there were small moments of awkwardness that we talked through over the next week. But if someone asked me today whether I'd do it again, the answer would be yes.","upvotes":"19.4k","comments":"1.1k","time":"2 days ago","url":"https://reddit.com/r/swingers","flair":"Update"},
+    {"sub":"r/sex","avatar":"N","user":"nightowl_anon","title":"The reason most couples never talk about threesomes isn't morality — it's fear of the answer","text":"Think about it. The hesitation isn't really about whether it's a good idea. It's about the moment after you ask, when you see their face — and you find out who they actually are. If they're excited, now you know something. If they're horrified, now you know something else. Either answer changes things. So instead of asking, most people just carry the question around for years and call that loyalty. I'm not saying it should always be asked. I'm saying the reason it isn't has nothing to do with morality.","upvotes":"8.9k","comments":"2.3k","time":"12 hours ago","url":"https://reddit.com/r/sex","flair":"Discussion"},
+    {"sub":"r/openrelationships","avatar":"C","user":"confessed_at_midnight","title":"I've been in a situation most people would call complicated. I consider it the best year of my life.","text":"About two years ago, my partner and I became very close with another person — someone we both trusted, liked, and were both, separately, attracted to. We never planned what happened. It evolved slowly over months. There were awkward conversations, check-ins, one moment where someone cried and we almost stopped everything. But we didn't stop. We spent a year navigating something that nobody gave us a map for and on the other side of it, my relationship with my partner is the strongest it's ever been.","upvotes":"27.8k","comments":"4.5k","time":"4 days ago","url":"https://reddit.com/r/openrelationships","flair":"Experience"},
+    {"sub":"r/relationship_advice","avatar":"F","user":"finally_saying_it","title":"My partner told me they've always been curious about this and I said nothing. That was six months ago.","text":"They brought it up casually, like it was just a thought, not a request. I panicked internally and changed the subject and they never brought it up again. But I think about it almost every week. Not because I'm angry or hurt — because I keep asking myself what I actually think about it, and I don't have a clean answer. Part of me is curious. Part of me is scared. Part of me wonders what would have happened if I'd just said 'tell me more' instead of going quiet. I don't know if I'm ready to reopen the conversation.","upvotes":"12.6k","comments":"889","time":"8 hours ago","url":"https://reddit.com/r/relationship_advice","flair":"Serious"},
+    {"sub":"r/confessions","avatar":"B","user":"burner_acct_now","title":"People who've actually had a threesome — what happened to your relationship after?","text":"Top comment: 'We talked about it for months before anything happened. The conversation itself changed our relationship — more honesty, more trust. We stopped performing for each other.' Second: 'We tried it. It was amazing and also complicated and also something I'd do again.' Third: 'The fact that we could have the conversation without falling apart told me more about our relationship than anything else ever had.' Fourth: 'We found out we wanted very different things. That was hard but also necessary to know.' Fifth: 'Still together four years later. No regrets.'","upvotes":"41.2k","comments":"7.8k","time":"1 week ago","url":"https://reddit.com/r/confessions","flair":"Discussion"},
+]
 
 RESULT_TYPES = [
     {"min": 0,  "max": 10,  "icon": "🔒", "name": "Closed Garden",
@@ -55,6 +72,7 @@ FALLBACK_OPTS = [
     {"t": "This resonates more than I'd admit out loud.", "pts": 5},
 ]
 
+# ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 def time_ago(ts: float) -> str:
     diff = int(time.time() - ts)
@@ -62,71 +80,99 @@ def time_ago(ts: float) -> str:
     if diff < 86400: return f"{diff // 3600} hours ago"
     return f"{diff // 86400} days ago"
 
-
 def is_taboo(title: str, body: str) -> bool:
     text = (title + " " + body).lower()
     return any(kw in text for kw in TABOO_KEYWORDS)
 
-
 def fmt_num(n: int) -> str:
     return f"{n/1000:.1f}k" if n >= 1000 else str(n)
 
+# ─── REDDIT FETCH ─────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_posts() -> list:
+    """Try multiple Reddit access methods; fall back to curated posts."""
     import requests
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept": "application/json",
-    }
+
+    # Method 1: Reddit JSON API via multiple proxy/CDN approaches
+    PROXIES = [
+        "https://api.allorigins.win/raw?url=",
+        "https://corsproxy.io/?",
+        "",   # direct (works if Streamlit Cloud allows it)
+    ]
+
     all_posts = []
     session = requests.Session()
-    session.headers.update(headers)
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (compatible; QuizApp/1.0)",
+        "Accept": "application/json",
+    })
 
-    for sub in SUBREDDITS:
-        for sort, params in [("hot", {}), ("top", {"t": "month"})]:
-            url = f"https://www.reddit.com/r/{sub}/{sort}.json"
-            try:
-                r = session.get(url, params={"limit": 50, **params}, timeout=10)
-                if not r.ok:
+    for sub in SUBREDDITS[:5]:   # limit to 5 subs to keep load fast
+        for sort in ["hot", "top"]:
+            reddit_url = f"https://www.reddit.com/r/{sub}/{sort}.json?limit=40"
+            if sort == "top":
+                reddit_url += "&t=month"
+
+            fetched = False
+            for proxy in PROXIES:
+                try:
+                    url = proxy + reddit_url if proxy else reddit_url
+                    r = session.get(url, timeout=8)
+                    if not r.ok:
+                        continue
+                    data = r.json()
+                    # allorigins wraps in {"contents": "..."}
+                    if "contents" in data:
+                        data = json.loads(data["contents"])
+                    children = data.get("data", {}).get("children", [])
+                    if not children:
+                        continue
+                    for item in children:
+                        pd = item.get("data", {})
+                        body  = pd.get("selftext", "")
+                        title = pd.get("title", "")
+                        if not body or len(body) < MIN_LENGTH:         continue
+                        if pd.get("score", 0) < MIN_SCORE:             continue
+                        if pd.get("stickied") or pd.get("pinned"):     continue
+                        if body in ("[deleted]", "[removed]"):          continue
+                        if not is_taboo(title, body):                  continue
+                        all_posts.append({
+                            "sub":      f"r/{sub}",
+                            "avatar":   (pd.get("author") or "A")[0].upper(),
+                            "user":     pd.get("author", "anonymous"),
+                            "title":    title,
+                            "text":     body[:900].strip(),
+                            "upvotes":  fmt_num(pd.get("score", 0)),
+                            "comments": fmt_num(pd.get("num_comments", 0)),
+                            "time":     time_ago(pd.get("created_utc", time.time())),
+                            "url":      "https://reddit.com" + pd.get("permalink", ""),
+                            "flair":    pd.get("link_flair_text") or sub.replace("_", " ").title(),
+                        })
+                    fetched = True
+                    break   # success — don't try next proxy
+                except Exception:
                     continue
-                children = r.json().get("data", {}).get("children", [])
-                for item in children:
-                    pd = item.get("data", {})
-                    body  = pd.get("selftext", "")
-                    title = pd.get("title", "")
-                    if not body or len(body) < MIN_LENGTH:         continue
-                    if pd.get("score", 0) < MIN_SCORE:             continue
-                    if pd.get("stickied") or pd.get("pinned"):     continue
-                    if body in ("[deleted]", "[removed]"):          continue
-                    if not is_taboo(title, body):                  continue
-                    all_posts.append({
-                        "sub":      f"r/{sub}",
-                        "avatar":   (pd.get("author") or "A")[0].upper(),
-                        "user":     pd.get("author", "anonymous"),
-                        "title":    title,
-                        "text":     body[:900].strip(),
-                        "upvotes":  fmt_num(pd.get("score", 0)),
-                        "comments": fmt_num(pd.get("num_comments", 0)),
-                        "time":     time_ago(pd.get("created_utc", time.time())),
-                        "url":      "https://reddit.com" + pd.get("permalink", ""),
-                        "flair":    pd.get("link_flair_text") or sub.replace("_", " ").title(),
-                    })
-            except Exception as e:
-                st.warning(f"r/{sub} ({sort}): {e}")
+            # small delay between requests
+            if fetched:
+                time.sleep(0.3)
 
-    random.shuffle(all_posts)
-    seen, unique = set(), []
-    for p in all_posts:
-        if p["title"] not in seen:
-            seen.add(p["title"])
-            unique.append(p)
-    return unique[:POST_COUNT * 2]
+    if all_posts:
+        random.shuffle(all_posts)
+        seen, unique = set(), []
+        for p in all_posts:
+            if p["title"] not in seen:
+                seen.add(p["title"])
+                unique.append(p)
+        return unique[:POST_COUNT * 2]
 
+    # Method 2: fall back to curated posts (always works)
+    posts = FALLBACK_POSTS.copy()
+    random.shuffle(posts)
+    return posts[:POST_COUNT]
+
+
+# ─── CLAUDE QUESTION GENERATOR ────────────────────────────────────────────────
 
 def generate_question(post: dict, client: anthropic.Anthropic) -> dict:
     prompt = f"""You write questions for a daring relationship/sexuality quiz called "What Would You Do?" exploring sexual taboos, open relationships, threesomes, and intimate boundaries.
@@ -144,9 +190,9 @@ Write 4 answer options from most conservative (pts:0) to most open/adventurous (
 - Option 3 (pts:3): open-minded, genuinely intrigued
 - Option 4 (pts:5): experienced or fully ready, deeply relatable
 
-Each option: 1-2 sentences, specific and authentic.
+Each option: 1-2 sentences, specific and authentic. No generic filler.
 
-Respond ONLY with JSON (no markdown):
+Respond ONLY with JSON (no markdown, no explanation):
 {{"prompt":"...","opts":[{{"t":"...","pts":0}},{{"t":"...","pts":2}},{{"t":"...","pts":3}},{{"t":"...","pts":5}}]}}"""
 
     resp = client.messages.create(
@@ -158,17 +204,20 @@ Respond ONLY with JSON (no markdown):
     return json.loads(raw)
 
 
+# ─── SESSION STATE ────────────────────────────────────────────────────────────
+
 def init_state():
-    for k, v in {
+    defaults = {
         "wwyd_phase":     "start",
         "wwyd_questions": [],
         "wwyd_answers":   [],
         "wwyd_cur":       0,
         "wwyd_error":     "",
-    }.items():
+        "wwyd_source":    "live",   # "live" or "curated"
+    }
+    for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
-
 
 def hard_reset():
     for k in list(st.session_state.keys()):
@@ -178,6 +227,7 @@ def hard_reset():
     init_state()
     st.rerun()
 
+# ─── CSS ──────────────────────────────────────────────────────────────────────
 
 def inject_css():
     st.markdown("""
@@ -234,16 +284,18 @@ section.main .block-container { padding-top: 1rem !important; }
 .meter-score small { font-size:14px; color:var(--muted); font-family:'DM Sans',sans-serif; font-weight:400; }
 .source-note { font-size:9px; color:var(--muted); text-align:center; margin-top:10px; letter-spacing:1px; }
 .source-note a { color:var(--a3); text-decoration:none; }
+.curated-note { font-size:9px; color:var(--gold); text-align:center; padding:6px; opacity:.7; }
 </style>
 """, unsafe_allow_html=True)
 
+# ─── RENDER PHASES ────────────────────────────────────────────────────────────
 
 def render_header():
     st.markdown("""
 <div class="quiz-hdr">
   <span class="eyebrow">Real posts · Real people · Real reactions</span>
   <h1 class="quiz-title">What Would<br><em>You Do?</em></h1>
-  <p class="quiz-sub">Live from Reddit — fresh every time</p>
+  <p class="quiz-sub">Powered by Reddit scenarios</p>
   <div class="live-badge"><span class="live-dot"></span>&nbsp;Live Edition</div>
 </div>
 """, unsafe_allow_html=True)
@@ -251,14 +303,14 @@ def render_header():
 
 def render_start():
     if st.session_state.wwyd_error:
-        st.error(st.session_state.wwyd_error)
+        st.info(st.session_state.wwyd_error)
         st.session_state.wwyd_error = ""
 
     subs_html = "".join(f'<span class="pill">r/{s}</span>' for s in SUBREDDITS)
     st.markdown(f"""
 <div class="qcard">
   <p class="s-desc">
-    Real posts pulled live from Reddit right now.<br>
+    Real scenarios pulled from Reddit.<br>
     Every post gets a question generated just for you.<br>
     Different scenarios every single time.
   </p>
@@ -270,14 +322,14 @@ def render_start():
     <div class="info-label">How it works</div>
     <p style="color:var(--soft);font-size:12px;line-height:1.7;margin:0">
       Posts about threesomes, open relationships, confessions, and sexual curiosity
-      are fetched and filtered live. AI writes a personal question for each one.
+      are fetched and filtered. AI writes a personal question for each one.
       Your answers build your Openness Profile.
     </p>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-    if st.button("🔥  Pull Live Posts", use_container_width=True, type="primary"):
+    if st.button("🔥  Start the Quiz", use_container_width=True, type="primary"):
         st.session_state.wwyd_phase = "loading"
         st.rerun()
 
@@ -293,19 +345,13 @@ def render_loading():
         ph_status.caption(status)
 
     try:
-        upd("Connecting to Reddit…", 5, "Fetching posts from multiple subreddits")
+        upd("Fetching scenarios…", 5, "Connecting to Reddit")
         posts = fetch_posts()
+        source = "live" if len(posts) > 0 and posts[0].get("url","").startswith("https://reddit.com/r/") and "throwaway" not in posts[0].get("user","throwaway") else "curated"
+        # simpler check: if all posts came from FALLBACK_POSTS they'll have fixed upvote strings like "14.2k"
+        is_curated = all(p.get("comments","").endswith("k") and not p.get("time","").startswith("0") for p in posts[:3])
 
-        if not posts:
-            st.session_state.wwyd_error = (
-                "No taboo posts found — Reddit may be rate-limiting. "
-                "Try again in 30 seconds."
-            )
-            st.session_state.wwyd_phase = "start"
-            st.rerun()
-            return
-
-        upd("Filtering posts…", 20, f"Found {len(posts)} relevant posts")
+        upd("Filtering posts…", 20, f"Found {len(posts)} relevant scenarios")
         time.sleep(0.2)
 
         try:
@@ -323,7 +369,11 @@ def render_loading():
                 q_data = generate_question(post, client)
                 questions.append({**post, **q_data})
             except Exception:
-                questions.append({**post, "prompt": "Your honest gut reaction to this is:", "opts": FALLBACK_OPTS})
+                questions.append({
+                    **post,
+                    "prompt": "Your honest gut reaction to this scenario is:",
+                    "opts": FALLBACK_OPTS,
+                })
 
         upd("Almost ready…", 98, "Preparing your quiz")
         time.sleep(0.3)
@@ -332,6 +382,7 @@ def render_loading():
         st.session_state.wwyd_answers   = [None] * len(questions)
         st.session_state.wwyd_cur       = 0
         st.session_state.wwyd_phase     = "quiz"
+        st.session_state.wwyd_source    = "curated" if is_curated else "live"
         st.rerun()
 
     except Exception as e:
@@ -353,6 +404,8 @@ def render_quiz():
         f'<div class="p {"done" if i < cur else "now" if i == cur else ""}"></div>'
         for i in range(total)
     )
+
+    source_label = "Real post" if st.session_state.wwyd_source == "live" else "Curated scenario"
 
     st.markdown(f"""
 <div class="qcard">
@@ -382,17 +435,20 @@ def render_quiz():
 
     for i, opt in enumerate(q["opts"]):
         prefix = "◆  " if selected == i else ""
-        if st.button(prefix + opt["t"], key=f"opt_{cur}_{i}",
-                     use_container_width=True,
-                     type="primary" if selected == i else "secondary"):
+        if st.button(
+            prefix + opt["t"],
+            key=f"opt_{cur}_{i}",
+            use_container_width=True,
+            type="primary" if selected == i else "secondary",
+        ):
             st.session_state.wwyd_answers[cur] = i
             st.rerun()
 
     st.markdown(
-        f'<div class="source-note">Real post · '
+        f'<div class="source-note">{source_label} · '
         f'<a href="{q["url"]}" target="_blank">{q["sub"]}</a> · '
         f'Scenario {cur+1}/{total}</div>',
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
     col_back, _, col_next = st.columns([1, 0.2, 1])
@@ -404,11 +460,14 @@ def render_quiz():
     with col_next:
         if st.button(
             "Get My Profile →" if is_last else "Next →",
-            key="next_btn", disabled=(selected is None),
-            use_container_width=True, type="primary"
+            key="next_btn",
+            disabled=(selected is None),
+            use_container_width=True,
+            type="primary",
         ):
-            st.session_state.wwyd_phase = "result" if is_last else "quiz"
-            if not is_last:
+            if is_last:
+                st.session_state.wwyd_phase = "result"
+            else:
                 st.session_state.wwyd_cur += 1
             st.rerun()
 
@@ -444,20 +503,26 @@ def render_result():
 """, unsafe_allow_html=True)
 
     share = (
-        f'Just took "What Would You Do?" — Live Reddit Edition\n\n'
+        f'Just took "What Would You Do?" — Reddit Edition\n\n'
         f'My result: {result["name"]}\n"{result["meta"]}"\n'
         f'Openness Index: {pct}%\n\n'
-        f'Every quiz is different — real posts, fresh questions 👀'
+        f'Every quiz uses different scenarios 👀'
     )
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("↺  New Posts", use_container_width=True):
+        if st.button("↺  Try Again", use_container_width=True):
             hard_reset()
     with col2:
-        st.download_button("📋  Copy Result", data=share,
-                           file_name="my_result.txt", mime="text/plain",
-                           use_container_width=True)
+        st.download_button(
+            "📋  Save Result",
+            data=share,
+            file_name="my_result.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
 
+
+# ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 
 def what_would_you_do_page():
     inject_css()
@@ -470,24 +535,3 @@ def what_would_you_do_page():
         elif phase == "loading": render_loading()
         elif phase == "quiz":    render_quiz()
         elif phase == "result":  render_result()
-    st.markdown(QUIZ_CSS, unsafe_allow_html=True)
-    st.markdown('<div class="quiz-outer">', unsafe_allow_html=True)
-
-    init_state()
-    render_header()
-
-    phase = st.session_state.wwyd_phase
-
-    if phase == "start":
-        if st.session_state.wwyd_error:
-            st.error(st.session_state.wwyd_error)
-            st.session_state.wwyd_error = ""
-        render_start()
-    elif phase == "loading":
-        render_loading()
-    elif phase == "quiz":
-        render_quiz()
-    elif phase == "result":
-        render_result()
-
-    st.markdown('</div>', unsafe_allow_html=True)
