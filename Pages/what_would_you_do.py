@@ -237,7 +237,7 @@ def hard_reset():
 # ─── CSS ──────────────────────────────────────────────────────────────────────
 
 def inject_css():
-    st.markdown("""
+    st.html("""
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -299,14 +299,14 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 #MainMenu { visibility:hidden; }
 footer    { visibility:hidden; }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 # ─── RENDER PHASES ────────────────────────────────────────────────────────────
 
 def render_header(is_live: bool):
     badge_color = "#c6ff00" if is_live else "#ffb300"
     badge_label = "LIVE · Reddit" if is_live else "CURATED · Fallback"
-    st.markdown(f"""
+    st.html(f"""
 <div style="text-align:center; padding:32px 0 24px; border-bottom:1px solid var(--border); margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
               text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
@@ -328,7 +328,7 @@ def render_header(is_live: bool):
   </div>
 </div>
 <style>@keyframes blink{{0%,100%{{opacity:1}}50%{{opacity:0.2}}}}</style>
-""", unsafe_allow_html=True)
+""")
 
 
 def render_start():
@@ -342,7 +342,7 @@ def render_start():
         f'background:var(--card);">r/{s}</span>'
         for s in SUBREDDITS
     )
-    st.markdown(f"""
+    st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:28px; margin-bottom:16px;">
   <p style="font-family:'DM Sans',sans-serif; font-size:15px; color:var(--soft);
@@ -363,7 +363,7 @@ def render_start():
     Your answers build your Openness Profile.
   </p>
 </div>
-""", unsafe_allow_html=True)
+""")
 
     if st.button("Begin →", use_container_width=True, type="primary"):
         st.session_state.wwyd_phase = "loading"
@@ -376,18 +376,9 @@ def render_loading():
     ph_status = st.empty()
 
     def upd(title, pct, status):
-        ph_title.markdown(
-            f'<div style="font-family:\'Space Mono\',monospace; font-size:11px; '
-            f'letter-spacing:2px; text-transform:uppercase; color:var(--lime); '
-            f'margin-bottom:8px;">{title}</div>',
-            unsafe_allow_html=True
-        )
+        ph_title.markdown(f"**{title}**")
         ph_bar.progress(pct)
-        ph_status.markdown(
-            f'<div style="font-family:\'Space Mono\',monospace; font-size:9px; '
-            f'color:var(--muted); letter-spacing:1px;">{status}</div>',
-            unsafe_allow_html=True
-        )
+        ph_status.caption(status)
 
     try:
         upd("Fetching live scenarios…", 5, "Firing parallel requests to Reddit")
@@ -444,7 +435,7 @@ def render_quiz():
     )
     source = "Live post" if is_live else "Curated scenario"
 
-    st.markdown(f"""
+    st.html(f"""
 <div style="display:flex; gap:3px; margin-bottom:20px;">{segs}</div>
 
 <div style="background:var(--card); border:1px solid var(--border); margin-bottom:16px; overflow:hidden; border-radius:4px;">
@@ -490,7 +481,7 @@ def render_quiz():
             margin-bottom:16px; line-height:1.65; font-style:italic;">
   {q['prompt']}
 </div>
-""", unsafe_allow_html=True)
+""")
 
     for i, opt in enumerate(q["opts"]):
         is_sel = selected == i
@@ -503,15 +494,14 @@ def render_quiz():
             st.session_state.wwyd_answers[cur] = i
             st.rerun()
 
-    st.markdown(
+    st.html(
         f'<div style="font-family:\'Space Mono\',monospace; font-size:9px; color:var(--muted); '
         f'text-align:center; margin-top:10px; letter-spacing:1px; text-transform:uppercase;">'
         f'{source} · <a href="{q["url"]}" target="_blank" style="color:var(--cyan); text-decoration:none;">'
-        f'{q["sub"]}</a> · {cur+1}/{total}</div>',
-        unsafe_allow_html=True,
+        f'{q["sub"]}</a> · {cur+1}/{total}</div>'
     )
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.html("<br>")
     col_back, col_next = st.columns(2)
     with col_back:
         if cur > 0:
@@ -576,14 +566,14 @@ def render_result():
     </div>
   </div>
 </div>
-""", unsafe_allow_html=True)
+""")
 
     share = (
         f'Just took "What Would You Do?" on ViceVault\n\n'
         f'Result: {result["name"]}\n"{result["meta"]}"\n'
         f'Openness Index: {pct}/100\n\nEvery quiz uses different scenarios 👀'
     )
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.html("<br>")
     col1, col2 = st.columns(2)
     with col1:
         if st.button("↺ Try Again", use_container_width=True):
