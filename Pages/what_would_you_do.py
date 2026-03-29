@@ -118,7 +118,7 @@ def get_model():
     except Exception:
         raise RuntimeError("GEMINI_API_KEY not found in Streamlit secrets.")
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-1.5-flash")
+    return genai.GenerativeModel("gemini-2.0-flash")
 
 
 def call_gemini(prompt: str) -> str:
