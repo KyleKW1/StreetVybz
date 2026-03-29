@@ -1,10 +1,9 @@
 """
 Pages/dashboard.py
-Vice tracker dashboard — log & visualise weed, alcohol, unprotected sex, other.
+Vice tracker — stats, log, and history as separate standalone pages.
 """
 
 import streamlit as st
-import json
 import time
 from datetime import datetime, timedelta, date
 
@@ -110,12 +109,22 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 }
 .stTextInput label, .stNumberInput label,
 .stTextArea label, .stSelectbox label,
-.stSlider label {
+.stSlider label, .stDateInput label,
+.stTimeInput label {
   font-family: 'Space Mono', monospace !important;
   font-size: 10px !important;
   letter-spacing: 1.5px !important;
   text-transform: uppercase !important;
   color: var(--muted) !important;
+}
+
+/* Date / Time inputs */
+.stDateInput > div > div,
+.stTimeInput > div > div {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 4px !important;
+  color: var(--text) !important;
 }
 
 /* Selectbox */
@@ -127,9 +136,7 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 }
 
 /* Slider */
-.stSlider > div > div > div > div {
-  background: var(--lime) !important;
-}
+.stSlider > div > div > div > div { background: var(--lime) !important; }
 
 /* Alerts */
 .stAlert {
@@ -139,34 +146,6 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 }
 .stSuccess { border-left: 3px solid var(--lime) !important; }
 .stError   { border-left: 3px solid var(--magenta) !important; }
-
-/* Tabs */
-.stTabs [data-baseweb="tab-list"] {
-  background: transparent !important;
-  gap: 0 !important;
-  border-bottom: 1px solid var(--border) !important;
-}
-.stTabs [data-baseweb="tab"] {
-  background: transparent !important;
-  color: var(--muted) !important;
-  font-family: 'Space Mono', monospace !important;
-  font-size: 10px !important;
-  letter-spacing: 1.5px !important;
-  text-transform: uppercase !important;
-  border-radius: 0 !important;
-  padding: 10px 20px !important;
-  border: none !important;
-}
-.stTabs [aria-selected="true"] {
-  color: var(--lime) !important;
-  border-bottom: 2px solid var(--lime) !important;
-}
-.stTabs [data-baseweb="tab-panel"] {
-  padding-top: 1.5rem !important;
-}
-
-/* Dataframe */
-.dataframe { border-radius: 4px !important; }
 
 #MainMenu { visibility: hidden; }
 footer    { visibility: hidden; }
@@ -238,19 +217,19 @@ VICES = {
     },
 }
 
-# ─── STORAGE HELPERS (session_state as local DB) ──────────────────────────────
+# ─── STORAGE HELPERS ──────────────────────────────────────────────────────────
 
 def get_log():
     if "vice_log" not in st.session_state:
         st.session_state.vice_log = []
     return st.session_state.vice_log
 
-def add_entry(vice_key: str, data: dict):
+def add_entry(vice_key: str, data: dict, timestamp: datetime):
     log = get_log()
     log.append({
         "id":        int(time.time() * 1000),
         "vice":      vice_key,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": timestamp.isoformat(),
         "data":      data,
     })
     st.session_state.vice_log = log
@@ -270,7 +249,18 @@ def all_entries(days: int = 30):
         if datetime.fromisoformat(e["timestamp"]) >= cutoff
     ]
 
-# ─── COMPONENTS ───────────────────────────────────────────────────────────────
+# ─── SHARED COMPONENTS ────────────────────────────────────────────────────────
+
+def page_masthead(title, subtitle=""):
+    st.html(f"""
+<div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
+              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Vice Vault</div>
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:var(--text);
+              letter-spacing:3px; line-height:0.95;">{title}</div>
+  {'<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--muted); margin-top:6px;">' + subtitle + '</div>' if subtitle else ''}
+</div>
+""")
 
 def stat_card(label, value, sublabel, color):
     st.html(f"""
@@ -284,60 +274,20 @@ def stat_card(label, value, sublabel, color):
 </div>
 """)
 
-def section_header(title, subtitle=""):
-    st.html(f"""
-<div style="margin-bottom:1.5rem;">
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:32px; color:var(--text);
-              letter-spacing:2px; line-height:1; margin-bottom:4px;">{title}</div>
-  {'<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--muted);">'+subtitle+'</div>' if subtitle else ''}
-</div>
-""")
+# ─── STATS PAGE ───────────────────────────────────────────────────────────────
 
-def render_log_form(vice_key: str):
-    v = VICES[vice_key]
-    st.html(f"""
-<div style="background:var(--card); border:1px solid var(--border); border-left:3px solid {v['color']};
-            border-radius:4px; padding:20px 20px 4px; margin-bottom:16px;">
-  <span style="font-size:22px;">{v['icon']}</span>
-  <span style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:{v['color']};
-               letter-spacing:2px; margin-left:8px;">{v['label']}</span>
-</div>
-""")
+def stats_page():
+    inject_css()
+    page_masthead("DASHBOARD", "No judgement. Just data.")
 
-    form_data = {}
-    for field in v["fields"]:
-        key = f"log_{vice_key}_{field['key']}"
-        if field["type"] == "select":
-            form_data[field["key"]] = st.selectbox(field["label"], field["options"], key=key)
-        elif field["type"] == "number":
-            form_data[field["key"]] = st.number_input(
-                field["label"],
-                min_value=float(field.get("min", 0)),
-                step=float(field.get("step", 1)),
-                key=key
-            )
-        elif field["type"] == "slider":
-            form_data[field["key"]] = st.slider(
-                field["label"],
-                min_value=field["min"],
-                max_value=field["max"],
-                value=(field["min"] + field["max"]) // 2,
-                key=key
-            )
-        elif field["type"] == "text":
-            form_data[field["key"]] = st.text_input(field["label"], key=key)
-
-    st.html("<div style='height:8px'></div>")
-    if st.button(f"Log {v['label']} →", key=f"submit_{vice_key}", type="primary", use_container_width=True):
-        add_entry(vice_key, form_data)
-        st.success(f"Logged. {v['icon']}")
-        st.rerun()
-
-def render_stats():
     log = all_entries(30)
     total = len(log)
-    section_header("YOUR STATS", "Last 30 days")
 
+    # Summary cards
+    st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Last 30 days</div>
+""")
     cols = st.columns(4)
     for i, (vk, v) in enumerate(VICES.items()):
         count = len([e for e in log if e["vice"] == vk])
@@ -346,7 +296,6 @@ def render_stats():
 
     st.html("<div style='height:1.5rem'></div>")
 
-    # Frequency chart — plain bars using HTML
     if total == 0:
         st.html("""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
@@ -357,14 +306,13 @@ def render_stats():
 """)
         return
 
-    # Last 14 days heatmap
+    # 14-day activity heatmap
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
             text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
   14-Day Activity
 </div>
 """)
-
     days_list = [(datetime.now() - timedelta(days=i)).date() for i in range(13, -1, -1)]
     day_counts = {}
     for e in all_entries(14):
@@ -372,13 +320,11 @@ def render_stats():
         day_counts[d] = day_counts.get(d, 0) + 1
 
     max_count = max(day_counts.values(), default=1)
-
     cols_heat = st.columns(14)
     for i, d in enumerate(days_list):
         cnt = day_counts.get(d, 0)
         intensity = cnt / max_count if max_count else 0
         opacity = 0.15 + intensity * 0.85
-        label = d.strftime("%d")
         with cols_heat[i]:
             st.html(f"""
 <div style="text-align:center;">
@@ -388,20 +334,17 @@ def render_stats():
               font-family:'Space Mono',monospace; font-size:10px; color:var(--lime);">
     {cnt if cnt else ''}
   </div>
-  <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">{label}</div>
+  <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">{d.strftime('%d')}</div>
 </div>
 """)
 
     st.html("<div style='height:1.5rem'></div>")
 
-    # Per-vice breakdown bars
+    # Per-vice breakdown
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
-  Breakdown
-</div>
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Breakdown</div>
 """)
-
     for vk, v in VICES.items():
         count = len([e for e in log if e["vice"] == vk])
         pct = (count / total * 100) if total else 0
@@ -416,13 +359,94 @@ def render_stats():
     </span>
   </div>
   <div style="height:4px; background:var(--border); border-radius:2px;">
-    <div style="width:{pct}%; height:100%; background:{v['color']}; border-radius:2px; transition:width .5s;"></div>
+    <div style="width:{pct}%; height:100%; background:{v['color']}; border-radius:2px;"></div>
   </div>
 </div>
 """)
 
-def render_history():
-    section_header("HISTORY", "All logged sessions")
+# ─── LOG SESSION PAGE ─────────────────────────────────────────────────────────
+
+def render_log_form(vice_key: str):
+    v = VICES[vice_key]
+    st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border); border-left:3px solid {v['color']};
+            border-radius:4px; padding:20px 20px 4px; margin-bottom:16px;">
+  <span style="font-size:22px;">{v['icon']}</span>
+  <span style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:{v['color']};
+               letter-spacing:2px; margin-left:8px;">{v['label']}</span>
+</div>
+""")
+
+    # ── Date & time pickers ───────────────────────────────────────────────────
+    col_date, col_time = st.columns(2)
+    with col_date:
+        log_date = st.date_input(
+            "Date",
+            value=date.today(),
+            max_value=date.today(),
+            key=f"log_{vice_key}_date",
+        )
+    with col_time:
+        log_time = st.time_input(
+            "Time",
+            value=datetime.now().time(),
+            key=f"log_{vice_key}_time",
+        )
+
+    st.html("<div style='height:4px'></div>")
+
+    # ── Vice-specific fields ──────────────────────────────────────────────────
+    form_data = {}
+    for field in v["fields"]:
+        key = f"log_{vice_key}_{field['key']}"
+        if field["type"] == "select":
+            form_data[field["key"]] = st.selectbox(field["label"], field["options"], key=key)
+        elif field["type"] == "number":
+            form_data[field["key"]] = st.number_input(
+                field["label"],
+                min_value=float(field.get("min", 0)),
+                step=float(field.get("step", 1)),
+                key=key,
+            )
+        elif field["type"] == "slider":
+            form_data[field["key"]] = st.slider(
+                field["label"],
+                min_value=field["min"],
+                max_value=field["max"],
+                value=(field["min"] + field["max"]) // 2,
+                key=key,
+            )
+        elif field["type"] == "text":
+            form_data[field["key"]] = st.text_input(field["label"], key=key)
+
+    st.html("<div style='height:8px'></div>")
+
+    if st.button(f"Log {v['label']} →", key=f"submit_{vice_key}", type="primary", use_container_width=True):
+        entry_dt = datetime.combine(log_date, log_time)
+        add_entry(vice_key, form_data, entry_dt)
+        st.success(f"Logged. {v['icon']}")
+        st.rerun()
+
+
+def log_session_page():
+    inject_css()
+    page_masthead("LOG SESSION", "What happened?")
+
+    vice_choice = st.selectbox(
+        "Select vice",
+        list(VICES.keys()),
+        format_func=lambda k: f"{VICES[k]['icon']}  {VICES[k]['label']}",
+        key="log_vice_choice",
+    )
+    st.html("<div style='height:4px'></div>")
+    render_log_form(vice_choice)
+
+# ─── HISTORY PAGE ─────────────────────────────────────────────────────────────
+
+def history_page():
+    inject_css()
+    page_masthead("HISTORY", "All logged sessions")
+
     log = list(reversed(get_log()))
 
     if not log:
@@ -438,7 +462,7 @@ def render_history():
     for e in log[:50]:
         v = VICES[e["vice"]]
         ts = datetime.fromisoformat(e["timestamp"])
-        time_str = ts.strftime("%b %d · %H:%M")
+        time_str = ts.strftime("%b %d, %Y · %H:%M")
         data_str = "  ·  ".join(
             f"{k}: {val}" for k, val in e["data"].items() if val and k != "notes"
         )
@@ -459,45 +483,12 @@ def render_history():
 </div>
 """)
 
+    st.html("<div style='height:8px'></div>")
     if st.button("Clear all history", type="secondary"):
         st.session_state.vice_log = []
         st.rerun()
 
-# ─── MAIN PAGE ────────────────────────────────────────────────────────────────
+# ─── LEGACY ENTRY POINT (kept for compatibility) ──────────────────────────────
 
 def dashboard_page():
-    inject_css()
-
-    # Masthead
-    st.html("""
-<div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Vice Vault</div>
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:52px; color:var(--text);
-              letter-spacing:3px; line-height:0.95;">YOUR VICES.<br>
-    <span style="color:var(--lime);">TRACKED.</span>
-  </div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-top:8px;">
-    No judgement. Just data.
-  </div>
-</div>
-""")
-
-    tab_stats, tab_log, tab_history = st.tabs(["STATS", "LOG SESSION", "HISTORY"])
-
-    with tab_stats:
-        render_stats()
-
-    with tab_log:
-        section_header("LOG A SESSION", "What happened?")
-        vice_choice = st.selectbox(
-            "Select vice",
-            list(VICES.keys()),
-            format_func=lambda k: f"{VICES[k]['icon']}  {VICES[k]['label']}",
-            key="log_vice_choice"
-        )
-        st.html("<div style='height:4px'></div>")
-        render_log_form(vice_choice)
-
-    with tab_history:
-        render_history()
+    stats_page()
