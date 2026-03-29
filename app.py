@@ -21,30 +21,34 @@ def render_sidebar():
 <div style="height:1px; background:#2a2a35; margin-bottom:12px;"></div>
 """, unsafe_allow_html=True)
 
-        if st.button("◈  Dashboard", use_container_width=True):
+        if st.button("◈  Dashboard",              use_container_width=True):
             st.session_state.selected_feature = 'stats'
             st.rerun()
-        if st.button("＋  Log Session", use_container_width=True):
+        if st.button("＋  Log Session",            use_container_width=True):
             st.session_state.selected_feature = 'log'
             st.rerun()
-        if st.button("≡  History", use_container_width=True):
+        if st.button("≡  History",                 use_container_width=True):
             st.session_state.selected_feature = 'history'
             st.rerun()
-        if st.button("◉  Analytics", use_container_width=True):
+        if st.button("◉  Analytics",               use_container_width=True):
             st.session_state.selected_feature = 'analytics'
             st.rerun()
 
         st.markdown("<div style='height:1px; background:#2a2a35; margin:12px 0;'></div>",
                     unsafe_allow_html=True)
 
-        if st.button("⚡  What Would You Do?", use_container_width=True):
+        if st.button("⚡  Read Between The Lines", use_container_width=True):
             st.session_state.selected_feature = 'wwyd'
+            st.rerun()
+
+        if st.button("📍  Kingston Hot Spots",     use_container_width=True):
+            st.session_state.selected_feature = 'hotspots'
             st.rerun()
 
         st.markdown("<div style='height:1px; background:#2a2a35; margin:12px 0;'></div>",
                     unsafe_allow_html=True)
 
-        if st.button("→  Logout", use_container_width=True):
+        if st.button("→  Logout",                  use_container_width=True):
             logout()
 
 
@@ -93,6 +97,10 @@ def main():
         elif feature == 'wwyd':
             from Pages.what_would_you_do import what_would_you_do_page
             what_would_you_do_page()
+
+        elif feature == 'hotspots':
+            from Pages.hotspots import hotspots_page
+            hotspots_page()
 
         else:  # 'stats' or default
             from Pages.dashboard import stats_page
