@@ -1,260 +1,243 @@
 """
 Pages/what_would_you_do.py
-Live Reddit-powered taboo quiz — parallel fetch, rebrand, consolidated file.
+Kink & desire profile quiz — 10 indirect scenario questions, no Reddit needed.
+Profiles across 6 dimensions and surfaces matched kink tags.
 """
 
 import streamlit as st
 import json
-import random
-import time
-import anthropic
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ─── CONFIG ───────────────────────────────────────────────────────────────────
+# ─── QUESTIONS ────────────────────────────────────────────────────────────────
 
-SUBREDDITS = [
-    "sex", "nonmonogamy", "polyamory", "swingers",
-    "confessions", "trueoffmychest", "relationship_advice",
-    "openrelationships",
+QUESTIONS = [
+    {
+        "tag": "Power play",
+        "text": "You're planning a surprise for someone you're deeply attracted to. Which direction do you take it?",
+        "dims": {"control": [0, 1, 2, 3], "sensory": [0, 0, 1, 1]},
+        "opts": [
+            "A thoughtful note and their favourite meal — I like making people feel cared for.",
+            "Something they've mentioned wanting but never asked for — I pay attention.",
+            "Blindfold them, lead them somewhere unexpected — the not-knowing is the point.",
+            "I tell them exactly what's going to happen, step by step, before it does.",
+        ],
+    },
+    {
+        "tag": "Atmosphere",
+        "text": "Which setting makes you feel most… switched on?",
+        "dims": {"exhib": [0, 1, 2, 3], "sensory": [1, 0, 2, 0]},
+        "opts": [
+            "Completely private. Just us, no possibility of interruption.",
+            "Somewhere semi-public — a balcony, a quiet corner — where getting caught is theoretically possible.",
+            "Honestly? An audience wouldn't bother me. The attention is part of it.",
+            "Sensory overload: music, low light, textures — I want every sense involved.",
+        ],
+    },
+    {
+        "tag": "Fantasy check",
+        "text": "A movie scene that unexpectedly does something for you usually involves:",
+        "dims": {"control": [0, 2, 1, 3], "dynamic": [0, 1, 2, 3]},
+        "opts": [
+            "Two people completely equal — no one leads, no one follows, just chemistry.",
+            "Someone taking charge in a way that's confident but not aggressive.",
+            "Roleplay or a character dynamic — the 'character' part matters as much as the act.",
+            "Clear power — one person completely in control, the other completely surrendered.",
+        ],
+    },
+    {
+        "tag": "Comfort zone",
+        "text": "You're with someone you trust completely. They suggest something new. Your gut says:",
+        "dims": {"openness": [0, 1, 2, 3], "control": [1, 0, 2, 0]},
+        "opts": [
+            "Hard pass — I know what I like and I'm not experimenting tonight.",
+            "Tell me more first. I need to understand it before I decide.",
+            "Curious. I'll try most things once if I'm comfortable with the person.",
+            "Yes before they finish the sentence. That's what trust is for.",
+        ],
+    },
+    {
+        "tag": "The language of want",
+        "text": "How do you prefer desire to be communicated?",
+        "dims": {"verbal": [0, 3, 1, 2], "control": [0, 1, 2, 1]},
+        "opts": [
+            "Actions only — words kill the mood for me.",
+            "Tell me exactly. Specific, explicit, no ambiguity.",
+            "Whispered, close — tone matters more than content.",
+            "I want to be asked permission. The asking is the thing.",
+        ],
+    },
+    {
+        "tag": "Slow burn or fast fire",
+        "text": "Your ideal pace from first contact to peak intensity is:",
+        "dims": {"sensory": [3, 1, 0, 2], "dynamic": [1, 0, 2, 1]},
+        "opts": [
+            "Agonisingly slow. I want anticipation that feels almost unbearable.",
+            "Gradual. Let it build naturally without forcing it.",
+            "Fast. The urgency is the turn-on.",
+            "Unpredictable — slow then suddenly fast — I like losing the rhythm.",
+        ],
+    },
+    {
+        "tag": "Imagination",
+        "text": "If you were writing the scenario in your head right now, the other person is:",
+        "dims": {"dynamic": [0, 1, 3, 2], "control": [0, 2, 3, 1]},
+        "opts": [
+            "Completely equal — we're discovering it together.",
+            "Slightly unpredictable — I don't know exactly what they'll do next.",
+            "Dominant and deliberate — they know exactly what they want from me.",
+            "Waiting for my lead — I decide everything.",
+        ],
+    },
+    {
+        "tag": "Sensation",
+        "text": "Which physical element features most in what you find genuinely exciting?",
+        "dims": {"sensory": [3, 2, 1, 0], "control": [1, 2, 0, 3]},
+        "opts": [
+            "Touch and texture — what things feel like against skin.",
+            "Restraint — not necessarily literal, but the feeling of being held.",
+            "Eye contact and presence — being completely seen.",
+            "Pain-adjacent sensation — that line where pleasure gets complicated.",
+        ],
+    },
+    {
+        "tag": "The reveal",
+        "text": "When it comes to being truly known by someone intimately, you:",
+        "dims": {"openness": [0, 1, 2, 3], "verbal": [1, 0, 2, 3]},
+        "opts": [
+            "Keep a lot private — some things are just mine.",
+            "Share selectively, over time, when trust is solid.",
+            "Open book — I'd rather someone know everything and react honestly.",
+            "Want to be figured out. I like someone reading me without being told.",
+        ],
+    },
+    {
+        "tag": "After everything",
+        "text": "What matters most to you once the intensity fades?",
+        "dims": {"dynamic": [0, 1, 2, 3], "openness": [2, 1, 0, 3]},
+        "opts": [
+            "Quiet — no processing, no talking, just being present.",
+            "Closeness — physical, warm, uncomplicated.",
+            "Conversation — I want to talk about what just happened.",
+            "Honesty — even if something was unexpected or complicated, I want it said.",
+        ],
+    },
 ]
 
-TABOO_KEYWORDS = [
-    "threesome", "3some", "open relationship", "swinger", "polyamory",
-    "fantasy", "attracted to", "cheated", "affair", "tempted", "curious about",
-    "another person", "someone else", "bring someone", "invite", "experiment",
-    "exploring", "never told anyone", "taboo", "forbidden", "secret",
-    "want to try", "thinking about", "nonmonogamy", "ethical non",
-    "open marriage", "group", "voyeur", "exhibitionist",
-    "fmf", "mfm", "confession", "told my partner", "my partner told me",
-    "we tried", "we talked about",
+# ─── DIMENSIONS ───────────────────────────────────────────────────────────────
+
+DIMS = {
+    "control":  {"label": "Power & control",     "color": "#D85A30"},
+    "sensory":  {"label": "Sensory depth",        "color": "#ff2d78"},
+    "exhib":    {"label": "Exhibitionism",         "color": "#ffb300"},
+    "dynamic":  {"label": "Role dynamics",         "color": "#7F77DD"},
+    "openness": {"label": "Sexual openness",       "color": "#00e5ff"},
+    "verbal":   {"label": "Verbal intensity",      "color": "#c6ff00"},
+}
+
+# ─── KINK TAGS ────────────────────────────────────────────────────────────────
+
+KINK_MAP = [
+    {"label": "Dominance / submission", "dims": {"control": 0.6, "dynamic": 0.4}, "threshold": 0.55},
+    {"label": "Sensory play",           "dims": {"sensory": 0.8, "control": 0.2}, "threshold": 0.50},
+    {"label": "Roleplay",               "dims": {"dynamic": 0.7, "verbal": 0.3},  "threshold": 0.45},
+    {"label": "Exhibitionism",          "dims": {"exhib": 1.0},                   "threshold": 0.40},
+    {"label": "Restraint",              "dims": {"control": 0.5, "sensory": 0.5}, "threshold": 0.50},
+    {"label": "Verbal intensity",       "dims": {"verbal": 0.8, "dynamic": 0.2},  "threshold": 0.50},
+    {"label": "Slow anticipation",      "dims": {"sensory": 0.4, "openness": 0.6},"threshold": 0.50},
+    {"label": "Power exchange",         "dims": {"control": 0.7, "dynamic": 0.3}, "threshold": 0.60},
+    {"label": "Emotional intimacy",     "dims": {"openness": 0.7, "verbal": 0.3}, "threshold": 0.45},
+    {"label": "Unpredictability",       "dims": {"openness": 0.5, "dynamic": 0.5},"threshold": 0.50},
 ]
 
-MIN_SCORE  = 50
-MIN_LENGTH = 200
-POST_COUNT = 10
+# ─── RESULT PROFILES ─────────────────────────────────────────────────────────
 
-FALLBACK_POSTS = [
-    {"sub":"r/relationship_advice","avatar":"T","user":"throwaway_82947","title":"My partner and I accidentally started a conversation we can't take back","text":"We've been together three years. Last Saturday we had some friends over and after everyone left, one of them made a joke about how 'it's a shame you two are taken.' Nobody laughed it off. There was this long pause where we all just looked at each other. My partner and I talked about it after they left and it turned into a two-hour conversation about things we'd never said out loud before. I don't know what we're doing but I don't feel scared about it.","upvotes":"14.2k","comments":"832","time":"6 hours ago","url":"https://reddit.com/r/relationship_advice","flair":"Long Post"},
-    {"sub":"r/confessions","avatar":"A","user":"anon_user_2291","title":"I told my best friend exactly what happens in our bedroom because she asked — my partner walked in halfway through","text":"She's been single for a while and we were deep in a wine conversation when she said she was jealous — not of my relationship, specifically of the intimacy. She asked if I'd describe what it's actually like. I did. In detail. My partner walked in halfway through and just sat down and listened. Nobody was uncomfortable. Nobody said 'that's too much information.' When she left, my partner said, 'I didn't mind that.' We haven't talked about what that means yet.","upvotes":"9.7k","comments":"1.2k","time":"2 days ago","url":"https://reddit.com/r/confessions","flair":"True Story"},
-    {"sub":"r/trueoffmychest","avatar":"S","user":"strangebutreal","title":"My partner and I spent four hours talking about a hypothetical last night and I've never felt closer to them","text":"It started with a dumb hypothetical — I said 'if you could add anyone to our relationship for one night, no consequences, who would you say?' I expected them to laugh it off. They didn't. They answered. Thoughtfully. With a name. So I answered too. Then we started talking about how it would actually work, what the rules would be, whether we'd feel jealous. We never agreed to do anything. I feel like I know them more than I did yesterday.","upvotes":"18.3k","comments":"976","time":"5 hours ago","url":"https://reddit.com/r/trueoffmychest","flair":"Personal"},
-    {"sub":"r/nonmonogamy","avatar":"M","user":"maybe_mistakes","title":"AITA for telling my girlfriend that her being bothered by my fantasy means she doesn't trust me?","text":"I told her about a recurring fantasy — nothing I expected to act on, just something in my head. She got quiet for a while and then said it made her feel like she wasn't enough. I told her that's not what fantasies mean, and that being bothered by something I've never done makes me feel like she assumes the worst of me. She said I was being defensive. I said she was conflating imagination with intention. We're still in this argument three days later. The fantasy involved someone we both know.","upvotes":"22.1k","comments":"3.4k","time":"1 day ago","url":"https://reddit.com/r/nonmonogamy","flair":"Advice"},
-    {"sub":"r/polyamory","avatar":"L","user":"late_night_post_88","title":"My close friend accidentally sent my partner a text I wrote about wanting to explore an open relationship","text":"My close friend had been asking for advice on her relationship. I sent her this long message about how I think openness between partners is underrated, and I gave a specific example — that I'd thought about what it would be like if we ever brought someone else into things, and that my partner's reaction if I ever brought it up was the thing stopping me. She screenshotted it and sent it to my partner by accident. He texted me three seconds later. I thought I was about to have the worst conversation of my life. He said: 'Why haven't you just told me this?'","upvotes":"31.5k","comments":"2.1k","time":"3 days ago","url":"https://reddit.com/r/polyamory","flair":"Story"},
-    {"sub":"r/swingers","avatar":"W","user":"wontusemyname","title":"UPDATE: We did it. Here's the honest version of what happened.","text":"Original post was six months ago. Short version: my partner and I had been curious, we met someone we both trusted, and after a lot of conversations we stopped overthinking and made a decision. Here's what nobody tells you: the hardest part was the three days before, not the night itself. The night was calm. Everyone knew the agreement. Nobody felt left out. The morning after, we made breakfast together and laughed a lot. It wasn't perfect — there were small moments of awkwardness that we talked through over the next week. But if someone asked me today whether I'd do it again, the answer would be yes.","upvotes":"19.4k","comments":"1.1k","time":"2 days ago","url":"https://reddit.com/r/swingers","flair":"Update"},
-    {"sub":"r/sex","avatar":"N","user":"nightowl_anon","title":"The reason most couples never talk about threesomes isn't morality — it's fear of the answer","text":"Think about it. The hesitation isn't really about whether it's a good idea. It's about the moment after you ask, when you see their face — and you find out who they actually are. If they're excited, now you know something. If they're horrified, now you know something else. Either answer changes things. So instead of asking, most people just carry the question around for years and call that loyalty. I'm not saying it should always be asked. I'm saying the reason it isn't has nothing to do with morality.","upvotes":"8.9k","comments":"2.3k","time":"12 hours ago","url":"https://reddit.com/r/sex","flair":"Discussion"},
-    {"sub":"r/openrelationships","avatar":"C","user":"confessed_at_midnight","title":"I've been in a situation most people would call complicated. I consider it the best year of my life.","text":"About two years ago, my partner and I became very close with another person — someone we both trusted, liked, and were both, separately, attracted to. We never planned what happened. It evolved slowly over months. There were awkward conversations, check-ins, one moment where someone cried and we almost stopped everything. But we didn't stop. We spent a year navigating something that nobody gave us a map for and on the other side of it, my relationship with my partner is the strongest it's ever been.","upvotes":"27.8k","comments":"4.5k","time":"4 days ago","url":"https://reddit.com/r/openrelationships","flair":"Experience"},
-    {"sub":"r/relationship_advice","avatar":"F","user":"finally_saying_it","title":"My partner told me they've always been curious about this and I said nothing. That was six months ago.","text":"They brought it up casually, like it was just a thought, not a request. I panicked internally and changed the subject and they never brought it up again. But I think about it almost every week. Not because I'm angry or hurt — because I keep asking myself what I actually think about it, and I don't have a clean answer. Part of me is curious. Part of me is scared. Part of me wonders what would have happened if I'd just said 'tell me more' instead of going quiet. I don't know if I'm ready to reopen the conversation.","upvotes":"12.6k","comments":"889","time":"8 hours ago","url":"https://reddit.com/r/relationship_advice","flair":"Serious"},
-    {"sub":"r/confessions","avatar":"B","user":"burner_acct_now","title":"People who've actually had a threesome — what happened to your relationship after?","text":"Top comment: 'We talked about it for months before anything happened. The conversation itself changed our relationship — more honesty, more trust. We stopped performing for each other.' Second: 'We tried it. It was amazing and also complicated and also something I'd do again.' Third: 'The fact that we could have the conversation without falling apart told me more about our relationship than anything else ever had.' Fourth: 'We found out we wanted very different things. That was hard but also necessary to know.' Fifth: 'Still together four years later. No regrets.'","upvotes":"41.2k","comments":"7.8k","time":"1 week ago","url":"https://reddit.com/r/confessions","flair":"Discussion"},
+PROFILES = [
+    {
+        "range": [0, 20],
+        "icon": "🌙",
+        "name": "The Intimate Minimalist",
+        "meta": "Real > elaborate.",
+        "desc": "You don't need complexity. What you want is genuine, simple, and deeply felt. The fewer variables the better — you find more in a moment of authentic closeness than in any elaborate setup.",
+    },
+    {
+        "range": [21, 42],
+        "icon": "🌿",
+        "name": "The Calibrated Explorer",
+        "meta": "Trust unlocks everything.",
+        "desc": "You know what you like but you're still curious about the edges. You don't chase novelty for its own sake — but with the right person and enough trust, you'll go further than most people realise.",
+    },
+    {
+        "range": [43, 62],
+        "icon": "🔺",
+        "name": "The Dynamic Architect",
+        "meta": "Power and pace are the whole thing.",
+        "desc": "Structure, dynamic, and control matter to you enormously. You're drawn to clear roles — whether you're the one creating them or surrendering to them. The setup is part of the pleasure.",
+    },
+    {
+        "range": [63, 999],
+        "icon": "⚡",
+        "name": "The Full-Spectrum Player",
+        "meta": "You want all of it.",
+        "desc": "You're not afraid of complexity. Sensation, dynamic, honesty, and edge — you want the full range. You've probably thought about this more than most people have, and you know exactly what that means.",
+    },
 ]
 
-RESULT_TYPES = [
-    {"min":  0, "max": 10,  "icon": "🔒", "name": "Closed Garden",
-     "meta": "Yours. Only yours. Period.",
-     "desc": "You're wired for exclusivity and you're not apologizing for it. Every scenario made you want to protect something — and that instinct is real. You believe some things should stay between two people, and no amount of 'communication' changes what you fundamentally want. That's not fear. That's a value."},
-    {"min": 11, "max": 22,  "icon": "🌿", "name": "Quietly Curious",
-     "meta": "The thought has crossed your mind. More than once.",
-     "desc": "You'd never bring it up unprompted, but these scenarios made something stir. You're more open than your default settings suggest. Given the right relationship, the right trust level, and the right conversation — you'd hear someone out. You're not closed. You're just careful about who gets the key."},
-    {"min": 23, "max": 35,  "icon": "🌙", "name": "The Open Door",
-     "meta": "You've thought this through. Seriously.",
-     "desc": "You're past the theoretical phase. These scenarios didn't make you uncomfortable — they made you think. You understand the dynamics, you've processed the jealousy question, and you're emotionally equipped for complexity. The only thing between you and yes is finding the right moment and the right person."},
-    {"min": 36, "max": 44,  "icon": "🔺", "name": "Already Decided",
-     "meta": "The question isn't whether. It's when.",
-     "desc": "There's no internal conflict left in you on this. You read these scenarios and recognised yourself — not as an observer but as someone who's either been in a version of these situations or is clearly ready. You know what you want. You manage the emotional complexity well. You're not waiting for permission."},
-    {"min": 45, "max": 999, "icon": "⚡", "name": "The Third Is Already Picked",
-     "meta": "You know exactly who. They probably know too.",
-     "desc": "You're not curious — you're experienced or so ready it's the same thing. These scenarios felt like reading your own diary entries. You've had the late-night conversations, sat in the silence, made the decision. Whoever you send this quiz to will understand immediately why you sent it."},
-]
+# ─── HELPERS ─────────────────────────────────────────────────────────────────
 
-FALLBACK_OPTS = [
-    {"t": "This makes me uncomfortable — I'd want no part of it.", "pts": 0},
-    {"t": "I understand it but it's not something I'd personally want.", "pts": 1},
-    {"t": "I'm genuinely curious — this scenario has me thinking.", "pts": 3},
-    {"t": "This resonates more than I'd admit out loud.", "pts": 5},
-]
+def _dim_maxes() -> dict:
+    mx = {d: 0 for d in DIMS}
+    for q in QUESTIONS:
+        for d, vals in q["dims"].items():
+            mx[d] += max(vals)
+    return mx
 
-# ─── HELPERS ──────────────────────────────────────────────────────────────────
+DIM_MAX = _dim_maxes()
 
-def time_ago(ts: float) -> str:
-    diff = int(time.time() - ts)
-    if diff < 3600:  return f"{diff // 60}m ago"
-    if diff < 86400: return f"{diff // 3600}h ago"
-    return f"{diff // 86400}d ago"
 
-def is_taboo(title: str, body: str) -> bool:
-    text = (title + " " + body).lower()
-    return any(kw in text for kw in TABOO_KEYWORDS)
-
-def fmt_num(n: int) -> str:
-    return f"{n/1000:.1f}k" if n >= 1000 else str(n)
-
-# ─── PARALLEL REDDIT FETCH ────────────────────────────────────────────────────
-
-def _fetch_one(args) -> list:
-    """Fetch one subreddit — tries direct then allorigins proxy."""
-    import requests
-    sub, sort = args
-    reddit_url = f"https://www.reddit.com/r/{sub}/{sort}.json?limit=25"
-    if sort == "top":
-        reddit_url += "&t=month"
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; ViceVault/1.0)",
-        "Accept": "application/json",
-    }
-    attempts = [
-        reddit_url,
-        "https://api.allorigins.win/raw?url=" + reddit_url,
-        "https://corsproxy.io/?" + reddit_url,
-    ]
-
-    for url in attempts:
-        try:
-            r = requests.get(url, headers=headers, timeout=5)
-            if not r.ok:
-                continue
-            data = r.json()
-            if "contents" in data:
-                data = json.loads(data["contents"])
-            children = data.get("data", {}).get("children", [])
-            if not children:
-                continue
-
-            posts = []
-            for item in children:
-                pd = item.get("data", {})
-                body  = pd.get("selftext", "")
-                title = pd.get("title", "")
-                if not body or len(body) < MIN_LENGTH:     continue
-                if pd.get("score", 0) < MIN_SCORE:         continue
-                if pd.get("stickied") or pd.get("pinned"): continue
-                if body in ("[deleted]", "[removed]"):      continue
-                if not is_taboo(title, body):              continue
-                posts.append({
-                    "sub":      f"r/{sub}",
-                    "avatar":   (pd.get("author") or "A")[0].upper(),
-                    "user":     pd.get("author", "anonymous"),
-                    "title":    title,
-                    "text":     body[:900].strip(),
-                    "upvotes":  fmt_num(pd.get("score", 0)),
-                    "comments": fmt_num(pd.get("num_comments", 0)),
-                    "time":     time_ago(pd.get("created_utc", time.time())),
-                    "url":      "https://reddit.com" + pd.get("permalink", ""),
-                    "flair":    pd.get("link_flair_text") or sub.replace("_", " ").title(),
-                    "_live":    True,
-                })
-            return posts
-        except Exception:
+def _compute_scores(answers: list) -> dict:
+    sc = {d: 0 for d in DIMS}
+    for qi, ai in enumerate(answers):
+        if ai is None:
             continue
-    return []
+        for d, vals in QUESTIONS[qi]["dims"].items():
+            sc[d] += vals[ai]
+    return sc
 
 
-@st.cache_data(ttl=600, show_spinner=False)
-def fetch_posts() -> tuple:
-    """
-    Fire all subreddit requests in parallel.
-    Returns (posts_list, is_live: bool).
-    Falls back to curated posts if nothing comes through.
-    """
-    tasks = [(sub, "hot") for sub in SUBREDDITS]
-    all_posts = []
-
-    with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
-        futures = {pool.submit(_fetch_one, t): t for t in tasks}
-        for future in as_completed(futures):
-            try:
-                all_posts.extend(future.result())
-            except Exception:
-                pass
-
-    if all_posts:
-        random.shuffle(all_posts)
-        seen, unique = set(), []
-        for p in all_posts:
-            if p["title"] not in seen:
-                seen.add(p["title"])
-                unique.append(p)
-        return unique[:POST_COUNT * 2], True
-
-    posts = FALLBACK_POSTS.copy()
-    random.shuffle(posts)
-    return posts[:POST_COUNT], False
+def _total_pct(scores: dict) -> int:
+    tot = sum(scores.values())
+    mx  = sum(DIM_MAX.values())
+    return round((tot / mx) * 100) if mx else 0
 
 
-# ─── CLAUDE QUESTION GENERATOR ────────────────────────────────────────────────
-
-def generate_question(post: dict, client) -> dict:
-    prompt = f"""You write questions for a daring relationship/sexuality quiz called "What Would You Do?" exploring sexual taboos, open relationships, threesomes, and intimate boundaries.
-
-Reddit post:
-SUBREDDIT: {post['sub']}
-TITLE: {post['title']}
-TEXT: {post['text']}
-
-Write a short provocative quiz question (1-2 sentences) asking the reader their honest gut reaction.
-
-Write 4 answer options from most conservative (pts:0) to most open/adventurous (pts:5):
-- Option 1 (pts:0): closed off, protective, uncomfortable
-- Option 2 (pts:2): cautious, curious but hesitant
-- Option 3 (pts:3): open-minded, genuinely intrigued
-- Option 4 (pts:5): experienced or fully ready, deeply relatable
-
-Each option: 1-2 sentences, specific and authentic. No generic filler.
-
-Respond ONLY with JSON (no markdown):
-{{"prompt":"...","opts":[{{"t":"...","pts":0}},{{"t":"...","pts":2}},{{"t":"...","pts":3}},{{"t":"...","pts":5}}]}}"""
-
-    resp = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=600,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    raw = resp.content[0].text.strip().replace("```json", "").replace("```", "").strip()
-    return json.loads(raw)
+def _dim_pct(scores: dict, d: str) -> int:
+    return round((scores[d] / DIM_MAX[d]) * 100) if DIM_MAX[d] else 0
 
 
-# ─── SESSION STATE ────────────────────────────────────────────────────────────
+def _kink_score(scores: dict, k: dict) -> float:
+    s = 0.0
+    for d, w in k["dims"].items():
+        s += (scores[d] / DIM_MAX[d]) * w if DIM_MAX[d] else 0
+    return s
 
-def init_state():
-    defaults = {
-        "wwyd_phase":     "start",
-        "wwyd_questions": [],
-        "wwyd_answers":   [],
-        "wwyd_cur":       0,
-        "wwyd_error":     "",
-        "wwyd_live":      False,
-    }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
 
-def hard_reset():
-    for k in list(st.session_state.keys()):
-        if k.startswith("wwyd_"):
-            del st.session_state[k]
-    fetch_posts.clear()
-    init_state()
-    st.rerun()
+def _active_kinks(scores: dict) -> list:
+    return [k["label"] for k in KINK_MAP if _kink_score(scores, k) >= k["threshold"]]
 
-# ─── CSS ──────────────────────────────────────────────────────────────────────
+# ─── CSS ─────────────────────────────────────────────────────────────────────
 
 def inject_css():
     st.html("""
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg:#0a0a0b; --surface:#111114; --card:#18181d;
-  --border:#2a2a35; --lime:#c6ff00; --magenta:#ff2d78;
-  --cyan:#00e5ff; --amber:#ffb300; --text:#f0f0f5;
-  --muted:#5a5a72; --soft:#9090aa;
+  --bg:#0a0a0b; --surface:#111114; --card:#18181d; --border:#2a2a35;
+  --lime:#c6ff00; --magenta:#ff2d78; --cyan:#00e5ff; --amber:#ffb300;
+  --text:#f0f0f5; --muted:#5a5a72; --soft:#9090aa;
 }
 .stApp { background:var(--bg) !important; }
 section[data-testid="stMain"] { background:var(--bg) !important; }
-section.main .block-container {
-  padding-top:0.5rem !important; padding-bottom:2rem !important;
-  max-width:720px !important;
-}
-section[data-testid="stSidebar"] {
-  background:#0d0d10 !important; border-right:1px solid var(--border) !important;
-}
+section.main .block-container { padding-top:0.5rem !important; max-width:720px !important; }
+section[data-testid="stSidebar"] { background:#0d0d10 !important; border-right:1px solid var(--border) !important; }
 section[data-testid="stSidebar"] * { color:#c8c8d8 !important; }
 section[data-testid="stSidebar"] .stButton > button {
   background:transparent !important; border:1px solid var(--border) !important;
@@ -269,330 +252,236 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 .stButton > button {
   background:var(--card) !important; color:var(--text) !important;
   border:1px solid var(--border) !important; border-radius:3px !important;
-  font-family:'Space Mono',monospace !important;
-  font-size:10px !important; letter-spacing:1.5px !important;
-  text-transform:uppercase !important; padding:10px 16px !important;
-  transition:all 0.15s !important; box-shadow:none !important;
+  font-family:'Space Mono',monospace !important; font-size:10px !important;
+  letter-spacing:1.5px !important; text-transform:uppercase !important;
+  padding:10px 16px !important; transition:all 0.15s !important; box-shadow:none !important;
 }
 .stButton > button:hover {
-  background:#222230 !important; border-color:var(--lime) !important;
-  color:var(--lime) !important; box-shadow:none !important; transform:none !important;
+  background:#222230 !important; border-color:var(--magenta) !important;
+  color:var(--magenta) !important; box-shadow:none !important; transform:none !important;
 }
 .stButton > button[kind="primary"] {
-  background:var(--lime) !important; color:#0a0a0b !important;
-  border-color:var(--lime) !important; font-weight:700 !important;
+  background:var(--magenta) !important; color:#fff !important;
+  border-color:var(--magenta) !important; font-weight:700 !important;
 }
 .stButton > button[kind="primary"]:hover {
-  background:#d4ff1a !important; box-shadow:0 0 20px rgba(198,255,0,0.2) !important;
+  background:#ff5590 !important; box-shadow:0 0 20px rgba(255,45,120,0.25) !important;
 }
 .stButton > button[kind="primary"]:disabled,
 .stButton > button[kind="primary"][disabled] {
   background:var(--border) !important; color:var(--muted) !important;
   border-color:var(--border) !important; box-shadow:none !important;
 }
-.stProgress > div > div > div { background:var(--lime) !important; }
-.stDownloadButton > button {
-  background:transparent !important; color:var(--soft) !important;
-  border:1px solid var(--border) !important; font-family:'Space Mono',monospace !important;
-  font-size:10px !important; letter-spacing:1px !important; text-transform:uppercase !important;
-}
-#MainMenu { visibility:hidden; }
-footer    { visibility:hidden; }
+.stProgress > div > div > div { background:var(--magenta) !important; }
+#MainMenu { visibility:hidden; } footer { visibility:hidden; }
 </style>
 """)
 
-# ─── RENDER PHASES ────────────────────────────────────────────────────────────
+# ─── STATE ───────────────────────────────────────────────────────────────────
 
-def render_header(is_live: bool):
-    badge_color = "#c6ff00" if is_live else "#ffb300"
-    badge_label = "LIVE · Reddit" if is_live else "CURATED · Fallback"
-    st.html(f"""
+def init_state():
+    defaults = {
+        "kq_phase":   "start",
+        "kq_cur":     0,
+        "kq_answers": [None] * len(QUESTIONS),
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
+def hard_reset():
+    for k in list(st.session_state.keys()):
+        if k.startswith("kq_"):
+            del st.session_state[k]
+    init_state()
+    st.rerun()
+
+# ─── HEADER ──────────────────────────────────────────────────────────────────
+
+def render_header():
+    st.html("""
 <div style="text-align:center; padding:32px 0 24px; border-bottom:1px solid var(--border); margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
               text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
-    Real posts · Real people · Real reactions
+    Vice Vault · Desire Profile
   </div>
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(52px,12vw,80px);
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(48px,11vw,76px);
               color:var(--text); letter-spacing:3px; line-height:0.9; margin-bottom:8px;">
-    WHAT WOULD<br><span style="color:var(--magenta);">YOU DO?</span>
+    READ<br><span style="color:var(--magenta);">BETWEEN</span><br>THE LINES
   </div>
   <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
-              letter-spacing:2px; text-transform:uppercase;">Scored by AI</div>
-  <div style="display:inline-flex; align-items:center; gap:6px; margin-top:14px;
-              background:rgba(198,255,0,0.07); border:1px solid rgba(198,255,0,0.2);
-              border-radius:2px; padding:5px 14px;">
-    <span style="width:5px; height:5px; border-radius:50%; background:{badge_color};
-                 display:inline-block; animation:blink 1.4s ease-in-out infinite;"></span>
-    <span style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                 text-transform:uppercase; color:{badge_color};">{badge_label}</span>
-  </div>
+              letter-spacing:2px; text-transform:uppercase;">10 questions · Your real profile</div>
 </div>
-<style>@keyframes blink{{0%,100%{{opacity:1}}50%{{opacity:0.2}}}}</style>
 """)
 
+# ─── START ────────────────────────────────────────────────────────────────────
 
 def render_start():
-    if st.session_state.wwyd_error:
-        st.warning(st.session_state.wwyd_error)
-        st.session_state.wwyd_error = ""
-
-    subs_html = "".join(
-        f'<span style="font-family:\'Space Mono\',monospace; font-size:9px; padding:4px 10px; '
-        f'border:1px solid var(--border); border-radius:2px; color:var(--soft); '
-        f'background:var(--card);">r/{s}</span>'
-        for s in SUBREDDITS
-    )
-    st.html(f"""
-<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
-            padding:28px; margin-bottom:16px;">
+    st.html("""
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px; padding:28px; margin-bottom:16px;">
   <p style="font-family:'DM Sans',sans-serif; font-size:15px; color:var(--soft);
-             line-height:1.8; text-align:center; margin-bottom:24px; font-style:italic;">
-    Real scenarios pulled from Reddit.<br>
-    Every post gets a fresh AI-generated question.<br>
-    Different every time. Honest answers only.
+             line-height:1.9; text-align:center; margin-bottom:20px; font-style:italic;">
+    No direct questions.<br>
+    No obvious answers.<br>
+    Just scenarios — and what your choices reveal.
   </p>
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:10px;">Pulling from</div>
-  <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:20px;">{subs_html}</div>
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:8px;">How it works</div>
-  <p style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft);
-             line-height:1.75; margin:0;">
-    Posts about open relationships, confessions, and intimate curiosity are fetched in parallel
-    and filtered for relevance. Claude writes a personal question for each one.
-    Your answers build your Openness Profile.
+              text-transform:uppercase; color:var(--muted); margin-bottom:8px;">What you get</div>
+  <p style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); line-height:1.8; margin:0;">
+    A desire profile across 6 dimensions — power, sensation, dynamic, openness, verbal intensity,
+    and exhibitionism — plus a set of kink tags that match your pattern.
+    Nothing is assumed. Everything is inferred.
   </p>
 </div>
 """)
-
     if st.button("Begin →", use_container_width=True, type="primary"):
-        st.session_state.wwyd_phase = "loading"
+        st.session_state.kq_phase = "quiz"
         st.rerun()
 
-
-def render_loading():
-    ph_title  = st.empty()
-    ph_bar    = st.empty()
-    ph_status = st.empty()
-
-    def upd(title, pct, status):
-        ph_title.markdown(f"**{title}**")
-        ph_bar.progress(pct)
-        ph_status.caption(status)
-
-    try:
-        upd("Fetching live scenarios…", 5, "Firing parallel requests to Reddit")
-        posts, is_live = fetch_posts()
-        upd("Posts loaded.", 30, f"{'Live data — ' if is_live else 'Curated fallback — '}{len(posts)} scenarios found")
-
-        try:
-            client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
-        except Exception:
-            client = anthropic.Anthropic()
-
-        selected  = posts[:POST_COUNT]
-        questions = []
-
-        for i, post in enumerate(selected):
-            pct = 35 + int((i / len(selected)) * 60)
-            upd("Generating questions with Claude…", pct, f"Question {i+1} of {len(selected)}")
-            try:
-                q_data = generate_question(post, client)
-                questions.append({**post, **q_data})
-            except Exception:
-                questions.append({**post, "prompt": "Your honest gut reaction to this scenario:", "opts": FALLBACK_OPTS})
-
-        upd("Almost ready…", 98, "Preparing your quiz")
-        time.sleep(0.2)
-
-        st.session_state.wwyd_questions = questions
-        st.session_state.wwyd_answers   = [None] * len(questions)
-        st.session_state.wwyd_cur       = 0
-        st.session_state.wwyd_live      = is_live
-        st.session_state.wwyd_phase     = "quiz"
-        st.rerun()
-
-    except Exception as e:
-        st.session_state.wwyd_error = f"Something went wrong: {e}"
-        st.session_state.wwyd_phase = "start"
-        st.rerun()
-
+# ─── QUIZ ─────────────────────────────────────────────────────────────────────
 
 def render_quiz():
-    questions = st.session_state.wwyd_questions
-    cur       = st.session_state.wwyd_cur
-    answers   = st.session_state.wwyd_answers
-    q         = questions[cur]
-    total     = len(questions)
-    is_last   = cur == total - 1
-    selected  = answers[cur]
-    is_live   = st.session_state.wwyd_live
+    cur     = st.session_state.kq_cur
+    answers = st.session_state.kq_answers
+    q       = QUESTIONS[cur]
+    total   = len(QUESTIONS)
+    is_last = cur == total - 1
+    sel     = answers[cur]
 
-    # Progress bar
+    # Progress segments
     segs = "".join(
-        f'<div style="flex:1; height:2px; background:{"var(--lime)" if i < cur else "var(--magenta)" if i == cur else "var(--border)"}; border-radius:1px;"></div>'
+        f'<div style="flex:1; height:2px; border-radius:1px; '
+        f'background:{"var(--magenta)" if i < cur else "rgba(255,45,120,0.5)" if i == cur else "var(--border)"}"></div>'
         for i in range(total)
     )
-    source = "Live post" if is_live else "Curated scenario"
-
     st.html(f"""
 <div style="display:flex; gap:3px; margin-bottom:20px;">{segs}</div>
-
-<div style="background:var(--card); border:1px solid var(--border); margin-bottom:16px; overflow:hidden; border-radius:4px;">
-  <div style="display:flex; align-items:center; gap:10px; padding:14px 16px 12px; border-bottom:1px solid var(--border);">
-    <div style="width:30px; height:30px; border-radius:50%; background:var(--magenta);
-                display:flex; align-items:center; justify-content:center;
-                font-family:'Bebas Neue',sans-serif; font-size:14px; color:#fff; flex-shrink:0;">
-      {q['avatar']}
-    </div>
-    <div style="flex:1; min-width:0;">
-      <div style="font-family:'Space Mono',monospace; font-size:10px; color:var(--magenta);">{q['sub']}</div>
-      <div style="font-family:'DM Sans',sans-serif; font-size:10px; color:var(--muted); margin-top:1px;">
-        u/{q['user']} · {q['time']}
-      </div>
-    </div>
-    <span style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
-                 padding:3px 8px; border:1px solid var(--border); color:var(--soft);
-                 text-transform:uppercase; border-radius:2px; white-space:nowrap;">
-      {q.get('flair','Post')}
-    </span>
-  </div>
-  <div style="padding:16px;">
-    <div style="font-family:'Bebas Neue',sans-serif; font-size:17px; letter-spacing:1px;
-                color:var(--text); margin-bottom:10px; line-height:1.3;">{q['title']}</div>
-    <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); line-height:1.85;">
-      {q['text'][:680]}{'…' if len(q['text']) > 680 else ''}
-    </div>
-  </div>
-  <div style="border-top:1px solid var(--border); padding:10px 16px;
-              display:flex; gap:14px; align-items:center; background:var(--surface);">
-    <span style="font-family:'Space Mono',monospace; font-size:10px; color:var(--muted);">▲ {q['upvotes']}</span>
-    <span style="font-family:'Space Mono',monospace; font-size:10px; color:var(--muted);">💬 {q['comments']}</span>
-    <a href="{q['url']}" target="_blank"
-       style="margin-left:auto; font-family:'Space Mono',monospace; font-size:9px;
-              letter-spacing:1px; color:var(--cyan); text-decoration:none; text-transform:uppercase;">
-      Reddit ↗
-    </a>
-  </div>
+<div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
+            text-align:right; margin-bottom:12px; letter-spacing:1px;">
+  {cur + 1} / {total}
 </div>
-
-<div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--amber);
-            border-left:2px solid var(--amber); padding-left:12px;
-            margin-bottom:16px; line-height:1.65; font-style:italic;">
-  {q['prompt']}
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px; padding:24px; margin-bottom:16px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
+              text-transform:uppercase; color:var(--magenta); margin-bottom:8px;">{q['tag']}</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:16px; color:var(--text);
+              line-height:1.6; margin-bottom:0;">{q['text']}</div>
 </div>
 """)
 
     for i, opt in enumerate(q["opts"]):
-        is_sel = selected == i
-        if st.button(
-            ("◆  " if is_sel else "") + opt["t"],
-            key=f"opt_{cur}_{i}",
-            use_container_width=True,
-            type="primary" if is_sel else "secondary",
-        ):
-            st.session_state.wwyd_answers[cur] = i
+        is_sel = sel == i
+        label  = ("◆  " if is_sel else "") + opt
+        if st.button(label, key=f"kq_{cur}_{i}", use_container_width=True,
+                     type="primary" if is_sel else "secondary"):
+            st.session_state.kq_answers[cur] = i
             st.rerun()
-
-    st.html(
-        f'<div style="font-family:\'Space Mono\',monospace; font-size:9px; color:var(--muted); '
-        f'text-align:center; margin-top:10px; letter-spacing:1px; text-transform:uppercase;">'
-        f'{source} · <a href="{q["url"]}" target="_blank" style="color:var(--cyan); text-decoration:none;">'
-        f'{q["sub"]}</a> · {cur+1}/{total}</div>'
-    )
 
     st.html("<br>")
     col_back, col_next = st.columns(2)
     with col_back:
         if cur > 0:
-            if st.button("← Back", key="back_btn", use_container_width=True):
-                st.session_state.wwyd_cur -= 1
+            if st.button("← Back", key="kq_back", use_container_width=True):
+                st.session_state.kq_cur -= 1
                 st.rerun()
     with col_next:
         label = "See My Profile →" if is_last else "Next →"
-        if st.button(label, key="next_btn", disabled=(selected is None),
+        if st.button(label, key="kq_next", disabled=(sel is None),
                      use_container_width=True, type="primary"):
             if is_last:
-                st.session_state.wwyd_phase = "result"
+                st.session_state.kq_phase = "result"
             else:
-                st.session_state.wwyd_cur += 1
+                st.session_state.kq_cur += 1
             st.rerun()
 
+# ─── RESULT ───────────────────────────────────────────────────────────────────
 
 def render_result():
-    questions = st.session_state.wwyd_questions
-    answers   = st.session_state.wwyd_answers
+    answers = st.session_state.kq_answers
+    scores  = _compute_scores(answers)
+    tot     = _total_pct(scores)
+    profile = next((p for p in PROFILES if p["range"][0] <= tot <= p["range"][1]), PROFILES[-1])
+    active  = _active_kinks(scores)
 
-    total_pts = sum(
-        questions[i]["opts"][a]["pts"]
-        for i, a in enumerate(answers) if a is not None
+    # Kink pills
+    pills = "".join(
+        f'<span style="font-family:\'Space Mono\',monospace; font-size:9px; '
+        f'padding:4px 10px; border-radius:99px; '
+        f'border:1px solid {"var(--magenta)" if k["label"] in active else "var(--border)"}; '
+        f'color:{"var(--magenta)" if k["label"] in active else "var(--muted)"}; '
+        f'background:{"rgba(255,45,120,0.08)" if k["label"] in active else "transparent"}; '
+        f'margin:3px;">{k["label"]}</span>'
+        for k in KINK_MAP
     )
-    max_pts = sum(max(o["pts"] for o in q["opts"]) for q in questions)
-    pct     = round((total_pts / max_pts) * 100) if max_pts else 0
-    result  = next(
-        (r for r in RESULT_TYPES if r["min"] <= total_pts <= r["max"]),
-        RESULT_TYPES[-1],
-    )
 
-    fill_color = "#c6ff00" if pct >= 60 else "#ffb300" if pct >= 30 else "#ff2d78"
-
-    st.markdown(f"""
-<div style="background:var(--card); border:1px solid var(--border); border-radius:4px; padding:32px 28px;">
-  <div style="font-size:52px; text-align:center; display:block; margin-bottom:12px;">{result['icon']}</div>
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(32px,7vw,52px);
-              letter-spacing:3px; color:var(--text); text-align:center; margin-bottom:4px; line-height:1.05;">
-    {result['name']}
+    st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px; padding:32px 28px; margin-bottom:16px;">
+  <div style="font-size:48px; text-align:center; margin-bottom:12px;">{profile['icon']}</div>
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(30px,6vw,48px);
+              letter-spacing:3px; color:var(--text); text-align:center; line-height:1.05; margin-bottom:4px;">
+    {profile['name'].upper()}
   </div>
   <div style="font-family:'Space Mono',monospace; font-size:10px; letter-spacing:2px;
-              color:var(--amber); text-transform:uppercase; text-align:center; margin-bottom:18px;">
-    {result['meta']}
+              color:var(--magenta); text-transform:uppercase; text-align:center; margin-bottom:18px;">
+    {profile['meta']}
   </div>
   <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
-             line-height:1.9; text-align:center; margin-bottom:28px;">
-    {result['desc']}
+             line-height:1.9; text-align:center; margin-bottom:24px;">
+    {profile['desc']}
   </p>
-  <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px; padding:20px; margin-bottom:0;">
-    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Openness Index</div>
-    <div style="height:6px; background:var(--border); border-radius:3px; margin-bottom:8px; overflow:hidden;">
-      <div style="width:{pct}%; height:100%; background:{fill_color}; border-radius:3px;"></div>
-    </div>
-    <div style="display:flex; justify-content:space-between;
-                font-family:'Space Mono',monospace; font-size:9px; color:var(--muted); margin-bottom:10px;">
-      <span>Closed off</span><span>Wide open</span>
-    </div>
-    <div style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:{fill_color}; line-height:1;">
-      {pct}<span style="font-family:'DM Sans',sans-serif; font-size:16px; color:var(--muted); font-weight:300;"> / 100</span>
-    </div>
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--muted); margin-bottom:10px;">Your kink tags</div>
+  <div style="display:flex; flex-wrap:wrap; gap:6px;">{pills}</div>
+</div>
+""")
+
+    # Dimension bars
+    st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Dimension breakdown</div>
+""")
+
+    sorted_dims = sorted(DIMS.keys(), key=lambda d: -_dim_pct(scores, d))
+    for d in sorted_dims:
+        pct   = _dim_pct(scores, d)
+        color = DIMS[d]["color"]
+        label = DIMS[d]["label"]
+        st.html(f"""
+<div style="margin-bottom:14px;">
+  <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+    <span style="font-family:'Space Mono',monospace; font-size:10px; color:var(--soft);">{label}</span>
+    <span style="font-family:'Space Mono',monospace; font-size:10px; color:{color};">{pct}%</span>
+  </div>
+  <div style="height:4px; background:var(--border); border-radius:2px;">
+    <div style="width:{pct}%; height:100%; background:{color}; border-radius:2px;"></div>
   </div>
 </div>
 """)
 
-    share = (
-        f'Just took "What Would You Do?" on ViceVault\n\n'
-        f'Result: {result["name"]}\n"{result["meta"]}"\n'
-        f'Openness Index: {pct}/100\n\nEvery quiz uses different scenarios 👀'
-    )
     st.html("<br>")
     col1, col2 = st.columns(2)
     with col1:
         if st.button("↺ Try Again", use_container_width=True):
             hard_reset()
     with col2:
-        st.download_button("↓ Save Result", data=share, file_name="my_result.txt",
+        share = (
+            f'Took the Vice Vault desire quiz\n\n'
+            f'Profile: {profile["name"]}\n'
+            f'"{profile["meta"]}"\n\n'
+            f'Active kinks: {", ".join(active) if active else "still figuring it out"}'
+        )
+        st.download_button("↓ Save Result", data=share, file_name="my_desire_profile.txt",
                            mime="text/plain", use_container_width=True)
 
-
-# ─── ENTRY POINT ──────────────────────────────────────────────────────────────
+# ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
 def what_would_you_do_page():
     inject_css()
     init_state()
     _, col, _ = st.columns([1, 5, 1])
     with col:
-        render_header(st.session_state.wwyd_live)
-        phase = st.session_state.wwyd_phase
-        if   phase == "start":   render_start()
-        elif phase == "loading": render_loading()
-        elif phase == "quiz":    render_quiz()
-        elif phase == "result":  render_result()
+        render_header()
+        phase = st.session_state.kq_phase
+        if   phase == "start":  render_start()
+        elif phase == "quiz":   render_quiz()
+        elif phase == "result": render_result()
