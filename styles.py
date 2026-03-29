@@ -4,7 +4,7 @@ import streamlit as st
 
 
 def apply_custom_styles():
-    st.markdown("""
+    st.html("""
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -119,4 +119,4 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 #MainMenu { visibility:hidden; }
 footer    { visibility:hidden; }
 </style>
-""", unsafe_allow_html=True)
+""")
