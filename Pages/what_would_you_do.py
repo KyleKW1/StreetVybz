@@ -1,12 +1,11 @@
 """
 Pages/what_would_you_do.py
 AI-generated desire & fantasy profile quiz.
-Claude generates 10 fresh indirect scenario questions every session.
+Gemini generates 10 fresh indirect scenario questions every session.
 Profiles across 6 dimensions and returns personalised exploration recommendations.
 """
 
 import streamlit as st
-import anthropic
 import json
 import random
 import google.generativeai as genai
@@ -15,12 +14,12 @@ import google.generativeai as genai
 # ─── DIMENSIONS ───────────────────────────────────────────────────────────────
 
 DIMS = {
-    "control":  {"label": "Power & control",   "color": "#D85A30"},
-    "sensory":  {"label": "Sensory depth",      "color": "#ff2d78"},
-    "exhib":    {"label": "Exhibitionism",       "color": "#ffb300"},
-    "dynamic":  {"label": "Role dynamics",       "color": "#7F77DD"},
-    "openness": {"label": "Sexual openness",     "color": "#00e5ff"},
-    "verbal":   {"label": "Verbal intensity",    "color": "#c6ff00"},
+    "control":  {"label": "Power & control",  "color": "#D85A30"},
+    "sensory":  {"label": "Sensory depth",     "color": "#ff2d78"},
+    "exhib":    {"label": "Exhibitionism",      "color": "#ffb300"},
+    "dynamic":  {"label": "Role dynamics",      "color": "#7F77DD"},
+    "openness": {"label": "Sexual openness",    "color": "#00e5ff"},
+    "verbal":   {"label": "Verbal intensity",   "color": "#c6ff00"},
 }
 
 PROFILES = [
@@ -110,14 +109,25 @@ Return ONLY a JSON array of exactly 5 recommendation strings. No markdown, no pr
 Example format: ["Recommendation one.", "Recommendation two.", ...]
 """
 
-# ─── HELPERS ─────────────────────────────────────────────────────────────────
+# ─── GEMINI CLIENT ────────────────────────────────────────────────────────────
 
-def get_client():
+def get_model():
+    """Configure Gemini and return a GenerativeModel instance."""
     try:
-        return genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        api_key = st.secrets["GEMINI_API_KEY"]
     except Exception:
-        return anthropic.Anthropic()
+        raise RuntimeError("GEMINI_API_KEY not found in Streamlit secrets.")
+    genai.configure(api_key=api_key)
+    return genai.GenerativeModel("gemini-1.5-flash")
 
+
+def call_gemini(prompt: str) -> str:
+    """Call Gemini and return the text response."""
+    model = get_model()
+    response = model.generate_content(prompt)
+    return response.text.strip()
+
+# ─── SCORING HELPERS ──────────────────────────────────────────────────────────
 
 def _dim_maxes(questions: list) -> dict:
     mx = {d: 0 for d in DIMS}
@@ -148,7 +158,7 @@ def _total_pct(scores: dict, dim_max: dict) -> int:
 def _dim_pct(scores: dict, dim_max: dict, d: str) -> int:
     return round((scores[d] / dim_max[d]) * 100) if dim_max.get(d) else 0
 
-# ─── CSS ─────────────────────────────────────────────────────────────────────
+# ─── CSS ──────────────────────────────────────────────────────────────────────
 
 def inject_css():
     st.html("""
@@ -202,7 +212,7 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 </style>
 """)
 
-# ─── STATE ───────────────────────────────────────────────────────────────────
+# ─── STATE ────────────────────────────────────────────────────────────────────
 
 def init_state():
     defaults = {
@@ -228,7 +238,7 @@ def hard_reset():
     init_state()
     st.rerun()
 
-# ─── HEADER ──────────────────────────────────────────────────────────────────
+# ─── HEADER ───────────────────────────────────────────────────────────────────
 
 def render_header():
     st.html("""
@@ -265,8 +275,8 @@ def render_start():
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted); margin-bottom:8px;">What you get</div>
   <p style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); line-height:1.8; margin:0;">
-    Claude generates 10 brand-new scenarios every session — no two quizzes are the same.
-    Your answers build a desire profile across 6 hidden dimensions, then Claude writes
+    AI generates 10 brand-new scenarios every session — no two quizzes are the same.
+    Your answers build a desire profile across 6 hidden dimensions, then AI writes
     personalised exploration recommendations just for you.
   </p>
 </div>
@@ -276,7 +286,7 @@ def render_start():
         st.session_state.kq_phase = "loading"
         st.rerun()
 
-# ─── LOADING — question generation ───────────────────────────────────────────
+# ─── LOADING ──────────────────────────────────────────────────────────────────
 
 def render_loading():
     ph_title  = st.empty()
@@ -289,28 +299,21 @@ def render_loading():
         ph_status.caption(s)
 
     try:
-        upd("Generating your quiz…", 10, "Claude is writing fresh scenarios for you")
-        client = get_client()
+        upd("Generating your quiz…", 10, "Writing fresh scenarios for you")
 
-        resp = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=4000,
-            messages=[{"role": "user", "content": GENERATION_PROMPT}],
-        )
+        raw = call_gemini(GENERATION_PROMPT)
+        raw = raw.replace("```json", "").replace("```", "").strip()
 
         upd("Parsing questions…", 80, "Validating and shuffling")
-        raw = resp.content[0].text.strip()
-        raw = raw.replace("```json", "").replace("```", "").strip()
+
         questions = json.loads(raw)
 
-        # Validate
         valid = []
         for q in questions:
             if not all(k in q for k in ("tag", "text", "dims", "opts")):
                 continue
             if len(q["opts"]) != 4:
                 continue
-            # ensure all dim keys are known
             q["dims"] = {d: v for d, v in q["dims"].items() if d in DIMS}
             if not q["dims"]:
                 continue
@@ -430,24 +433,19 @@ def render_generating_result():
             for d in DIMS
         )
 
-        upd("Generating your recommendations…", 55, "Claude is writing your personalised profile")
+        upd("Generating your recommendations…", 55, "Writing your personalised profile")
 
-        client = get_client()
         rec_prompt = RECOMMENDATION_PROMPT.format(
             scores=score_str,
             profile_name=profile["name"],
             profile_desc=profile["desc"],
         )
 
-        resp = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1500,
-            messages=[{"role": "user", "content": rec_prompt}],
-        )
+        raw = call_gemini(rec_prompt)
+        raw = raw.replace("```json", "").replace("```", "").strip()
 
         upd("Finishing up…", 90, "Almost there")
 
-        raw = resp.content[0].text.strip().replace("```json", "").replace("```", "").strip()
         recs = json.loads(raw)
         if not isinstance(recs, list):
             recs = []
@@ -473,7 +471,6 @@ def render_result():
     dim_max = st.session_state.get("kq_dimmax", {d: 1 for d in DIMS})
     recs    = st.session_state.get("kq_recs", [])
 
-    # Profile card
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:32px 28px; margin-bottom:16px;">
@@ -493,7 +490,6 @@ def render_result():
 </div>
 """)
 
-    # Dimension bars — sorted highest first
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
             text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
@@ -516,7 +512,6 @@ def render_result():
 </div>
 """)
 
-    # Recommendations
     if recs:
         st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
@@ -559,7 +554,7 @@ def render_result():
             use_container_width=True,
         )
 
-# ─── ENTRY POINT ─────────────────────────────────────────────────────────────
+# ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 
 def what_would_you_do_page():
     inject_css()
