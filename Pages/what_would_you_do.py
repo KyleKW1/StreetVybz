@@ -1,14 +1,14 @@
 """
 Pages/what_would_you_do.py
 AI-generated desire & fantasy profile quiz.
-Gemini generates 10 fresh indirect scenario questions every session.
+GPT-4o-mini generates 10 fresh indirect scenario questions every session.
 Profiles across 6 dimensions and returns personalised exploration recommendations.
 """
 
 import streamlit as st
 import json
 import random
-import google.generativeai as genai
+from openai import OpenAI
 
 
 # ─── DIMENSIONS ───────────────────────────────────────────────────────────────
@@ -109,23 +109,16 @@ Return ONLY a JSON array of exactly 5 recommendation strings. No markdown, no pr
 Example format: ["Recommendation one.", "Recommendation two.", ...]
 """
 
-# ─── GEMINI CLIENT ────────────────────────────────────────────────────────────
+# ─── OPENAI CLIENT ────────────────────────────────────────────────────────────
 
-def get_model():
-    """Configure Gemini and return a GenerativeModel instance."""
-    try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-    except Exception:
-        raise RuntimeError("GEMINI_API_KEY not found in Streamlit secrets.")
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-2.0-flash")
-
-
-def call_gemini(prompt: str) -> str:
-    """Call Gemini and return the text response."""
-    model = get_model()
-    response = model.generate_content(prompt)
-    return response.text.strip()
+def call_openai(prompt: str) -> str:
+    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.9,
+    )
+    return response.choices[0].message.content.strip()
 
 # ─── SCORING HELPERS ──────────────────────────────────────────────────────────
 
@@ -301,7 +294,7 @@ def render_loading():
     try:
         upd("Generating your quiz…", 10, "Writing fresh scenarios for you")
 
-        raw = call_gemini(GENERATION_PROMPT)
+        raw = call_openai(GENERATION_PROMPT)
         raw = raw.replace("```json", "").replace("```", "").strip()
 
         upd("Parsing questions…", 80, "Validating and shuffling")
@@ -320,7 +313,7 @@ def render_loading():
             valid.append(q)
 
         if len(valid) < 5:
-            raise ValueError(f"Only {len(valid)} valid questions generated — try again.")
+            raise ValueError(f"Only {len(valid)} valid questions — try again.")
 
         random.shuffle(valid)
         final = valid[:10]
@@ -441,7 +434,7 @@ def render_generating_result():
             profile_desc=profile["desc"],
         )
 
-        raw = call_gemini(rec_prompt)
+        raw = call_openai(rec_prompt)
         raw = raw.replace("```json", "").replace("```", "").strip()
 
         upd("Finishing up…", 90, "Almost there")
