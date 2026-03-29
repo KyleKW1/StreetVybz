@@ -1,6 +1,7 @@
 """
 Pages/dashboard.py
 Vice tracker — stats, log, and history as separate standalone pages.
+DB-backed: entries are saved to vice_log table on add, deleted on clear.
 """
 
 import streamlit as st
@@ -219,20 +220,42 @@ VICES = {
 
 # ─── STORAGE HELPERS ──────────────────────────────────────────────────────────
 
+def _current_user_id() -> int | None:
+    user = st.session_state.get("user")
+    return user.get("id") if user else None
+
+
 def get_log():
     if "vice_log" not in st.session_state:
         st.session_state.vice_log = []
     return st.session_state.vice_log
 
+
 def add_entry(vice_key: str, data: dict, timestamp: datetime):
+    """Add a vice entry to session_state AND persist to DB."""
     log = get_log()
-    log.append({
-        "id":        int(time.time() * 1000),
+    local_id = int(time.time() * 1000)
+
+    entry = {
+        "id":        local_id,
         "vice":      vice_key,
         "timestamp": timestamp.isoformat(),
         "data":      data,
-    })
+    }
+    log.append(entry)
     st.session_state.vice_log = log
+
+    # ── DB persist ────────────────────────────────────────────────────────────
+    user_id = _current_user_id()
+    if user_id:
+        try:
+            import database as db
+            db_id = db.save_vice_entry(user_id, vice_key, timestamp, data)
+            if db_id:
+                entry["id"] = db_id   # update local entry with real DB id
+        except Exception:
+            pass   # offline — local copy is the fallback
+
 
 def entries_for(vice_key: str, days: int = 30):
     cutoff = datetime.now() - timedelta(days=days)
@@ -241,6 +264,7 @@ def entries_for(vice_key: str, days: int = 30):
         if e["vice"] == vice_key
         and datetime.fromisoformat(e["timestamp"]) >= cutoff
     ]
+
 
 def all_entries(days: int = 30):
     cutoff = datetime.now() - timedelta(days=days)
@@ -377,7 +401,6 @@ def render_log_form(vice_key: str):
 </div>
 """)
 
-    # ── Date & time pickers ───────────────────────────────────────────────────
     col_date, col_time = st.columns(2)
     with col_date:
         log_date = st.date_input(
@@ -395,7 +418,6 @@ def render_log_form(vice_key: str):
 
     st.html("<div style='height:4px'></div>")
 
-    # ── Vice-specific fields ──────────────────────────────────────────────────
     form_data = {}
     for field in v["fields"]:
         key = f"log_{vice_key}_{field['key']}"
@@ -485,10 +507,18 @@ def history_page():
 
     st.html("<div style='height:8px'></div>")
     if st.button("Clear all history", type="secondary"):
+        # ── Delete from DB ────────────────────────────────────────────────────
+        user_id = _current_user_id()
+        if user_id:
+            try:
+                import database as db
+                db.delete_vice_log(user_id)
+            except Exception:
+                pass
         st.session_state.vice_log = []
         st.rerun()
 
-# ─── LEGACY ENTRY POINT (kept for compatibility) ──────────────────────────────
+# ─── LEGACY ENTRY POINT ───────────────────────────────────────────────────────
 
 def dashboard_page():
     stats_page()
