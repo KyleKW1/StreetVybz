@@ -9,4 +9,4 @@ seaborn
 python-dateutil
 anthropic
 requests
-google-generativeai
+openai
