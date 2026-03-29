@@ -3,6 +3,7 @@ Pages/what_would_you_do.py
 AI-generated desire & fantasy profile quiz.
 GPT-4o-mini generates 10 fresh indirect scenario questions every session.
 Profiles across 6 dimensions and returns personalised exploration recommendations.
+Results are saved to the quiz_results table on completion.
 """
 
 import streamlit as st
@@ -151,6 +152,29 @@ def _total_pct(scores: dict, dim_max: dict) -> int:
 def _dim_pct(scores: dict, dim_max: dict, d: str) -> int:
     return round((scores[d] / dim_max[d]) * 100) if dim_max.get(d) else 0
 
+# ─── DB SAVE ──────────────────────────────────────────────────────────────────
+
+def _save_result_to_db(profile, dim_scores_pct, recs, total_pct, questions, answers):
+    """Persist quiz result. Silent fail — never blocks the UI."""
+    user = st.session_state.get("user")
+    user_id = user.get("id") if user else None
+    if not user_id:
+        return
+    try:
+        import database as db
+        db.save_read_between_lines_result(
+            user_id         = user_id,
+            profile_name    = profile.get("name", ""),
+            profile_meta    = profile.get("meta", ""),
+            dim_scores      = dim_scores_pct,
+            recommendations = recs,
+            total_pct       = total_pct,
+            questions       = questions,
+            answers         = answers,
+        )
+    except Exception:
+        pass
+
 # ─── CSS ──────────────────────────────────────────────────────────────────────
 
 def inject_css():
@@ -218,6 +242,7 @@ def init_state():
         "kq_profile":   {},
         "kq_recs":      [],
         "kq_error":     "",
+        "kq_saved":     False,   # NEW: prevent duplicate DB writes
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -270,7 +295,7 @@ def render_start():
   <p style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); line-height:1.8; margin:0;">
     AI generates 10 brand-new scenarios every session — no two quizzes are the same.
     Your answers build a desire profile across 6 hidden dimensions, then AI writes
-    personalised exploration recommendations just for you.
+    personalised exploration recommendations just for you. Results are saved to your profile.
   </p>
 </div>
 """)
@@ -443,11 +468,17 @@ def render_generating_result():
         if not isinstance(recs, list):
             recs = []
 
-        st.session_state.kq_scores  = scores
-        st.session_state.kq_dimmax  = dim_max
-        st.session_state.kq_profile = profile
-        st.session_state.kq_recs    = recs
-        st.session_state.kq_phase   = "result"
+        # Build percentage dict for storage
+        dim_scores_pct = {d: _dim_pct(scores, dim_max, d) for d in DIMS}
+
+        st.session_state.kq_scores    = scores
+        st.session_state.kq_dimmax    = dim_max
+        st.session_state.kq_profile   = profile
+        st.session_state.kq_recs      = recs
+        st.session_state.kq_dim_pct   = dim_scores_pct   # store for DB save
+        st.session_state.kq_total_pct = tot
+        st.session_state.kq_phase     = "result"
+        st.session_state.kq_saved     = False
         st.rerun()
 
     except Exception as e:
@@ -463,6 +494,18 @@ def render_result():
     scores  = st.session_state.get("kq_scores", {d: 0 for d in DIMS})
     dim_max = st.session_state.get("kq_dimmax", {d: 1 for d in DIMS})
     recs    = st.session_state.get("kq_recs", [])
+
+    # ── Save to DB once ───────────────────────────────────────────────────────
+    if not st.session_state.get("kq_saved"):
+        _save_result_to_db(
+            profile        = profile,
+            dim_scores_pct = st.session_state.get("kq_dim_pct", {}),
+            recs           = recs,
+            total_pct      = st.session_state.get("kq_total_pct", 0),
+            questions      = st.session_state.get("kq_questions", []),
+            answers        = st.session_state.get("kq_answers", []),
+        )
+        st.session_state.kq_saved = True
 
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
@@ -522,6 +565,14 @@ def render_result():
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75;">
     {rec}
   </div>
+</div>
+""")
+
+    # Saved indicator
+    st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+            text-transform:uppercase; color:var(--muted); text-align:center; margin-top:8px;">
+  ✓ Result saved to your profile
 </div>
 """)
 
