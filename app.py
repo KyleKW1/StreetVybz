@@ -5,6 +5,38 @@ from Pages.auth_page import login_page, register_page
 from password_reset import forgot_password_page, reset_password_page
 
 
+# ─── DB SYNC HELPERS ──────────────────────────────────────────────────────────
+
+def _bootstrap_db():
+    """Create missing tables silently on first authenticated load."""
+    try:
+        import database as db
+        db.ensure_tables()
+    except Exception:
+        pass   # offline / no DB — app still works with session_state only
+
+
+def _load_vice_log_from_db(user_id: int):
+    """
+    Populate st.session_state.vice_log from the database.
+    Only runs once per login session (guarded by vice_log_loaded flag).
+    """
+    if st.session_state.get("vice_log_loaded"):
+        return
+    try:
+        import database as db
+        entries = db.load_vice_log(user_id)
+        # DB entries are newest-first; session_state expects oldest-first (appended order)
+        st.session_state.vice_log = list(reversed(entries))
+    except Exception:
+        if "vice_log" not in st.session_state:
+            st.session_state.vice_log = []
+    finally:
+        st.session_state.vice_log_loaded = True
+
+
+# ─── SIDEBAR ──────────────────────────────────────────────────────────────────
+
 def render_sidebar():
     with st.sidebar:
         user = st.session_state.get("user", {})
@@ -49,8 +81,12 @@ def render_sidebar():
                     unsafe_allow_html=True)
 
         if st.button("→  Logout",                  use_container_width=True):
+            # Clear sync flag so next login re-fetches
+            st.session_state.pop("vice_log_loaded", None)
             logout()
 
+
+# ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 def main():
     st.set_page_config(
@@ -79,6 +115,14 @@ def main():
         else:
             login_page()
     else:
+        # ── First authenticated run ─────────────────────────────────────────
+        user    = st.session_state.get("user", {})
+        user_id = user.get("id") if user else None
+
+        if user_id:
+            _bootstrap_db()
+            _load_vice_log_from_db(user_id)
+
         render_sidebar()
         feature = st.session_state.selected_feature
 
