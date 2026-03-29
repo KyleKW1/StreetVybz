@@ -64,19 +64,19 @@ def main():
         feature = st.session_state.selected_feature
 
         if feature == 'log':
-            from pages.log_session import log_session_page
+            from Pages.log_session import log_session_page
             log_session_page()
         elif feature == 'history':
-            from pages.session_history import session_history_page
+            from Pages.session_history import session_history_page
             session_history_page()
         elif feature == 'analytics':
-            from pages.analytics import analytics_page
+            from Pages.analytics import analytics_page
             analytics_page()
         elif feature == 'wwyd':
-            from pages.what_would_you_do import what_would_you_do_page
+            from Pages.what_would_you_do import what_would_you_do_page
             what_would_you_do_page()
         else:
-            from pages.dashboard import dashboard_page
+            from Pages.dashboard import dashboard_page
             dashboard_page()
 
 
