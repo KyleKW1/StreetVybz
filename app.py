@@ -22,7 +22,7 @@ def render_sidebar():
 """, unsafe_allow_html=True)
 
         if st.button("◈  Dashboard", use_container_width=True):
-            st.session_state.selected_feature = None
+            st.session_state.selected_feature = 'stats'
             st.rerun()
         if st.button("＋  Log Session", use_container_width=True):
             st.session_state.selected_feature = 'log'
@@ -58,7 +58,7 @@ def main():
 
     for key, default in [
         ('authenticated', False), ('user', None), ('page', 'login'),
-        ('selected_feature', None), ('file_page', 0),
+        ('selected_feature', 'stats'), ('file_page', 0),
     ]:
         if key not in st.session_state:
             st.session_state[key] = default
@@ -79,22 +79,24 @@ def main():
         feature = st.session_state.selected_feature
 
         if feature == 'log':
-            from Pages.dashboard import dashboard_page
-            st.session_state._force_tab = 'log'
-            dashboard_page()
+            from Pages.dashboard import log_session_page
+            log_session_page()
+
         elif feature == 'history':
-            from Pages.dashboard import dashboard_page
-            st.session_state._force_tab = 'history'
-            dashboard_page()
+            from Pages.dashboard import history_page
+            history_page()
+
         elif feature == 'analytics':
             from Pages.analytics import analytics_page
             analytics_page()
+
         elif feature == 'wwyd':
             from Pages.what_would_you_do import what_would_you_do_page
             what_would_you_do_page()
-        else:
-            from Pages.dashboard import dashboard_page
-            dashboard_page()
+
+        else:  # 'stats' or default
+            from Pages.dashboard import stats_page
+            stats_page()
 
 
 if __name__ == "__main__":
