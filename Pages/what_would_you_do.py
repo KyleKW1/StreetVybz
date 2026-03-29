@@ -9,6 +9,8 @@ import streamlit as st
 import anthropic
 import json
 import random
+import google.generativeai as genai
+
 
 # ─── DIMENSIONS ───────────────────────────────────────────────────────────────
 
@@ -112,7 +114,7 @@ Example format: ["Recommendation one.", "Recommendation two.", ...]
 
 def get_client():
     try:
-        return anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+        return genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     except Exception:
         return anthropic.Anthropic()
 
