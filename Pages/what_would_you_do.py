@@ -56,58 +56,64 @@ PROFILES = [
 
 # ─── PROMPTS ──────────────────────────────────────────────────────────────────
 
-GENERATION_PROMPT = """You write questions for an adult desire-discovery quiz called "Read Between The Lines" inside a lifestyle app called Vice Vault.
+GENERATION_PROMPT = """You write questions for an adults-only desire quiz called "Read Between The Lines" inside a lifestyle app called Vice Vault. The audience is adults who have explicitly opted into this experience.
 
-The quiz reveals intimate preferences WITHOUT asking about anything directly.
-Every question must feel like a lifestyle or personality scenario on the surface.
-The person should not immediately realise what each question is measuring.
+The quiz is EXPLICITLY sexual in nature. Every question must be about sex, desire, fantasy, or intimate preferences — just phrased as a scenario or gut-reaction rather than a blunt question.
 
-Generate exactly 10 unique scenario-based questions. Each must:
-- Sound like an innocent preference or gut-reaction question on the surface
-- Actually measure one or more of these hidden dimensions:
-    control (dominant/submissive energy)
-    sensory (sensation and texture seeking)
-    exhib (exhibitionism / being watched)
-    dynamic (roleplay / persona / power games)
-    openness (willingness to experiment)
-    verbal (explicit communication / dirty talk)
-- Have exactly 4 answer options from least adventurous (score 0) to most (score 3)
-- Cover DIFFERENT scenarios — vary the settings, framings, moods
-- Feel fun, cheeky, a little daring — never clinical or medical
+The goal is to feel like a daring, cheeky quiz you'd find in a bold lifestyle magazine — the kind that makes you laugh, feel a little exposed, and want to show your partner.
+
+Generate exactly 10 questions. Each must:
+- Be clearly about sex, attraction, desire, or intimacy — not ambiguously lifestyle-coded
+- Measure one or more of these dimensions:
+    control — who leads, who follows, dominance and submission dynamics
+    sensory — physical sensation, touch, texture, intensity of physical experience
+    exhib — being watched, performing, public/semi-public desire, showing off
+    dynamic — roleplay, personas, power games, fantasy scenarios
+    openness — willingness to experiment sexually, taboo curiosity, non-monogamy
+    verbal — dirty talk, explicit communication, sound, language during sex
+- Have exactly 4 answer options, escalating from least adventurous (score 0) to most (score 3)
+- Feel exciting, a little provocative, honest — not clinical or sanitised
+
+Strong example questions (use as tone reference, not verbatim):
+- "Your partner says they want to try something new tonight and hands you a blindfold. Your first reaction?"
+- "You're in a hotel and realise the curtains are slightly open while you're with someone. You..."
+- "Your partner wants to talk through exactly what they want to do to you before anything happens. You feel..."
+- "Someone you're sleeping with suggests you both stay fully dressed for as long as possible. Your instinct is..."
+- "You're in a new situationship. They send you a voice note describing exactly what they've been thinking about. You..."
 
 Return ONLY valid JSON. No markdown fences, no explanation. Format:
 [
   {
-    "tag": "Short 2-3 word category label",
-    "text": "The question text",
+    "tag": "Short 2-3 word label (e.g. 'The Blindfold', 'Open Window', 'Say It Out Loud')",
+    "text": "The question or scenario text",
     "dims": {"dim_name": [score_for_opt0, score_for_opt1, score_for_opt2, score_for_opt3]},
     "opts": ["Option A text", "Option B text", "Option C text", "Option D text"]
   }
 ]
 
-Scores are integers 0-3. Map 1-2 dims per question.
-Make questions feel like something people would screenshot and send to a partner.
+Scores are integers 0-3. Each option should feel meaningfully different — not just "a little" vs "a lot".
+Make every question feel like it sees through the person answering it.
 """
 
-RECOMMENDATION_PROMPT = """You are a knowledgeable, sex-positive, non-judgmental desire analyst for Vice Vault, an adult lifestyle app.
+RECOMMENDATION_PROMPT = """You are a sex-positive, frank, and knowledgeable desire analyst for Vice Vault, an adult lifestyle app.
 
-A user just completed a desire profile quiz. Based on their dimension scores, write 5 personalised recommendations for experiences, scenarios, or dynamics they might genuinely enjoy exploring.
+A user just completed a desire profile quiz. Based on their scores, write 5 personalised recommendations for things they might enjoy exploring — specific experiences, scenarios, or dynamics.
 
-Dimension scores (0-100%):
+Dimension scores (0–100%):
 {scores}
 
-Profile type: {profile_name} — {profile_desc}
+Profile: {profile_name} — {profile_desc}
 
 Guidelines:
-- Be specific and evocative, not vague or generic
-- Frame each as something to explore or try — curious and inviting, not prescriptive
-- Scale from approachable to more adventurous based on their highest-scoring dims
-- Write like a knowledgeable, cool friend — not a therapist or a textbook
-- Each recommendation: 1-2 sentences max
-- Do NOT use bullet point characters or numbering in the strings themselves
+- Be specific, honest, and a little daring — this is an adults-only app
+- Reference actual sexual dynamics, scenarios, or experiences where relevant
+- Each rec should feel tailored to their exact score pattern, not generic
+- Tone: a knowledgeable, non-judgmental friend who's been around — not a therapist
+- 1-2 sentences per recommendation, max
+- Do NOT use bullet characters or numbering inside the strings
 
-Return ONLY a JSON array of exactly 5 recommendation strings. No markdown, no preamble.
-Example format: ["Recommendation one.", "Recommendation two.", ...]
+Return ONLY a JSON array of exactly 5 strings. No markdown, no preamble.
+["Recommendation one.", "Recommendation two.", ...]
 """
 
 # ─── OPENAI CLIENT ────────────────────────────────────────────────────────────
@@ -117,7 +123,7 @@ def call_openai(prompt: str) -> str:
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.9,
+        temperature=0.95,
     )
     return response.choices[0].message.content.strip()
 
@@ -242,7 +248,7 @@ def init_state():
         "kq_profile":   {},
         "kq_recs":      [],
         "kq_error":     "",
-        "kq_saved":     False,   # NEW: prevent duplicate DB writes
+        "kq_saved":     False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -270,7 +276,7 @@ def render_header():
     READ<br><span style="color:var(--magenta);">BETWEEN</span><br>THE LINES
   </div>
   <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
-              letter-spacing:2px; text-transform:uppercase;">AI-generated · Different every time</div>
+              letter-spacing:2px; text-transform:uppercase;">AI-generated · Different every time · 18+</div>
 </div>
 """)
 
@@ -286,16 +292,17 @@ def render_start():
             padding:28px; margin-bottom:16px;">
   <p style="font-family:'DM Sans',sans-serif; font-size:15px; color:var(--soft);
              line-height:1.9; text-align:center; margin-bottom:20px; font-style:italic;">
-    No direct questions.<br>
-    No obvious answers.<br>
-    Just scenarios — and what your choices reveal about what you actually want.
+    No obvious questions.<br>
+    No sanitised answers.<br>
+    Just scenarios — and what your instincts say about what you actually want.
   </p>
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:8px;">What you get</div>
+              text-transform:uppercase; color:var(--muted); margin-bottom:8px;">What happens</div>
   <p style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); line-height:1.8; margin:0;">
-    AI generates 10 brand-new scenarios every session — no two quizzes are the same.
-    Your answers build a desire profile across 6 hidden dimensions, then AI writes
-    personalised exploration recommendations just for you. Results are saved to your profile.
+    10 fresh scenarios generated every time — no two quizzes are identical.
+    Your answers build a desire profile across 6 dimensions covering power, sensation,
+    exhibitionism, roleplay, openness, and verbal intensity. Then AI writes
+    recommendations tailored specifically to your pattern. Results are saved to your profile.
   </p>
 </div>
 """)
@@ -468,14 +475,13 @@ def render_generating_result():
         if not isinstance(recs, list):
             recs = []
 
-        # Build percentage dict for storage
         dim_scores_pct = {d: _dim_pct(scores, dim_max, d) for d in DIMS}
 
         st.session_state.kq_scores    = scores
         st.session_state.kq_dimmax    = dim_max
         st.session_state.kq_profile   = profile
         st.session_state.kq_recs      = recs
-        st.session_state.kq_dim_pct   = dim_scores_pct   # store for DB save
+        st.session_state.kq_dim_pct   = dim_scores_pct
         st.session_state.kq_total_pct = tot
         st.session_state.kq_phase     = "result"
         st.session_state.kq_saved     = False
@@ -495,7 +501,6 @@ def render_result():
     dim_max = st.session_state.get("kq_dimmax", {d: 1 for d in DIMS})
     recs    = st.session_state.get("kq_recs", [])
 
-    # ── Save to DB once ───────────────────────────────────────────────────────
     if not st.session_state.get("kq_saved"):
         _save_result_to_db(
             profile        = profile,
@@ -568,7 +573,6 @@ def render_result():
 </div>
 """)
 
-    # Saved indicator
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
             text-transform:uppercase; color:var(--muted); text-align:center; margin-top:8px;">
