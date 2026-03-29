@@ -1,6 +1,7 @@
 """
 Pages/what_would_you_do.py
 Live Reddit-powered sexual taboo quiz.
+Parallel fetch with ThreadPoolExecutor for fast cold loads.
 Falls back to curated posts if Reddit is blocked.
 """
 
@@ -9,6 +10,7 @@ import json
 import random
 import time
 import anthropic
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 
@@ -19,13 +21,13 @@ SUBREDDITS = [
 ]
 
 TABOO_KEYWORDS = [
-    "threesome", "3some", "third", "open relationship", "swinger", "polyamory",
+    "threesome", "3some", "open relationship", "swinger", "polyamory",
     "fantasy", "attracted to", "cheated", "affair", "tempted", "curious about",
     "another person", "someone else", "bring someone", "invite", "experiment",
     "exploring", "never told anyone", "taboo", "forbidden", "secret",
     "want to try", "thinking about", "nonmonogamy", "ethical non",
-    "open marriage", "hotwife", "group", "voyeur", "exhibitionist",
-    "fmf", "mmf", "confession", "told my partner", "my partner told me",
+    "open marriage", "group", "voyeur", "exhibitionist",
+    "fmf", "mfm", "confession", "told my partner", "my partner told me",
     "we tried", "we talked about",
 ]
 
@@ -33,6 +35,7 @@ MIN_SCORE  = 50
 MIN_LENGTH = 200
 POST_COUNT = 10
 
+# Curated fallback posts — used when Reddit is unreachable
 FALLBACK_POSTS = [
     {"sub":"r/relationship_advice","avatar":"T","user":"throwaway_82947","title":"My partner and I accidentally started a conversation we can't take back","text":"We've been together three years. Last Saturday we had some friends over and after everyone left, one of them made a joke about how 'it's a shame you two are taken.' Nobody laughed it off. There was this long pause where we all just looked at each other. My partner and I talked about it after they left and it turned into a two-hour conversation about things we'd never said out loud before. I don't know what we're doing but I don't feel scared about it.","upvotes":"14.2k","comments":"832","time":"6 hours ago","url":"https://reddit.com/r/relationship_advice","flair":"Long Post"},
     {"sub":"r/confessions","avatar":"A","user":"anon_user_2291","title":"I told my best friend exactly what happens in our bedroom because she asked — my partner walked in halfway through","text":"She's been single for a while and we were deep in a wine conversation when she said she was jealous — not of my relationship, specifically of the intimacy. She asked if I'd describe what it's actually like. I did. In detail. My partner walked in halfway through and just sat down and listened. Nobody was uncomfortable. Nobody said 'that's too much information.' When she left, my partner said, 'I didn't mind that.' We haven't talked about what that means yet.","upvotes":"9.7k","comments":"1.2k","time":"2 days ago","url":"https://reddit.com/r/confessions","flair":"True Story"},
@@ -86,67 +89,94 @@ def is_taboo(title: str, body: str) -> bool:
 def fmt_num(n: int) -> str:
     return f"{n/1000:.1f}k" if n >= 1000 else str(n)
 
-# ─── REDDIT FETCH ─────────────────────────────────────────────────────────────
+# ─── FAST PARALLEL REDDIT FETCH ───────────────────────────────────────────────
+
+def _fetch_one(args) -> list:
+    """
+    Fetch a single subreddit/sort combo.
+    Tries direct first (3 s timeout), then one proxy fallback.
+    Returns a list of filtered post dicts (may be empty).
+    """
+    import requests
+    sub, sort = args
+    reddit_url = f"https://www.reddit.com/r/{sub}/{sort}.json?limit=25"
+    if sort == "top":
+        reddit_url += "&t=month"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; QuizApp/1.0)",
+        "Accept": "application/json",
+    }
+    attempts = [
+        ("direct",  reddit_url),
+        ("proxy",   "https://api.allorigins.win/raw?url=" + reddit_url),
+    ]
+
+    for method, url in attempts:
+        try:
+            r = requests.get(url, headers=headers, timeout=4)
+            if not r.ok:
+                continue
+            data = r.json()
+            if "contents" in data:          # allorigins wrapper
+                data = json.loads(data["contents"])
+            children = data.get("data", {}).get("children", [])
+            if not children:
+                continue
+
+            posts = []
+            for item in children:
+                pd = item.get("data", {})
+                body  = pd.get("selftext", "")
+                title = pd.get("title", "")
+                if not body or len(body) < MIN_LENGTH:         continue
+                if pd.get("score", 0) < MIN_SCORE:             continue
+                if pd.get("stickied") or pd.get("pinned"):     continue
+                if body in ("[deleted]", "[removed]"):          continue
+                if not is_taboo(title, body):                  continue
+                posts.append({
+                    "sub":      f"r/{sub}",
+                    "avatar":   (pd.get("author") or "A")[0].upper(),
+                    "user":     pd.get("author", "anonymous"),
+                    "title":    title,
+                    "text":     body[:900].strip(),
+                    "upvotes":  fmt_num(pd.get("score", 0)),
+                    "comments": fmt_num(pd.get("num_comments", 0)),
+                    "time":     time_ago(pd.get("created_utc", time.time())),
+                    "url":      "https://reddit.com" + pd.get("permalink", ""),
+                    "flair":    pd.get("link_flair_text") or sub.replace("_", " ").title(),
+                })
+            return posts        # success — return whatever we found
+
+        except Exception:
+            continue            # try next method
+
+    return []                   # both methods failed
+
 
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_posts() -> list:
-    import requests
-    PROXIES = [
-        "https://api.allorigins.win/raw?url=",
-        "https://corsproxy.io/?",
-        "",
-    ]
-    all_posts = []
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (compatible; QuizApp/1.0)",
-        "Accept": "application/json",
-    })
-    for sub in SUBREDDITS[:5]:
-        for sort in ["hot", "top"]:
-            reddit_url = f"https://www.reddit.com/r/{sub}/{sort}.json?limit=40"
-            if sort == "top":
-                reddit_url += "&t=month"
-            fetched = False
-            for proxy in PROXIES:
-                try:
-                    url = proxy + reddit_url if proxy else reddit_url
-                    r = session.get(url, timeout=8)
-                    if not r.ok:
-                        continue
-                    data = r.json()
-                    if "contents" in data:
-                        data = json.loads(data["contents"])
-                    children = data.get("data", {}).get("children", [])
-                    if not children:
-                        continue
-                    for item in children:
-                        pd = item.get("data", {})
-                        body  = pd.get("selftext", "")
-                        title = pd.get("title", "")
-                        if not body or len(body) < MIN_LENGTH:         continue
-                        if pd.get("score", 0) < MIN_SCORE:             continue
-                        if pd.get("stickied") or pd.get("pinned"):     continue
-                        if body in ("[deleted]", "[removed]"):          continue
-                        if not is_taboo(title, body):                  continue
-                        all_posts.append({
-                            "sub":      f"r/{sub}",
-                            "avatar":   (pd.get("author") or "A")[0].upper(),
-                            "user":     pd.get("author", "anonymous"),
-                            "title":    title,
-                            "text":     body[:900].strip(),
-                            "upvotes":  fmt_num(pd.get("score", 0)),
-                            "comments": fmt_num(pd.get("num_comments", 0)),
-                            "time":     time_ago(pd.get("created_utc", time.time())),
-                            "url":      "https://reddit.com" + pd.get("permalink", ""),
-                            "flair":    pd.get("link_flair_text") or sub.replace("_", " ").title(),
-                        })
-                    fetched = True
-                    break
-                except Exception:
-                    continue
-            if fetched:
-                time.sleep(0.3)
+    """
+    Fire all subreddit requests in parallel using ThreadPoolExecutor.
+    Falls back to FALLBACK_POSTS if nothing comes through.
+
+    Speed improvement over serial fetch:
+      Before: ~8 subs × ~3 s each = 24 s worst-case
+      After:  all fire at once    = ~3–5 s total
+    """
+    # Only "hot" — cuts requests in half; still yields enough posts
+    tasks = [(sub, "hot") for sub in SUBREDDITS]
+
+    all_posts: list = []
+    # max_workers = number of tasks so they all fire simultaneously
+    with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+        futures = {pool.submit(_fetch_one, t): t for t in tasks}
+        for future in as_completed(futures):
+            try:
+                all_posts.extend(future.result())
+            except Exception:
+                pass
+
     if all_posts:
         random.shuffle(all_posts)
         seen, unique = set(), []
@@ -155,6 +185,8 @@ def fetch_posts() -> list:
                 seen.add(p["title"])
                 unique.append(p)
         return unique[:POST_COUNT * 2]
+
+    # Fallback — guaranteed to work
     posts = FALLBACK_POSTS.copy()
     random.shuffle(posts)
     return posts[:POST_COUNT]
@@ -222,7 +254,6 @@ def inject_css():
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=DM+Mono:wght@400;500&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
 <style>
 
-/* ── Reset & Base ── */
 section.main .block-container {
     padding-top: 0.5rem !important;
     padding-bottom: 2rem !important;
@@ -238,441 +269,229 @@ section.main .block-container {
     --rouge-dim: rgba(192,57,43,0.12);
     --rouge-border: rgba(192,57,43,0.3);
     --gold: #b8922a;
-    --gold-dim: rgba(184,146,42,0.15);
     --charcoal: #2a2826;
     --ash: #6b6560;
     --mist: #9e9891;
     --rule: #d4cfc5;
-    --selected-bg: #1a1714;
-    --selected-text: #f5f2eb;
 }
 
-/* ── Page background ── */
-.stApp {
-    background: var(--paper) !important;
-}
-section[data-testid="stMain"] {
-    background: var(--paper) !important;
-}
+.stApp { background: var(--paper) !important; }
+section[data-testid="stMain"] { background: var(--paper) !important; }
 
-/* ── Sidebar overrides ── */
+/* Sidebar */
 section[data-testid="stSidebar"] {
     background: #121110 !important;
     border-right: 1px solid #2a2826 !important;
 }
+section[data-testid="stSidebar"] * { color: #c8c2b8 !important; }
 section[data-testid="stSidebar"] .stButton > button {
     background: transparent !important;
-    border: 1px solid #2a2826 !important;
-    color: #c8c2b8 !important;
+    border: 1px solid #2a2826 !important; color: #c8c2b8 !important;
     border-radius: 4px !important;
-    font-family: 'DM Mono', monospace !important;
-    font-size: 11px !important;
-    letter-spacing: 0.5px !important;
-    text-transform: uppercase !important;
+    font-family: 'Lato', sans-serif !important;
+    font-size: 12.5px !important; font-weight: 600 !important;
+    text-transform: none !important; letter-spacing: 0 !important;
     transition: all 0.2s !important;
 }
 section[data-testid="stSidebar"] .stButton > button:hover {
-    background: #1e1c1a !important;
-    border-color: var(--rouge) !important;
-    color: var(--paper) !important;
-    transform: none !important;
-    box-shadow: none !important;
+    background: #1e1c1a !important; border-color: var(--rouge) !important;
+    color: var(--paper) !important; box-shadow: none !important; transform: none !important;
 }
 
-/* ── Global button reset ── */
+/* Buttons */
 .stButton > button {
-    background: var(--charcoal) !important;
-    color: var(--paper) !important;
-    border: 1px solid var(--charcoal) !important;
-    border-radius: 3px !important;
+    background: var(--charcoal) !important; color: var(--paper) !important;
+    border: 1px solid var(--charcoal) !important; border-radius: 3px !important;
     font-family: 'DM Mono', monospace !important;
-    font-size: 11px !important;
-    letter-spacing: 1.5px !important;
-    text-transform: uppercase !important;
-    padding: 10px 20px !important;
-    transition: all 0.2s ease !important;
-    font-weight: 500 !important;
-    box-shadow: none !important;
+    font-size: 11px !important; letter-spacing: 1.5px !important;
+    text-transform: uppercase !important; padding: 10px 20px !important;
+    transition: all 0.2s ease !important; box-shadow: none !important; font-weight: 500 !important;
 }
 .stButton > button:hover {
-    background: var(--ink) !important;
-    border-color: var(--ink) !important;
-    transform: none !important;
-    box-shadow: 2px 2px 0 var(--rouge) !important;
+    background: var(--ink) !important; border-color: var(--ink) !important;
+    box-shadow: 2px 2px 0 var(--rouge) !important; transform: none !important;
 }
-
-/* Secondary buttons */
 .stButton > button[kind="secondary"] {
-    background: transparent !important;
-    color: var(--ash) !important;
+    background: transparent !important; color: var(--ash) !important;
     border: 1px solid var(--rule) !important;
 }
 .stButton > button[kind="secondary"]:hover {
-    background: var(--cream) !important;
-    color: var(--charcoal) !important;
-    border-color: var(--charcoal) !important;
-    box-shadow: none !important;
+    background: var(--cream) !important; color: var(--charcoal) !important;
+    border-color: var(--charcoal) !important; box-shadow: none !important;
 }
-
-/* Primary buttons */
 .stButton > button[kind="primary"] {
-    background: var(--charcoal) !important;
-    color: var(--paper) !important;
+    background: var(--charcoal) !important; color: var(--paper) !important;
     border: 1px solid var(--charcoal) !important;
 }
-.stButton > button[kind="primary"]:hover {
-    background: var(--ink) !important;
-    box-shadow: 3px 3px 0 var(--rouge) !important;
-}
-.stButton > button[kind="primary"]:disabled {
-    background: var(--rule) !important;
-    color: var(--mist) !important;
-    border-color: var(--rule) !important;
-    box-shadow: none !important;
-    cursor: not-allowed !important;
+.stButton > button[kind="primary"]:hover { box-shadow: 3px 3px 0 var(--rouge) !important; }
+.stButton > button[kind="primary"]:disabled,
+.stButton > button[kind="primary"][disabled] {
+    background: var(--rule) !important; color: var(--mist) !important;
+    border-color: var(--rule) !important; box-shadow: none !important;
 }
 
-/* ── Header ── */
+/* Masthead */
 .wwyd-masthead {
-    text-align: center;
-    padding: 40px 0 32px;
-    border-bottom: 2px solid var(--charcoal);
-    margin-bottom: 32px;
-    position: relative;
+    text-align: center; padding: 40px 0 32px;
+    border-bottom: 2px solid var(--charcoal); margin-bottom: 32px;
 }
 .wwyd-kicker {
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 4px;
-    text-transform: uppercase;
-    color: var(--rouge);
-    margin-bottom: 14px;
-    display: block;
+    font-family: 'DM Mono', monospace; font-size: 9px;
+    letter-spacing: 4px; text-transform: uppercase;
+    color: var(--rouge); margin-bottom: 14px; display: block;
 }
 .wwyd-headline {
     font-family: 'Playfair Display', serif;
-    font-size: clamp(42px, 9vw, 72px);
-    font-weight: 900;
-    line-height: 0.92;
-    color: var(--ink);
-    margin: 0;
-    letter-spacing: -1px;
+    font-size: clamp(42px, 9vw, 72px); font-weight: 900;
+    line-height: 0.92; color: var(--ink); margin: 0; letter-spacing: -1px;
 }
-.wwyd-headline em {
-    font-style: italic;
-    color: var(--rouge);
-}
+.wwyd-headline em { font-style: italic; color: var(--rouge); }
 .wwyd-deck {
-    font-family: 'Lato', sans-serif;
-    font-size: 12px;
-    color: var(--ash);
-    margin-top: 14px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
+    font-family: 'Lato', sans-serif; font-size: 12px;
+    color: var(--ash); margin-top: 14px; letter-spacing: 2px; text-transform: uppercase;
 }
 .live-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: var(--rouge-dim);
-    border: 1px solid var(--rouge-border);
-    border-radius: 2px;
-    padding: 5px 14px;
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--rouge);
-    margin-top: 16px;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--rouge-dim); border: 1px solid var(--rouge-border);
+    border-radius: 2px; padding: 5px 14px;
+    font-family: 'DM Mono', monospace; font-size: 9px;
+    letter-spacing: 2px; text-transform: uppercase;
+    color: var(--rouge); margin-top: 16px;
 }
 .live-pip {
-    width: 5px; height: 5px;
-    border-radius: 50%;
-    background: var(--rouge);
+    width: 5px; height: 5px; border-radius: 50%; background: var(--rouge);
     animation: blink 1.4s ease-in-out infinite;
 }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
 
-/* ── Cards ── */
+/* Cards */
 .card {
-    background: var(--warm-white);
-    border: 1px solid var(--rule);
-    border-top: 3px solid var(--charcoal);
-    padding: 28px 24px;
-    margin-bottom: 16px;
+    background: var(--warm-white); border: 1px solid var(--rule);
+    border-top: 3px solid var(--charcoal); padding: 28px 24px; margin-bottom: 16px;
 }
 
-/* ── Reddit post card ── */
+/* Reddit post */
 .post-wrap {
-    background: white;
-    border: 1px solid var(--rule);
-    margin-bottom: 20px;
-    overflow: hidden;
+    background: white; border: 1px solid var(--rule); margin-bottom: 20px; overflow: hidden;
 }
 .post-top {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 14px 16px 0;
-    border-bottom: 1px solid var(--rule);
-    padding-bottom: 12px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px 12px; border-bottom: 1px solid var(--rule);
 }
 .post-avatar {
-    width: 32px; height: 32px;
-    border-radius: 50%;
-    background: var(--charcoal);
-    color: var(--paper);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Playfair Display', serif;
-    font-size: 14px;
-    font-weight: 700;
-    flex-shrink: 0;
+    width: 32px; height: 32px; border-radius: 50%; background: var(--charcoal);
+    color: var(--paper); display: flex; align-items: center; justify-content: center;
+    font-family: 'Playfair Display', serif; font-size: 14px; font-weight: 700; flex-shrink: 0;
 }
-.post-meta-sub {
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    color: var(--rouge);
-    font-weight: 500;
-}
-.post-meta-info {
-    font-family: 'Lato', sans-serif;
-    font-size: 10px;
-    color: var(--mist);
-    margin-top: 1px;
-}
+.post-meta-sub { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--rouge); }
+.post-meta-info { font-family: 'Lato', sans-serif; font-size: 10px; color: var(--mist); margin-top: 1px; }
 .post-flair-tag {
-    margin-left: auto;
-    font-family: 'DM Mono', monospace;
-    font-size: 8px;
-    letter-spacing: 1px;
-    padding: 3px 10px;
-    border: 1px solid var(--rule);
-    color: var(--ash);
-    text-transform: uppercase;
-    white-space: nowrap;
-    border-radius: 2px;
+    margin-left: auto; font-family: 'DM Mono', monospace; font-size: 8px;
+    letter-spacing: 1px; padding: 3px 10px; border: 1px solid var(--rule);
+    color: var(--ash); text-transform: uppercase; white-space: nowrap; border-radius: 2px;
 }
-.post-body-inner {
-    padding: 16px;
-}
+.post-body-inner { padding: 16px; }
 .post-headline {
-    font-family: 'Playfair Display', serif;
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--ink);
-    line-height: 1.45;
-    margin-bottom: 10px;
+    font-family: 'Playfair Display', serif; font-size: 15px; font-weight: 700;
+    color: var(--ink); line-height: 1.45; margin-bottom: 10px;
 }
-.post-excerpt {
-    font-family: 'Lato', sans-serif;
-    font-size: 12.5px;
-    color: var(--ash);
-    line-height: 1.9;
-}
+.post-excerpt { font-family: 'Lato', sans-serif; font-size: 12.5px; color: var(--ash); line-height: 1.9; }
 .post-footer-bar {
-    border-top: 1px solid var(--rule);
-    padding: 10px 16px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    background: var(--cream);
+    border-top: 1px solid var(--rule); padding: 10px 16px;
+    display: flex; align-items: center; gap: 16px; background: var(--cream);
 }
-.post-stat {
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    color: var(--mist);
-}
+.post-stat { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--mist); }
 .post-reddit-link {
-    margin-left: auto;
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 1px;
-    color: var(--rouge);
-    text-decoration: none;
-    text-transform: uppercase;
+    margin-left: auto; font-family: 'DM Mono', monospace; font-size: 9px;
+    letter-spacing: 1px; color: var(--rouge); text-decoration: none; text-transform: uppercase;
 }
 
-/* ── Progress bar ── */
-.progress-row {
-    display: flex;
-    gap: 3px;
-    margin-bottom: 22px;
-}
-.prog-seg {
-    height: 2px;
-    flex: 1;
-    background: var(--rule);
-}
+/* Progress */
+.progress-row { display: flex; gap: 3px; margin-bottom: 22px; }
+.prog-seg { height: 2px; flex: 1; background: var(--rule); }
 .prog-seg.done { background: var(--charcoal); }
 .prog-seg.now  { background: var(--rouge); }
 
-/* ── Question prompt ── */
+/* Question prompt */
 .q-prompt-text {
-    font-family: 'Playfair Display', serif;
-    font-style: italic;
-    font-size: 14px;
-    color: var(--gold);
-    border-left: 2px solid var(--gold);
-    padding-left: 12px;
-    margin-bottom: 18px;
-    line-height: 1.65;
+    font-family: 'Playfair Display', serif; font-style: italic;
+    font-size: 14px; color: var(--gold);
+    border-left: 2px solid var(--gold); padding-left: 12px;
+    margin-bottom: 18px; line-height: 1.65;
 }
 
-/* ── Source note ── */
+/* Source footnote */
 .source-footnote {
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    color: var(--mist);
-    text-align: center;
-    letter-spacing: 1px;
-    margin-top: 8px;
-    text-transform: uppercase;
+    font-family: 'DM Mono', monospace; font-size: 9px; color: var(--mist);
+    text-align: center; letter-spacing: 1px; margin-top: 8px; text-transform: uppercase;
 }
 .source-footnote a { color: var(--rouge); text-decoration: none; }
 
-/* ── Start page pills ── */
-.sub-pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 8px;
-}
+/* Start page */
+.sub-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .sub-pill {
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    padding: 4px 10px;
-    border: 1px solid var(--rule);
-    border-radius: 2px;
-    color: var(--ash);
-    background: white;
+    font-family: 'DM Mono', monospace; font-size: 9px;
+    padding: 4px 10px; border: 1px solid var(--rule);
+    border-radius: 2px; color: var(--ash); background: white;
 }
-.info-section {
-    background: white;
-    border: 1px solid var(--rule);
-    padding: 16px;
-    margin-bottom: 10px;
-}
+.info-section { background: white; border: 1px solid var(--rule); padding: 16px; margin-bottom: 10px; }
 .info-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--rouge);
-    margin-bottom: 8px;
+    font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--rouge); margin-bottom: 8px;
 }
-.info-body {
-    font-family: 'Lato', sans-serif;
-    font-size: 12.5px;
-    color: var(--ash);
-    line-height: 1.8;
-    margin: 0;
-}
+.info-body { font-family: 'Lato', sans-serif; font-size: 12.5px; color: var(--ash); line-height: 1.8; margin: 0; }
 .start-lede {
-    font-family: 'Playfair Display', serif;
-    font-size: 17px;
-    color: var(--charcoal);
-    line-height: 1.7;
-    text-align: center;
-    margin-bottom: 24px;
-    font-style: italic;
+    font-family: 'Playfair Display', serif; font-size: 17px;
+    color: var(--charcoal); line-height: 1.7; text-align: center;
+    margin-bottom: 24px; font-style: italic;
 }
 
-/* ── Result ── */
+/* Result */
 .result-icon { font-size: 52px; text-align: center; display: block; margin-bottom: 12px; }
 .result-name {
-    font-family: 'Playfair Display', serif;
-    font-size: clamp(28px, 6vw, 44px);
-    font-weight: 900;
-    color: var(--ink);
-    text-align: center;
-    margin-bottom: 4px;
-    line-height: 1.1;
+    font-family: 'Playfair Display', serif; font-size: clamp(28px, 6vw, 44px);
+    font-weight: 900; color: var(--ink); text-align: center; margin-bottom: 4px; line-height: 1.1;
 }
 .result-meta {
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 2px;
-    color: var(--gold);
-    text-transform: uppercase;
-    text-align: center;
-    margin-bottom: 18px;
+    font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 2px;
+    color: var(--gold); text-transform: uppercase; text-align: center; margin-bottom: 18px;
 }
-.result-desc {
-    font-family: 'Lato', sans-serif;
-    font-size: 13.5px;
-    color: var(--ash);
-    line-height: 1.9;
-    text-align: center;
-    margin-bottom: 24px;
-}
-.meter-box {
-    background: white;
-    border: 1px solid var(--rule);
-    padding: 20px;
-    margin-bottom: 20px;
-}
+.result-desc { font-family: 'Lato', sans-serif; font-size: 13.5px; color: var(--ash); line-height: 1.9; text-align: center; margin-bottom: 24px; }
+.meter-box { background: white; border: 1px solid var(--rule); padding: 20px; margin-bottom: 20px; }
 .meter-label-text {
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--mist);
-    margin-bottom: 12px;
+    font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--mist); margin-bottom: 12px;
 }
-.meter-track {
-    height: 6px;
-    background: var(--rule);
-    margin-bottom: 8px;
-}
-.meter-fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--gold), var(--rouge));
-}
+.meter-track { height: 6px; background: var(--rule); margin-bottom: 8px; }
+.meter-fill { height: 100%; background: linear-gradient(90deg, var(--gold), var(--rouge)); }
 .meter-ends {
-    display: flex;
-    justify-content: space-between;
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    color: var(--mist);
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    display: flex; justify-content: space-between;
+    font-family: 'DM Mono', monospace; font-size: 9px;
+    color: var(--mist); text-transform: uppercase; letter-spacing: 1px;
 }
 .meter-big-score {
-    font-family: 'Playfair Display', serif;
-    font-size: 48px;
-    font-weight: 900;
-    color: var(--ink);
-    line-height: 1;
-    margin-top: 10px;
+    font-family: 'Playfair Display', serif; font-size: 48px;
+    font-weight: 900; color: var(--ink); line-height: 1; margin-top: 10px;
 }
-.meter-big-score small {
-    font-family: 'Lato', sans-serif;
-    font-size: 14px;
-    color: var(--mist);
-    font-weight: 300;
+.meter-big-score small { font-family: 'Lato', sans-serif; font-size: 14px; color: var(--mist); font-weight: 300; }
+.divider-rule { border: none; border-top: 1px solid var(--rule); margin: 24px 0; }
+
+/* Progress bar color */
+.stProgress > div > div > div { background: var(--rouge) !important; }
+
+/* Download button */
+.stDownloadButton > button {
+    background: transparent !important; color: var(--charcoal) !important;
+    border: 1px solid var(--rule) !important; border-radius: 2px !important;
+    font-family: 'DM Mono', monospace !important; font-size: 10px !important;
+    letter-spacing: 1.5px !important; text-transform: uppercase !important;
 }
-.divider-rule {
-    border: none;
-    border-top: 1px solid var(--rule);
-    margin: 24px 0;
-}
-.curated-note {
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    color: var(--gold);
-    text-align: center;
-    letter-spacing: 1px;
-    padding: 8px;
-    text-transform: uppercase;
-    opacity: 0.8;
+.stDownloadButton > button:hover {
+    border-color: var(--charcoal) !important; background: var(--cream) !important; box-shadow: none !important;
 }
 
-/* ── Loading ── */
-.stProgress > div > div > div {
-    background: var(--rouge) !important;
-}
+#MainMenu { visibility: hidden; }
+footer    { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -695,7 +514,6 @@ def render_start():
         st.session_state.wwyd_error = ""
 
     subs_html = "".join(f'<span class="sub-pill">r/{s}</span>' for s in SUBREDDITS)
-
     st.markdown(f"""
 <p class="start-lede">
   Real scenarios pulled from Reddit.<br>
@@ -709,7 +527,7 @@ def render_start():
 <div class="info-section">
   <div class="info-label">How it works</div>
   <p class="info-body">
-    Taboo posts about open relationships, confessions, and intimate curiosity are fetched and filtered.
+    Posts about open relationships, confessions, and intimate curiosity are fetched in parallel and filtered.
     AI writes a personal question for each one. Your answers build your Openness Profile.
   </p>
 </div>
@@ -732,11 +550,10 @@ def render_loading():
         ph_status.caption(status)
 
     try:
-        upd("Fetching scenarios…", 5, "Connecting to Reddit")
+        upd("Fetching scenarios in parallel…", 5, "Firing all requests simultaneously")
         posts = fetch_posts()
 
-        upd("Filtering posts…", 20, f"Found {len(posts)} relevant scenarios")
-        time.sleep(0.2)
+        upd("Posts loaded.", 30, f"Found {len(posts)} relevant scenarios")
 
         try:
             client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
@@ -747,7 +564,7 @@ def render_loading():
         questions = []
 
         for i, post in enumerate(selected):
-            pct = 25 + int((i / len(selected)) * 70)
+            pct = 35 + int((i / len(selected)) * 60)
             upd("Generating questions…", pct, f"Question {i+1} of {len(selected)}")
             try:
                 q_data = generate_question(post, client)
@@ -760,7 +577,7 @@ def render_loading():
                 })
 
         upd("Almost ready…", 98, "Preparing your quiz")
-        time.sleep(0.3)
+        time.sleep(0.2)
 
         st.session_state.wwyd_questions = questions
         st.session_state.wwyd_answers   = [None] * len(questions)
@@ -788,7 +605,6 @@ def render_quiz():
     is_last   = cur == total - 1
     selected  = answers[cur]
 
-    # Progress bar
     segs = "".join(
         f'<div class="prog-seg {"done" if i < cur else "now" if i == cur else ""}"></div>'
         for i in range(total)
@@ -819,16 +635,13 @@ def render_quiz():
 <div class="q-prompt-text">{q['prompt']}</div>
 """, unsafe_allow_html=True)
 
-    # Answer options
     for i, opt in enumerate(q["opts"]):
         is_sel = selected == i
-        prefix = "◆  " if is_sel else ""
-        btn_type = "primary" if is_sel else "secondary"
         if st.button(
-            prefix + opt["t"],
+            ("◆  " if is_sel else "") + opt["t"],
             key=f"opt_{cur}_{i}",
             use_container_width=True,
-            type=btn_type,
+            type="primary" if is_sel else "secondary",
         ):
             st.session_state.wwyd_answers[cur] = i
             st.rerun()
@@ -841,7 +654,7 @@ def render_quiz():
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
-    col_back, col_next = st.columns([1, 1])
+    col_back, col_next = st.columns(2)
     with col_back:
         if cur > 0:
             if st.button("← Back", key="back_btn", use_container_width=True, type="secondary"):
