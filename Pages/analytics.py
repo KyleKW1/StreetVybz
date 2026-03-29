@@ -7,7 +7,7 @@ from collections import defaultdict
 
 
 def inject_css():
-    st.markdown("""
+    st.html("""
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -51,7 +51,7 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 }
 #MainMenu { visibility:hidden; } footer { visibility:hidden; }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 
 VICE_META = {
@@ -77,7 +77,7 @@ def entries_in_range(days: int):
 def analytics_page():
     inject_css()
 
-    st.markdown("""
+    st.html("""
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
               text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Vice Vault</div>
@@ -89,12 +89,12 @@ def analytics_page():
     Patterns don't lie.
   </div>
 </div>
-""", unsafe_allow_html=True)
+""")
 
     log = get_log()
 
     if not log:
-        st.markdown("""
+        st.html("""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:60px; text-align:center;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:3px;
@@ -103,7 +103,7 @@ def analytics_page():
     Log some sessions on the dashboard first.
   </div>
 </div>
-""", unsafe_allow_html=True)
+""")
         return
 
     # ── Period selector ───────────────────────────────────────────────────────
@@ -119,18 +119,18 @@ def analytics_page():
         return
 
     # ── Summary cards ─────────────────────────────────────────────────────────
-    st.markdown("""
+    st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
             text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
   Summary
 </div>
-""", unsafe_allow_html=True)
+""")
 
     counts = {vk: len([e for e in entries if e["vice"] == vk]) for vk in VICE_META}
     cols = st.columns(4)
     for i, (vk, meta) in enumerate(VICE_META.items()):
         with cols[i]:
-            st.markdown(f"""
+            st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-top:2px solid {meta['color']}; border-radius:4px; padding:16px 18px;">
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
@@ -139,17 +139,17 @@ def analytics_page():
               line-height:1;">{counts[vk]}</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:10px; color:var(--soft);">sessions</div>
 </div>
-""", unsafe_allow_html=True)
+""")
 
-    st.markdown("<div style='height:1.5rem'></div>", unsafe_allow_html=True)
+    st.html("<div style='height:1.5rem'></div>")
 
     # ── Weekly frequency chart (ASCII-style bars) ─────────────────────────────
-    st.markdown("""
+    st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
             text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
   Weekly Frequency
 </div>
-""", unsafe_allow_html=True)
+""")
 
     # Group entries by week
     week_counts = defaultdict(int)
@@ -177,21 +177,21 @@ def analytics_page():
 </div>"""
         bars_html += '</div>'
 
-        st.markdown(f"""
+        st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px; padding:20px;">
   {bars_html}
 </div>
-""", unsafe_allow_html=True)
+""")
 
-    st.markdown("<div style='height:1.5rem'></div>", unsafe_allow_html=True)
+    st.html("<div style='height:1.5rem'></div>")
 
     # ── Vice share pie (CSS-based) ────────────────────────────────────────────
-    st.markdown("""
+    st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
             text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
   Share of Sessions
 </div>
-""", unsafe_allow_html=True)
+""")
 
     col_pie, col_legend = st.columns([1, 2])
     with col_pie:
@@ -202,32 +202,32 @@ def analytics_page():
             stops.append(f"{meta['color']} {pct_acc:.1f}% {pct_acc + pct:.1f}%")
             pct_acc += pct
         conic = ", ".join(stops)
-        st.markdown(f"""
+        st.html(f"""
 <div style="width:120px; height:120px; border-radius:50%;
             background:conic-gradient({conic});
             margin:0 auto;"></div>
-""", unsafe_allow_html=True)
+""")
 
     with col_legend:
         for vk, meta in VICE_META.items():
             pct = (counts[vk] / total * 100) if total else 0
-            st.markdown(f"""
+            st.html(f"""
 <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
   <div style="width:10px; height:10px; background:{meta['color']}; border-radius:2px; flex-shrink:0;"></div>
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); flex:1;">{meta['icon']} {meta['label']}</div>
   <div style="font-family:'Space Mono',monospace; font-size:11px; color:{meta['color']};">{pct:.0f}%</div>
 </div>
-""", unsafe_allow_html=True)
+""")
 
-    st.markdown("<div style='height:1.5rem'></div>", unsafe_allow_html=True)
+    st.html("<div style='height:1.5rem'></div>")
 
     # ── Streak / cadence insights ─────────────────────────────────────────────
-    st.markdown("""
+    st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
             text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
   Insights
 </div>
-""", unsafe_allow_html=True)
+""")
 
     # Most active day of week
     dow_counts = defaultdict(int)
@@ -255,11 +255,11 @@ def analytics_page():
     cols2 = st.columns(4)
     for i, (label, value, color) in enumerate(insights):
         with cols2[i]:
-            st.markdown(f"""
+            st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px; padding:16px;">
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted); margin-bottom:8px;">{label}</div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:{color};
               line-height:1.1;">{value}</div>
 </div>
-""", unsafe_allow_html=True)
+""")
