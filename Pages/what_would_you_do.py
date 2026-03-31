@@ -63,7 +63,7 @@ The quiz is EXPLICITLY sexual in nature. Every question must be about sex, desir
 The goal is to feel like a daring, cheeky quiz you'd find in a bold lifestyle magazine — the kind that makes you laugh, feel a little exposed, and want to show your partner.
 
 Generate exactly 10 questions. Each must:
-- Be clearly about sex, attraction, desire, or intimacy — not ambiguously lifestyle-coded
+- Be clearly about sex eg. threesome, attraction, desire, or intimacy — not ambiguously lifestyle-coded
 - Measure one or more of these dimensions:
     control — who leads, who follows, dominance and submission dynamics
     sensory — physical sensation, touch, texture, intensity of physical experience
