@@ -69,7 +69,7 @@ Generate exactly 10 questions. Each must:
     sensory — physical sensation, touch, texture, intensity of physical experience
     exhib — being watched, performing, public/semi-public desire, showing off
     dynamic — roleplay, personas, power games, fantasy scenarios
-    openness — willingness to experiment sexually, taboo curiosity, non-monogamy
+    openness — willingness to experiment sexually, taboo curiosity, non-monogamy, threesome
     verbal — dirty talk, explicit communication, sound, language during sex
 - Have exactly 4 answer options, escalating from least adventurous (score 0) to most (score 3)
 - Feel exciting, a little provocative, honest — not clinical or sanitised
