@@ -9,6 +9,7 @@ Results are saved to the quiz_results table on completion.
 import streamlit as st
 import json
 import random
+import datetime
 from openai import OpenAI
 
 
@@ -54,46 +55,82 @@ PROFILES = [
     },
 ]
 
-# ─── PROMPTS ──────────────────────────────────────────────────────────────────
+# ─── FANTASY POOLS (randomised each session) ──────────────────────────────────
 
-GENERATION_PROMPT = """You write questions for an adults-only desire quiz called "Read Between The Lines" inside a lifestyle app called Vice Vault. The audience is adults who have explicitly opted into this experience.
-
-The quiz is EXPLICITLY sexual in nature. Every question must be about sex, desire, fantasy, or intimate preferences — just phrased as a scenario or gut-reaction rather than a blunt question.
-
-The goal is to feel like a daring, cheeky quiz you'd find in a bold lifestyle magazine — the kind that makes you laugh, feel a little exposed, and want to show your partner.
-
-Generate exactly 10 questions. Each must:
-- Be clearly about sex eg. threesome, attraction, desire, or intimacy — not ambiguously lifestyle-coded
-- Measure one or more of these dimensions:
-    control — who leads, who follows, dominance and submission dynamics
-    sensory — physical sensation, touch, texture, intensity of physical experience
-    exhib — being watched, performing, public/semi-public desire, showing off
-    dynamic — roleplay, personas, power games, fantasy scenarios
-    openness — willingness to experiment sexually, taboo curiosity, non-monogamy, threesome
-    verbal — dirty talk, explicit communication, sound, language during sex
-- Have exactly 4 answer options, escalating from least adventurous (score 0) to most (score 3)
-- Feel exciting, a little provocative, honest — not clinical or sanitised
-
-Strong example questions (use as tone reference, not verbatim):
-- "Your partner says they want to try something new tonight and hands you a blindfold. Your first reaction?"
-- "You're in a hotel and realise the curtains are slightly open while you're with someone. You..."
-- "Your partner wants to talk through exactly what they want to do to you before anything happens. You feel..."
-- "Someone you're sleeping with suggests you both stay fully dressed for as long as possible. Your instinct is..."
-- "You're in a new situationship. They send you a voice note describing exactly what they've been thinking about. You..."
-
-Return ONLY valid JSON. No markdown fences, no explanation. Format:
-[
-  {
-    "tag": "Short 2-3 word label (e.g. 'The Blindfold', 'Open Window', 'Say It Out Loud')",
-    "text": "The question or scenario text",
-    "dims": {"dim_name": [score_for_opt0, score_for_opt1, score_for_opt2, score_for_opt3]},
-    "opts": ["Option A text", "Option B text", "Option C text", "Option D text"]
-  }
+_FANTASY_POOLS = [
+    ["bondage & restraint", "blindfolds", "handcuffs", "rope play", "sensory deprivation"],
+    ["threesomes", "group sex", "watching your partner with someone else", "being shared"],
+    ["public sex", "sex in semi-public places", "risk of being caught", "outdoor sex"],
+    ["dominance & submission", "being ordered around", "consensual control", "collaring"],
+    ["roleplay", "stranger fantasy", "boss/employee dynamic", "forbidden encounter scenarios"],
+    ["voyeurism", "watching others have sex", "peephole fantasy", "live shows"],
+    ["exhibitionism", "performing for an audience", "filming yourself", "stripping on demand"],
+    ["rough sex", "hair-pulling", "spanking", "biting", "consensual choking"],
+    ["sex toys", "vibrators used during partnered sex", "remote-controlled play", "strap-ons"],
+    ["dirty talk", "phone sex", "explicit sexting", "voice notes", "being told exactly what to do"],
+    ["edging & orgasm control", "denial play", "forced orgasm", "not allowed to come"],
+    ["body worship", "foot fetish", "lingerie play", "staying dressed during sex"],
+    ["cuckolding & compersion", "hot wife / hot husband fantasy", "watching your partner perform"],
+    ["mirror sex", "watching yourself", "filming your own encounters", "reviewing footage"],
+    ["anonymous sex fantasy", "glory hole scenario", "no-names hookup fantasy"],
+    ["sex parties", "swinging", "open relationship scenarios", "couple swaps"],
+    ["fetish wear", "latex", "leather", "uniforms", "costumes"],
+    ["power reversal", "femdom", "pegging", "role-switching mid-scene"],
+    ["temperature & sensation play", "ice", "wax", "feathers", "impact play"],
+    ["praise & degradation kink", "being called names during sex", "humiliation play", "worship dynamic"],
 ]
 
-Scores are integers 0-3. Each option should feel meaningfully different — not just "a little" vs "a lot".
-Make every question feel like it sees through the person answering it.
+def _build_generation_prompt() -> str:
+    seed = random.randint(100000, 999999)
+    today = datetime.date.today().isoformat()
+    clusters = random.sample(_FANTASY_POOLS, 4)
+    cluster_str = "\n".join(f"  - {', '.join(c)}" for c in clusters)
+
+    return f"""You write questions for an adults-only desire quiz called "Read Between The Lines" inside Vice Vault, an adult lifestyle app. All users have verified their age and explicitly opted in to explicit sexual content.
+
+SESSION SEED: {seed} | DATE: {today}
+This seed is unique — your questions MUST differ from any previous session. Never reuse scenarios, phrasings, or setups from prior runs.
+
+THIS SESSION'S FANTASY ANCHORS — build at least 6 of your 10 questions directly around these specific kink/fantasy clusters:
+{cluster_str}
+
+The remaining 4 questions can explore any sexual fantasy, kink, or dynamic not listed above — but they must be equally specific and explicit.
+
+RULES:
+1. Every question must be unambiguously about a specific sexual fantasy, kink, or dynamic. No vague "connection" softness — if a question could appear in a general lifestyle quiz, rewrite it.
+2. Each question must feel like it exposes something the person hasn't fully admitted to themselves.
+3. Measure one or more dimensions per question:
+   - control     → dominance, submission, restraint, consensual power exchange
+   - sensory     → physical sensation, pain/pleasure, texture, temperature, intensity
+   - exhib       → being watched, performing, filming, public/semi-public scenarios
+   - dynamic     → roleplay, personas, power games, specific fantasy scenarios
+   - openness    → threesomes, group sex, non-monogamy, swinging, taboo kinks
+   - verbal      → dirty talk, sexting, explicit instructions, sound, narration during sex
+4. Exactly 4 answer options per question, escalating from vanilla (score 0) to deeply into it (score 3).
+5. Options must feel meaningfully different — not just "a little" vs "more". The jump 1→2→3 should feel like crossing a line.
+6. Tone: bold, direct, a little confrontational — like the quiz already knows your answer.
+
+STRONG EXAMPLE QUESTIONS (tone reference — do NOT reuse these):
+- "Your partner ties your hands above your head and tells you not to move. What's your honest reaction?"
+- "Someone you've been sleeping with suggests inviting a third person into bed — someone you both know. You..."
+- "You're having sex in a changing room and someone tries the door handle. You..."
+- "Your partner hands you their phone mid-sex and says 'film this'. You..."
+- "They want to edge you for an hour and you're not allowed to come until they say so. Your instinct is..."
+
+Return ONLY valid JSON — no markdown fences, no explanation, no preamble. Format exactly:
+[
+  {{
+    "tag": "2-3 word label capturing the kink/fantasy (e.g. 'The Third', 'Tied Down', 'Say It Louder')",
+    "text": "The scenario — second person, present tense, specific and explicitly sexual",
+    "dims": {{"dim_name": [score_for_opt0, score_for_opt1, score_for_opt2, score_for_opt3]}},
+    "opts": ["Vanilla/avoidant response", "Curious but cautious", "Into it", "Already fantasised about exactly this"]
+  }}
+]
+
+Scores are integers 0–3. Make every question feel like it already knows what the person is going to pick.
 """
+
+# ─── PROMPTS ──────────────────────────────────────────────────────────────────
 
 RECOMMENDATION_PROMPT = """You are a sex-positive, frank, and knowledgeable desire analyst for Vice Vault, an adult lifestyle app.
 
@@ -123,7 +160,7 @@ def call_openai(prompt: str) -> str:
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.95,
+        temperature=0.97,
     )
     return response.choices[0].message.content.strip()
 
@@ -161,7 +198,6 @@ def _dim_pct(scores: dict, dim_max: dict, d: str) -> int:
 # ─── DB SAVE ──────────────────────────────────────────────────────────────────
 
 def _save_result_to_db(profile, dim_scores_pct, recs, total_pct, questions, answers):
-    """Persist quiz result. Silent fail — never blocks the UI."""
     user = st.session_state.get("user")
     user_id = user.get("id") if user else None
     if not user_id:
@@ -229,6 +265,12 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 .stButton > button[kind="primary"][disabled] {
   background:var(--border) !important; color:var(--muted) !important;
   border-color:var(--border) !important; box-shadow:none !important;
+}
+/* Answer option buttons — make selected state snappier visually */
+.kq-opt-selected > button {
+  background:#2a0e1a !important;
+  border-color:var(--magenta) !important;
+  color:var(--magenta) !important;
 }
 .stProgress > div > div > div { background:var(--magenta) !important; }
 #MainMenu { visibility:hidden; } footer { visibility:hidden; }
@@ -326,7 +368,7 @@ def render_loading():
     try:
         upd("Generating your quiz…", 10, "Writing fresh scenarios for you")
 
-        raw = call_openai(GENERATION_PROMPT)
+        raw = call_openai(_build_generation_prompt())
         raw = raw.replace("```json", "").replace("```", "").strip()
 
         upd("Parsing questions…", 80, "Validating and shuffling")
@@ -364,6 +406,32 @@ def render_loading():
         st.rerun()
 
 # ─── QUIZ ─────────────────────────────────────────────────────────────────────
+# Speed note: answer clicks set state and advance immediately — the question card
+# HTML is built once per question index so rerenders stay lightweight.
+
+@st.cache_data(show_spinner=False)
+def _render_question_html(cur: int, total: int, tag: str, text: str) -> str:
+    """Cache the static question card HTML — only rebuilds when question changes."""
+    segs = "".join(
+        f'<div style="flex:1; height:2px; border-radius:1px; '
+        f'background:{"var(--magenta)" if i < cur else "rgba(255,45,120,0.5)" if i == cur else "var(--border)"}"></div>'
+        for i in range(total)
+    )
+    return f"""
+<div style="display:flex; gap:3px; margin-bottom:20px;">{segs}</div>
+<div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
+            text-align:right; margin-bottom:12px; letter-spacing:1px;">
+  {cur + 1} / {total}
+</div>
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:24px; margin-bottom:16px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
+              text-transform:uppercase; color:var(--magenta); margin-bottom:8px;">{tag}</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:16px; color:var(--text);
+              line-height:1.6;">{text}</div>
+</div>
+"""
+
 
 def render_quiz():
     cur       = st.session_state.kq_cur
@@ -379,36 +447,23 @@ def render_quiz():
     is_last = cur == total - 1
     sel     = answers[cur] if cur < len(answers) else None
 
-    segs = "".join(
-        f'<div style="flex:1; height:2px; border-radius:1px; '
-        f'background:{"var(--magenta)" if i < cur else "rgba(255,45,120,0.5)" if i == cur else "var(--border)"}"></div>'
-        for i in range(total)
-    )
+    # Cached static HTML — fast on re-render after answer tap
+    st.html(_render_question_html(cur, total, q["tag"], q["text"]))
 
-    st.html(f"""
-<div style="display:flex; gap:3px; margin-bottom:20px;">{segs}</div>
-<div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
-            text-align:right; margin-bottom:12px; letter-spacing:1px;">
-  {cur + 1} / {total}
-</div>
-<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
-            padding:24px; margin-bottom:16px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-              text-transform:uppercase; color:var(--magenta); margin-bottom:8px;">{q['tag']}</div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:16px; color:var(--text);
-              line-height:1.6;">{q['text']}</div>
-</div>
-""")
-
+    # Answer buttons — clicking selects AND immediately advances to next question
     for i, opt in enumerate(q["opts"]):
         is_sel = sel == i
+        label  = ("◆  " if is_sel else "") + opt
         if st.button(
-            ("◆  " if is_sel else "") + opt,
+            label,
             key=f"kq_{cur}_{i}",
             use_container_width=True,
             type="primary" if is_sel else "secondary",
         ):
             st.session_state.kq_answers[cur] = i
+            # Auto-advance: if not last question, move forward immediately on select
+            if not is_last:
+                st.session_state.kq_cur += 1
             st.rerun()
 
     st.html("<br>")
@@ -419,14 +474,16 @@ def render_quiz():
                 st.session_state.kq_cur -= 1
                 st.rerun()
     with col_next:
-        label = "See My Profile →" if is_last else "Next →"
-        if st.button(label, key="kq_next", disabled=(sel is None),
-                     use_container_width=True, type="primary"):
-            if is_last:
+        if is_last:
+            if st.button(
+                "See My Profile →",
+                key="kq_next",
+                disabled=(sel is None),
+                use_container_width=True,
+                type="primary",
+            ):
                 st.session_state.kq_phase = "generating_result"
-            else:
-                st.session_state.kq_cur += 1
-            st.rerun()
+                st.rerun()
 
 # ─── GENERATING RESULT ────────────────────────────────────────────────────────
 
