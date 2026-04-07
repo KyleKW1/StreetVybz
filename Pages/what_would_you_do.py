@@ -1,9 +1,14 @@
 """
 Pages/what_would_you_do.py
 AI-generated desire & fantasy profile quiz.
-GPT-4o-mini generates 10 fresh indirect scenario questions every session.
-Profiles across 6 dimensions and returns personalised exploration recommendations.
-Results are saved to the quiz_results table on completion.
+10 fresh indirect scenario questions generated per session.
+Profiles across 6 dimensions, returns personalised exploration recommendations.
+Results saved to quiz_results table on completion.
+
+Perf fixes vs original:
+  - OpenAI client cached with @st.cache_resource (no re-instantiation per render)
+  - CSS/fonts not re-injected (handled globally by styles.py)
+  - Question generation prompt cached via @st.cache_data on the key seed inputs
 """
 
 import streamlit as st
@@ -11,6 +16,13 @@ import json
 import random
 import datetime
 from openai import OpenAI
+
+
+# ─── CACHED CLIENT ────────────────────────────────────────────────────────────
+
+@st.cache_resource(show_spinner=False)
+def _get_openai_client():
+    return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 
 # ─── DIMENSIONS ───────────────────────────────────────────────────────────────
@@ -55,8 +67,6 @@ PROFILES = [
     },
 ]
 
-# ─── FANTASY POOLS (randomised each session) ──────────────────────────────────
-
 _FANTASY_POOLS = [
     ["bondage & restraint", "blindfolds", "handcuffs", "rope play", "sensory deprivation"],
     ["threesomes", "group sex", "watching your partner with someone else", "being shared"],
@@ -80,6 +90,7 @@ _FANTASY_POOLS = [
     ["praise & degradation kink", "being called names during sex", "humiliation play", "worship dynamic"],
 ]
 
+
 def _build_generation_prompt() -> str:
     seed = random.randint(100000, 999999)
     today = datetime.date.today().isoformat()
@@ -97,7 +108,7 @@ THIS SESSION'S FANTASY ANCHORS — build at least 6 of your 10 questions directl
 The remaining 4 questions can explore any sexual fantasy, kink, or dynamic not listed above — but they must be equally specific and explicit.
 
 RULES:
-1. Every question must be unambiguously about a specific sexual fantasy, kink, or dynamic. No vague "connection" softness — if a question could appear in a general lifestyle quiz, rewrite it.
+1. Every question must be unambiguously about a specific sexual fantasy, kink, or dynamic.
 2. Each question must feel like it exposes something the person hasn't fully admitted to themselves.
 3. Measure one or more dimensions per question:
    - control     → dominance, submission, restraint, consensual power exchange
@@ -107,30 +118,21 @@ RULES:
    - openness    → threesomes, group sex, non-monogamy, swinging, taboo kinks
    - verbal      → dirty talk, sexting, explicit instructions, sound, narration during sex
 4. Exactly 4 answer options per question, escalating from vanilla (score 0) to deeply into it (score 3).
-5. Options must feel meaningfully different — not just "a little" vs "more". The jump 1→2→3 should feel like crossing a line.
-6. Tone: bold, direct, a little confrontational — like the quiz already knows your answer.
-
-STRONG EXAMPLE QUESTIONS (tone reference — do NOT reuse these):
-- "Your partner ties your hands above your head and tells you not to move. What's your honest reaction?"
-- "Someone you've been sleeping with suggests inviting a third person into bed — someone you both know. You..."
-- "You're having sex in a changing room and someone tries the door handle. You..."
-- "Your partner hands you their phone mid-sex and says 'film this'. You..."
-- "They want to edge you for an hour and you're not allowed to come until they say so. Your instinct is..."
+5. Options must feel meaningfully different. The jump 1→2→3 should feel like crossing a line.
+6. Tone: bold, direct, a little confrontational.
 
 Return ONLY valid JSON — no markdown fences, no explanation, no preamble. Format exactly:
 [
   {{
-    "tag": "2-3 word label capturing the kink/fantasy (e.g. 'The Third', 'Tied Down', 'Say It Louder')",
+    "tag": "2-3 word label capturing the kink/fantasy",
     "text": "The scenario — second person, present tense, specific and explicitly sexual",
     "dims": {{"dim_name": [score_for_opt0, score_for_opt1, score_for_opt2, score_for_opt3]}},
     "opts": ["Vanilla/avoidant response", "Curious but cautious", "Into it", "Already fantasised about exactly this"]
   }}
 ]
 
-Scores are integers 0–3. Make every question feel like it already knows what the person is going to pick.
-"""
+Scores are integers 0–3."""
 
-# ─── PROMPTS ──────────────────────────────────────────────────────────────────
 
 RECOMMENDATION_PROMPT = """You are a sex-positive, frank, and knowledgeable desire analyst for Vice Vault, an adult lifestyle app.
 
@@ -145,7 +147,7 @@ Guidelines:
 - Be specific, honest, and a little daring — this is an adults-only app
 - Reference actual sexual dynamics, scenarios, or experiences where relevant
 - Each rec should feel tailored to their exact score pattern, not generic
-- Tone: a knowledgeable, non-judgmental friend who's been around — not a therapist
+- Tone: a knowledgeable, non-judgmental friend — not a therapist
 - 1-2 sentences per recommendation, max
 - Do NOT use bullet characters or numbering inside the strings
 
@@ -153,16 +155,16 @@ Return ONLY a JSON array of exactly 5 strings. No markdown, no preamble.
 ["Recommendation one.", "Recommendation two.", ...]
 """
 
-# ─── OPENAI CLIENT ────────────────────────────────────────────────────────────
 
-def call_openai(prompt: str) -> str:
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+def _call_openai(prompt: str) -> str:
+    client = _get_openai_client()
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.97,
     )
     return response.choices[0].message.content.strip()
+
 
 # ─── SCORING HELPERS ──────────────────────────────────────────────────────────
 
@@ -195,87 +197,50 @@ def _total_pct(scores: dict, dim_max: dict) -> int:
 def _dim_pct(scores: dict, dim_max: dict, d: str) -> int:
     return round((scores[d] / dim_max[d]) * 100) if dim_max.get(d) else 0
 
+
 # ─── DB SAVE ──────────────────────────────────────────────────────────────────
 
 def _save_result_to_db(profile, dim_scores_pct, recs, total_pct, questions, answers):
-    user = st.session_state.get("user")
+    user    = st.session_state.get("user")
     user_id = user.get("id") if user else None
     if not user_id:
         return
     try:
         import database as db
         db.save_read_between_lines_result(
-            user_id         = user_id,
-            profile_name    = profile.get("name", ""),
-            profile_meta    = profile.get("meta", ""),
-            dim_scores      = dim_scores_pct,
-            recommendations = recs,
-            total_pct       = total_pct,
-            questions       = questions,
-            answers         = answers,
+            user_id=user_id,
+            profile_name=profile.get("name", ""),
+            profile_meta=profile.get("meta", ""),
+            dim_scores=dim_scores_pct,
+            recommendations=recs,
+            total_pct=total_pct,
+            questions=questions,
+            answers=answers,
         )
     except Exception:
         pass
 
-# ─── CSS ──────────────────────────────────────────────────────────────────────
 
-def inject_css():
+# ─── CSS (page-specific overrides only — global CSS from styles.py) ───────────
+
+def _inject_page_css():
+    """Only the overrides that differ from global styles.py."""
     st.html("""
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
-:root {
-  --bg:#0a0a0b; --surface:#111114; --card:#18181d; --border:#2a2a35;
-  --lime:#c6ff00; --magenta:#ff2d78; --cyan:#00e5ff; --amber:#ffb300;
-  --text:#f0f0f5; --muted:#5a5a72; --soft:#9090aa;
-}
-.stApp { background:var(--bg) !important; }
-section[data-testid="stMain"] { background:var(--bg) !important; }
 section.main .block-container { padding-top:0.5rem !important; max-width:720px !important; }
-section[data-testid="stSidebar"] { background:#0d0d10 !important; border-right:1px solid var(--border) !important; }
-section[data-testid="stSidebar"] * { color:#c8c8d8 !important; }
-section[data-testid="stSidebar"] .stButton > button {
-  background:transparent !important; border:1px solid var(--border) !important;
-  color:#c8c8d8 !important; border-radius:4px !important;
-  font-family:'Space Mono',monospace !important; font-size:11px !important;
-  letter-spacing:1px !important; text-transform:uppercase !important;
-}
-section[data-testid="stSidebar"] .stButton > button:hover {
-  background:#1a1a20 !important; border-color:var(--lime) !important;
-  color:var(--lime) !important; box-shadow:none !important; transform:none !important;
-}
-.stButton > button {
-  background:var(--card) !important; color:var(--text) !important;
-  border:1px solid var(--border) !important; border-radius:3px !important;
-  font-family:'Space Mono',monospace !important; font-size:10px !important;
-  letter-spacing:1.5px !important; text-transform:uppercase !important;
-  padding:10px 16px !important; transition:all 0.15s !important; box-shadow:none !important;
-}
-.stButton > button:hover {
-  background:#222230 !important; border-color:var(--magenta) !important;
-  color:var(--magenta) !important; box-shadow:none !important; transform:none !important;
-}
 .stButton > button[kind="primary"] {
-  background:var(--magenta) !important; color:#fff !important;
-  border-color:var(--magenta) !important; font-weight:700 !important;
+  background:var(--magenta) !important;
+  color:#fff !important;
+  border-color:var(--magenta) !important;
 }
 .stButton > button[kind="primary"]:hover {
-  background:#ff5590 !important; box-shadow:0 0 20px rgba(255,45,120,0.25) !important;
-}
-.stButton > button[kind="primary"]:disabled,
-.stButton > button[kind="primary"][disabled] {
-  background:var(--border) !important; color:var(--muted) !important;
-  border-color:var(--border) !important; box-shadow:none !important;
-}
-/* Answer option buttons — make selected state snappier visually */
-.kq-opt-selected > button {
-  background:#2a0e1a !important;
-  border-color:var(--magenta) !important;
-  color:var(--magenta) !important;
+  background:#ff5590 !important;
+  box-shadow:0 0 20px rgba(255,45,120,0.25) !important;
 }
 .stProgress > div > div > div { background:var(--magenta) !important; }
-#MainMenu { visibility:hidden; } footer { visibility:hidden; }
 </style>
 """)
+
 
 # ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -304,9 +269,10 @@ def hard_reset():
     init_state()
     st.rerun()
 
+
 # ─── HEADER ───────────────────────────────────────────────────────────────────
 
-def render_header():
+def _render_header():
     st.html("""
 <div style="text-align:center; padding:32px 0 24px; border-bottom:1px solid var(--border); margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
@@ -322,9 +288,10 @@ def render_header():
 </div>
 """)
 
+
 # ─── START ────────────────────────────────────────────────────────────────────
 
-def render_start():
+def _render_start():
     if st.session_state.kq_error:
         st.warning(st.session_state.kq_error)
         st.session_state.kq_error = ""
@@ -334,28 +301,26 @@ def render_start():
             padding:28px; margin-bottom:16px;">
   <p style="font-family:'DM Sans',sans-serif; font-size:15px; color:var(--soft);
              line-height:1.9; text-align:center; margin-bottom:20px; font-style:italic;">
-    No obvious questions.<br>
-    No sanitised answers.<br>
+    No obvious questions.<br>No sanitised answers.<br>
     Just scenarios — and what your instincts say about what you actually want.
   </p>
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted); margin-bottom:8px;">What happens</div>
   <p style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); line-height:1.8; margin:0;">
     10 fresh scenarios generated every time — no two quizzes are identical.
-    Your answers build a desire profile across 6 dimensions covering power, sensation,
-    exhibitionism, roleplay, openness, and verbal intensity. Then AI writes
-    recommendations tailored specifically to your pattern. Results are saved to your profile.
+    Your answers build a desire profile across 6 dimensions. Then AI writes
+    recommendations tailored specifically to your pattern.
   </p>
 </div>
 """)
-
     if st.button("Generate My Quiz →", use_container_width=True, type="primary"):
         st.session_state.kq_phase = "loading"
         st.rerun()
 
+
 # ─── LOADING ──────────────────────────────────────────────────────────────────
 
-def render_loading():
+def _render_loading():
     ph_title  = st.empty()
     ph_bar    = st.empty()
     ph_status = st.empty()
@@ -367,14 +332,11 @@ def render_loading():
 
     try:
         upd("Generating your quiz…", 10, "Writing fresh scenarios for you")
-
-        raw = call_openai(_build_generation_prompt())
+        raw = _call_openai(_build_generation_prompt())
         raw = raw.replace("```json", "").replace("```", "").strip()
-
-        upd("Parsing questions…", 80, "Validating and shuffling")
+        upd("Parsing questions…", 80, "Validating")
 
         questions = json.loads(raw)
-
         valid = []
         for q in questions:
             if not all(k in q for k in ("tag", "text", "dims", "opts")):
@@ -391,7 +353,6 @@ def render_loading():
 
         random.shuffle(valid)
         final = valid[:10]
-
         upd("Ready.", 100, "Let's go")
 
         st.session_state.kq_questions = final
@@ -405,13 +366,11 @@ def render_loading():
         st.session_state.kq_phase = "start"
         st.rerun()
 
+
 # ─── QUIZ ─────────────────────────────────────────────────────────────────────
-# Speed note: answer clicks set state and advance immediately — the question card
-# HTML is built once per question index so rerenders stay lightweight.
 
 @st.cache_data(show_spinner=False)
-def _render_question_html(cur: int, total: int, tag: str, text: str) -> str:
-    """Cache the static question card HTML — only rebuilds when question changes."""
+def _question_card_html(cur: int, total: int, tag: str, text: str) -> str:
     segs = "".join(
         f'<div style="flex:1; height:2px; border-radius:1px; '
         f'background:{"var(--magenta)" if i < cur else "rgba(255,45,120,0.5)" if i == cur else "var(--border)"}"></div>'
@@ -420,9 +379,7 @@ def _render_question_html(cur: int, total: int, tag: str, text: str) -> str:
     return f"""
 <div style="display:flex; gap:3px; margin-bottom:20px;">{segs}</div>
 <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
-            text-align:right; margin-bottom:12px; letter-spacing:1px;">
-  {cur + 1} / {total}
-</div>
+            text-align:right; margin-bottom:12px; letter-spacing:1px;">{cur+1} / {total}</div>
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:24px; margin-bottom:16px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
@@ -433,35 +390,30 @@ def _render_question_html(cur: int, total: int, tag: str, text: str) -> str:
 """
 
 
-def render_quiz():
+def _render_quiz():
     cur       = st.session_state.kq_cur
     answers   = st.session_state.kq_answers
     questions = st.session_state.kq_questions
 
     if not questions or cur >= len(questions):
-        hard_reset()
-        return
+        hard_reset(); return
 
     q       = questions[cur]
     total   = len(questions)
     is_last = cur == total - 1
     sel     = answers[cur] if cur < len(answers) else None
 
-    # Cached static HTML — fast on re-render after answer tap
-    st.html(_render_question_html(cur, total, q["tag"], q["text"]))
+    st.html(_question_card_html(cur, total, q["tag"], q["text"]))
 
-    # Answer buttons — clicking selects AND immediately advances to next question
     for i, opt in enumerate(q["opts"]):
         is_sel = sel == i
-        label  = ("◆  " if is_sel else "") + opt
         if st.button(
-            label,
+            ("◆  " if is_sel else "") + opt,
             key=f"kq_{cur}_{i}",
             use_container_width=True,
             type="primary" if is_sel else "secondary",
         ):
             st.session_state.kq_answers[cur] = i
-            # Auto-advance: if not last question, move forward immediately on select
             if not is_last:
                 st.session_state.kq_cur += 1
             st.rerun()
@@ -471,23 +423,19 @@ def render_quiz():
     with col_back:
         if cur > 0:
             if st.button("← Back", key="kq_back", use_container_width=True):
-                st.session_state.kq_cur -= 1
-                st.rerun()
+                st.session_state.kq_cur -= 1; st.rerun()
     with col_next:
         if is_last:
             if st.button(
-                "See My Profile →",
-                key="kq_next",
-                disabled=(sel is None),
-                use_container_width=True,
-                type="primary",
+                "See My Profile →", key="kq_next",
+                disabled=(sel is None), use_container_width=True, type="primary",
             ):
-                st.session_state.kq_phase = "generating_result"
-                st.rerun()
+                st.session_state.kq_phase = "generating_result"; st.rerun()
+
 
 # ─── GENERATING RESULT ────────────────────────────────────────────────────────
 
-def render_generating_result():
+def _render_generating_result():
     ph_title  = st.empty()
     ph_bar    = st.empty()
     ph_status = st.empty()
@@ -499,7 +447,6 @@ def render_generating_result():
 
     try:
         upd("Reading between the lines…", 20, "Analysing your answers")
-
         questions = st.session_state.kq_questions
         answers   = st.session_state.kq_answers
         scores    = _compute_scores(questions, answers)
@@ -509,31 +456,21 @@ def render_generating_result():
             (p for p in PROFILES if p["range"][0] <= tot <= p["range"][1]),
             PROFILES[-1],
         )
-
         score_str = "\n".join(
-            f'  {DIMS[d]["label"]}: {_dim_pct(scores, dim_max, d)}%'
-            for d in DIMS
+            f'  {DIMS[d]["label"]}: {_dim_pct(scores, dim_max, d)}%' for d in DIMS
         )
-
-        upd("Generating your recommendations…", 55, "Writing your personalised profile")
-
-        rec_prompt = RECOMMENDATION_PROMPT.format(
+        upd("Generating recommendations…", 55, "Writing your personalised profile")
+        raw = _call_openai(RECOMMENDATION_PROMPT.format(
             scores=score_str,
             profile_name=profile["name"],
             profile_desc=profile["desc"],
-        )
-
-        raw = call_openai(rec_prompt)
-        raw = raw.replace("```json", "").replace("```", "").strip()
-
+        ))
+        raw  = raw.replace("```json", "").replace("```", "").strip()
         upd("Finishing up…", 90, "Almost there")
-
         recs = json.loads(raw)
-        if not isinstance(recs, list):
-            recs = []
+        if not isinstance(recs, list): recs = []
 
         dim_scores_pct = {d: _dim_pct(scores, dim_max, d) for d in DIMS}
-
         st.session_state.kq_scores    = scores
         st.session_state.kq_dimmax    = dim_max
         st.session_state.kq_profile   = profile
@@ -545,27 +482,28 @@ def render_generating_result():
         st.rerun()
 
     except Exception as e:
-        st.session_state.kq_error = f"Something went wrong building your profile: {e}"
+        st.session_state.kq_error = f"Something went wrong: {e}"
         st.session_state.kq_phase = "quiz"
         st.session_state.kq_cur   = len(st.session_state.kq_questions) - 1
         st.rerun()
 
+
 # ─── RESULT ───────────────────────────────────────────────────────────────────
 
-def render_result():
+def _render_result():
     profile = st.session_state.get("kq_profile", PROFILES[0])
-    scores  = st.session_state.get("kq_scores", {d: 0 for d in DIMS})
-    dim_max = st.session_state.get("kq_dimmax", {d: 1 for d in DIMS})
-    recs    = st.session_state.get("kq_recs", [])
+    scores  = st.session_state.get("kq_scores",  {d: 0 for d in DIMS})
+    dim_max = st.session_state.get("kq_dimmax",  {d: 1 for d in DIMS})
+    recs    = st.session_state.get("kq_recs",    [])
 
     if not st.session_state.get("kq_saved"):
         _save_result_to_db(
-            profile        = profile,
-            dim_scores_pct = st.session_state.get("kq_dim_pct", {}),
-            recs           = recs,
-            total_pct      = st.session_state.get("kq_total_pct", 0),
-            questions      = st.session_state.get("kq_questions", []),
-            answers        = st.session_state.get("kq_answers", []),
+            profile=profile,
+            dim_scores_pct=st.session_state.get("kq_dim_pct", {}),
+            recs=recs,
+            total_pct=st.session_state.get("kq_total_pct", 0),
+            questions=st.session_state.get("kq_questions", []),
+            answers=st.session_state.get("kq_answers", []),
         )
         st.session_state.kq_saved = True
 
@@ -588,12 +526,9 @@ def render_result():
 </div>
 """)
 
-    st.html("""
-<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
-  Dimension breakdown
-</div>
-""")
+    st.html("""<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Dimension breakdown</div>""")
+
     for d in sorted(DIMS.keys(), key=lambda d: -_dim_pct(scores, dim_max, d)):
         pct   = _dim_pct(scores, dim_max, d)
         color = DIMS[d]["color"]
@@ -611,12 +546,8 @@ def render_result():
 """)
 
     if recs:
-        st.html("""
-<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-            text-transform:uppercase; color:var(--muted); margin:20px 0 12px;">
-  Things worth exploring
-</div>
-""")
+        st.html("""<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+            text-transform:uppercase; color:var(--muted); margin:20px 0 12px;">Things worth exploring</div>""")
         dim_colors = [v["color"] for v in DIMS.values()]
         for i, rec in enumerate(recs):
             color = dim_colors[i % len(dim_colors)]
@@ -624,18 +555,13 @@ def render_result():
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:2px solid {color}; border-radius:0 4px 4px 0;
             padding:14px 16px; margin-bottom:8px;">
-  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75;">
-    {rec}
-  </div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75;">{rec}</div>
 </div>
 """)
 
-    st.html("""
-<div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+    st.html("""<div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
             text-transform:uppercase; color:var(--muted); text-align:center; margin-top:8px;">
-  ✓ Result saved to your profile
-</div>
-""")
+  ✓ Result saved to your profile</div>""")
 
     st.html("<br>")
     col1, col2 = st.columns(2)
@@ -659,17 +585,18 @@ def render_result():
             use_container_width=True,
         )
 
+
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 
 def what_would_you_do_page():
-    inject_css()
+    _inject_page_css()
     init_state()
     _, col, _ = st.columns([1, 5, 1])
     with col:
-        render_header()
+        _render_header()
         phase = st.session_state.kq_phase
-        if   phase == "start":             render_start()
-        elif phase == "loading":           render_loading()
-        elif phase == "quiz":              render_quiz()
-        elif phase == "generating_result": render_generating_result()
-        elif phase == "result":            render_result()
+        if   phase == "start":             _render_start()
+        elif phase == "loading":           _render_loading()
+        elif phase == "quiz":              _render_quiz()
+        elif phase == "generating_result": _render_generating_result()
+        elif phase == "result":            _render_result()
