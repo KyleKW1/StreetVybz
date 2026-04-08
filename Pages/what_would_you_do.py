@@ -29,6 +29,15 @@ Fixes v4:
     ignoring any preamble / trailing text the model appends
   - Both loading phases use _extract_json_array before json.loads
   - Raw model output logged to kq_raw_debug on failure for easier debugging
+
+Fixes v5:
+  - _sanitize_raw() normalises full-width punctuation and curly quotes before
+    JSON extraction — prevents parse failures from CJK-style model drift
+  - Prompt hardened: ASCII-only JSON, explicit closing-bracket rule
+  - Generation call wrapped in retry loop (up to 3 attempts) before surfacing
+    error to the user
+  - JSONDecodeError now reports position + message for easier debugging
+  - Fallback: questions that fail validation are skipped cleanly (was crashing)
 """
 
 import re
@@ -206,13 +215,11 @@ _FANTASY_POOLS = [
 
 
 def _build_generation_prompt() -> str:
-    # uuid4 = globally unique, never repeats across all sessions ever
     seed      = str(uuid.uuid4())
     timestamp = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
 
-    # Sample 6 clusters for anchored questions, leave the rest available for freeform
     clusters        = random.sample(_FANTASY_POOLS, 6)
-    cluster_labels  = [c[0] for c in clusters]   # first item is the headline kink
+    cluster_labels  = [c[0] for c in clusters]
     cluster_str     = "\n".join(f"  Cluster {i+1}: {', '.join(c)}" for i, c in enumerate(clusters))
     excluded_labels = "; ".join(cluster_labels)
 
@@ -257,6 +264,8 @@ Choose territory that is specific, psychologically revealing, and genuinely diff
 6. Options must be meaningfully distinct — not just more emphatic versions of the same thing.
 7. CRITICAL — fully gender-neutral and body-neutral language throughout. No pronouns that imply gender. No assumed body parts. No assumed role (top/bottom/giver/receiver). The questions must work for any person of any gender, body, and orientation.
 8. Tone: direct, a little confrontational, no clinical language, no hedging.
+9. CRITICAL — output valid JSON using ASCII double quotes ONLY. No curly quotes, no backticks, no full-width punctuation (no ：, 、, ，). Every string must open and close with a standard " character.
+10. The JSON array must end with a single ] on its own line. Do not write any text after that closing bracket.
 
 Return ONLY valid JSON — no markdown fences, no explanation, no preamble, no trailing text after the closing bracket:
 [
@@ -293,9 +302,49 @@ Guidelines:
 - Tone: knowledgeable, non-judgmental, like a frank friend who knows a lot — not a therapist or a content warning.
 - 1-2 sentences per recommendation, max.
 - Do NOT use bullet characters or numbering inside the strings.
+- CRITICAL — output valid JSON using ASCII double quotes ONLY. No curly quotes, no backticks, no full-width punctuation.
+- The JSON array must end with a single ] on its own line. Do not write any text after that closing bracket.
 
 Return ONLY a JSON array of exactly 5 strings. No markdown, no preamble, no trailing text after the closing bracket.
 ["Recommendation one.", "Recommendation two.", ...]"""
+
+
+# ─── RAW OUTPUT SANITIZER ─────────────────────────────────────────────────────
+
+def _sanitize_raw(raw: str) -> str:
+    """
+    Normalise common model output quirks before JSON extraction.
+
+    Handles:
+      - Full-width / CJK punctuation the model occasionally emits
+      - Curly / typographic quotes
+      - Backtick-delimited strings inside arrays
+      - Stray trailing commas before ] or }
+    """
+    # Full-width and CJK punctuation → ASCII equivalents
+    char_map = {
+        "\uff1a": ":",   # ：
+        "\u3001": ",",   # 、
+        "\uff0c": ",",   # ，
+        "\u3002": ".",   # 。
+        "\u2018": "'",   # left single quote
+        "\u2019": "'",   # right single quote
+        "\u201c": '"',   # left double quote
+        "\u201d": '"',   # right double quote
+        "\u2013": "-",   # en dash
+        "\u2014": "-",   # em dash
+    }
+    for bad, good in char_map.items():
+        raw = raw.replace(bad, good)
+
+    # Replace backtick-delimited strings: `foo` → "foo"
+    # Only inside what looks like a JSON array value position
+    raw = re.sub(r"`([^`]*)`", r'"\1"', raw)
+
+    # Remove trailing commas before ] or } (common model mistake)
+    raw = re.sub(r",\s*([}\]])", r"\1", raw)
+
+    return raw
 
 
 # ─── JSON EXTRACTION HELPER ───────────────────────────────────────────────────
@@ -310,13 +359,10 @@ def _extract_json_array(raw: str) -> str:
       - Trailing text / notes after the closing bracket
       - Cases where the model wraps the array in an object
 
-    Raises ValueError if no array is found.
+    Raises ValueError with position detail if no valid array is found.
     """
-    # Strip markdown fences first
     raw = raw.replace("```json", "").replace("```", "").strip()
 
-    # Walk character-by-character to find the outermost [...] block.
-    # This is more reliable than a regex for nested structures.
     start = raw.find("[")
     if start == -1:
         raise ValueError("No JSON array found in model response")
@@ -347,17 +393,42 @@ def _extract_json_array(raw: str) -> str:
     raise ValueError("Malformed JSON array — no closing bracket found")
 
 
-def _call_openai(prompt: str) -> str:
+def _parse_json_array(raw: str) -> list:
+    """Sanitise → extract → parse, with useful error messages on failure."""
+    sanitized = _sanitize_raw(raw)
+    extracted = _extract_json_array(sanitized)
+    try:
+        return json.loads(extracted)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"JSON parse error at position {e.pos}: {e.msg}") from e
+
+
+# ─── OPENAI CALL WITH RETRY ───────────────────────────────────────────────────
+
+def _call_openai(prompt: str, retries: int = 3) -> str:
+    """
+    Call the OpenAI API with automatic retry on failure.
+    Returns the raw string content of the first successful response.
+    Raises the last exception if all attempts fail.
+    """
     client = _get_openai_client()
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.99,
-        presence_penalty=0.6,
-        frequency_penalty=0.4,
-        max_tokens=4000,   # prevent truncated JSON on long question sets
-    )
-    return response.choices[0].message.content.strip()
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.99,
+                presence_penalty=0.6,
+                frequency_penalty=0.4,
+                max_tokens=4000,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as exc:
+            last_exc = exc
+            if attempt < retries:
+                continue
+    raise last_exc
 
 
 # ─── SCORING HELPERS ──────────────────────────────────────────────────────────
@@ -477,7 +548,7 @@ def init_state():
         "kq_recs":      [],
         "kq_error":     "",
         "kq_saved":     False,
-        "kq_raw_debug": "",   # stores last raw model output on failure
+        "kq_raw_debug": "",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -518,7 +589,6 @@ def _render_start():
         st.warning(st.session_state.kq_error)
         st.session_state.kq_error = ""
 
-    # Debug expander — shows raw model output when a parse failure occurred
     if st.session_state.get("kq_raw_debug"):
         with st.expander("🛠 Debug: last raw model output"):
             st.code(st.session_state.kq_raw_debug, language="text")
@@ -542,7 +612,7 @@ def _render_start():
 """)
     if st.button("Generate My Quiz →", use_container_width=True, type="primary"):
         st.session_state.kq_phase     = "loading"
-        st.session_state.kq_raw_debug = ""   # clear stale debug output
+        st.session_state.kq_raw_debug = ""
         st.rerun()
 
 
@@ -564,13 +634,18 @@ def _render_loading():
         raw = _call_openai(_build_generation_prompt())
 
         upd("Parsing questions…", 80, "Validating")
-        questions = json.loads(_extract_json_array(raw))
+        questions = _parse_json_array(raw)
 
         valid = []
         for q in questions:
+            # Skip malformed entries cleanly instead of crashing
+            if not isinstance(q, dict):
+                continue
             if not all(k in q for k in ("tag", "text", "dims", "opts")):
                 continue
-            if len(q["opts"]) != 4:
+            if not isinstance(q.get("opts"), list) or len(q["opts"]) != 4:
+                continue
+            if not isinstance(q.get("dims"), dict):
                 continue
             q["dims"] = {d: v for d, v in q["dims"].items() if d in DIMS}
             if not q["dims"]:
@@ -591,7 +666,7 @@ def _render_loading():
         st.rerun()
 
     except Exception as e:
-        st.session_state.kq_raw_debug = raw   # preserve for debugging
+        st.session_state.kq_raw_debug = raw
         st.session_state.kq_error     = f"Couldn't generate questions: {e}"
         st.session_state.kq_phase     = "start"
         st.rerun()
@@ -703,7 +778,7 @@ def _render_generating_result():
         ))
 
         upd("Finishing up…", 90, "Almost there")
-        recs = json.loads(_extract_json_array(raw))
+        recs = _parse_json_array(raw)
         if not isinstance(recs, list):
             recs = []
 
