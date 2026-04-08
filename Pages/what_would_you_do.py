@@ -8,18 +8,27 @@ Results saved to quiz_results table on completion.
 Perf fixes vs original:
   - OpenAI client cached with @st.cache_resource (no re-instantiation per render)
   - CSS/fonts not re-injected (handled globally by styles.py)
-  - Question generation prompt cached via @st.cache_data on the key seed inputs
 
 Fixes v2:
   - Recommendation prompt now receives chosen AND rejected answers explicitly
   - Model told never to suggest anything in rejected territory
   - Gender/orientation-neutral language enforced in prompt
+
+Fixes v3:
+  - uuid4 seed (truly unique per session, never collides)
+  - Timestamp injected to second-level precision (kills caching at model level)
+  - _FANTASY_POOLS massively expanded; 6 clusters sampled (was 4)
+  - Remaining 4 free questions must come from OUTSIDE the sampled clusters
+  - Prompt rewritten to surface unconscious/hidden desires via indirect scenarios
+  - All gendered language purged from pools and prompts
+  - Answer options now required to feel like crossing a psychological line
 """
 
 import streamlit as st
 import json
 import random
 import datetime
+import uuid
 from openai import OpenAI
 
 
@@ -72,96 +81,208 @@ PROFILES = [
     },
 ]
 
+# ─── EXPANDED FANTASY POOLS ───────────────────────────────────────────────────
+# 30 distinct clusters. Each session samples 6 — giving C(30,6) = 593,775
+# possible combinations before the free-question wildcard layer.
+# ALL language is body-neutral and orientation-neutral.
+
 _FANTASY_POOLS = [
-    ["bondage & restraint", "blindfolds", "handcuffs", "rope play", "sensory deprivation"],
-    ["threesomes", "group sex", "watching your partner with someone else", "being shared"],
-    ["public sex", "sex in semi-public places", "risk of being caught", "outdoor sex"],
-    ["dominance & submission", "being ordered around", "consensual control", "collaring"],
-    ["roleplay", "stranger fantasy", "boss/employee dynamic", "forbidden encounter scenarios"],
-    ["voyeurism", "watching others have sex", "peephole fantasy", "live shows"],
-    ["exhibitionism", "performing for an audience", "filming yourself", "stripping on demand"],
-    ["rough sex", "hair-pulling", "spanking", "biting", "consensual choking"],
-    ["sex toys", "vibrators used during partnered sex", "remote-controlled play", "strap-ons"],
-    ["dirty talk", "phone sex", "explicit sexting", "voice notes", "being told exactly what to do"],
-    ["edging & orgasm control", "denial play", "forced orgasm", "not allowed to come"],
-    ["body worship", "foot fetish", "lingerie play", "staying dressed during sex"],
-    ["cuckolding & compersion", "hot wife / hot husband fantasy", "watching your partner perform"],
-    ["mirror sex", "watching yourself", "filming your own encounters", "reviewing footage"],
-    ["anonymous sex fantasy", "glory hole scenario", "no-names hookup fantasy"],
-    ["sex parties", "swinging", "open relationship scenarios", "couple swaps"],
-    ["fetish wear", "latex", "leather", "uniforms", "costumes"],
-    ["power reversal", "femdom", "pegging", "role-switching mid-scene"],
-    ["temperature & sensation play", "ice", "wax", "feathers", "impact play"],
-    ["praise & degradation kink", "being called names during sex", "humiliation play", "worship dynamic"],
+    # 1 — Restraint
+    ["being physically restrained during sex", "wrists tied above your head", "full-body rope bondage",
+     "being unable to move while your partner does whatever they want", "spreader bars"],
+    # 2 — Blindfolds / sensory removal
+    ["blindfolds during sex", "not knowing what will happen next", "sensory deprivation hoods",
+     "earplugs + blindfold combination", "being guided somewhere with no context"],
+    # 3 — Group / multi-partner
+    ["threesomes", "group sex with strangers", "being the centre of attention for multiple partners",
+     "watching two people together while you participate", "an orgy scenario"],
+    # 4 — Watching / voyeurism
+    ["watching two people have sex without them knowing", "being let in to watch as a deliberate act",
+     "live sex shows", "watching your partner with someone else", "covert observation fantasy"],
+    # 5 — Being watched / exhibitionism
+    ["having sex while someone watches", "performing for a stranger's gaze", "being filmed without direction",
+     "sex in a room with a window", "knowing someone can hear everything"],
+    # 6 — Public / risk
+    ["sex in a place you could be caught", "outdoors with people nearby", "under a table at a restaurant",
+     "in a changing room", "risk-of-discovery as the core turn-on"],
+    # 7 — Dominance — giving
+    ["being in complete control of another person's pleasure", "giving orders and having them obeyed",
+     "deciding when your partner is allowed to come", "owning someone's body for a scene",
+     "using a partner however you want with their full consent"],
+    # 8 — Submission — receiving
+    ["being told exactly what to do in bed", "giving up all control to a trusted partner",
+     "being used for someone else's pleasure", "obeying without question",
+     "not being allowed to speak unless given permission"],
+    # 9 — Orgasm control
+    ["being kept on the edge without being allowed to finish", "denying your own orgasm on command",
+     "forced orgasm against your will (consensually)", "multiple orgasms with no break",
+     "edging for a prolonged period before release"],
+    # 10 — Dirty talk
+    ["being narrated during sex", "explicit instructions whispered mid-act",
+     "being told in graphic detail what's about to happen", "degrading language you've pre-agreed to",
+     "praise that borders on obsession"],
+    # 11 — Roleplay / personas
+    ["playing a character who isn't you during sex", "stranger-meeting-stranger scenario despite knowing each other",
+     "authority figure and subordinate dynamic", "rescuer and rescued", "predator and prey consensual chase"],
+    # 12 — Anonymous / no-identity
+    ["sex with someone whose name you never learn", "anonymous encounter in a darkened room",
+     "glory hole fantasy", "hotel-hallway knock with no context", "masked encounter"],
+    # 13 — Fetish wear / texture
+    ["latex worn during sex", "leather restraints", "full-body stockings", "uniforms worn during sex",
+     "partner in specific clothing that triggers arousal"],
+    # 14 — Body worship
+    ["having every part of your body kissed slowly", "spending an entire session on one body part",
+     "foot or leg focus", "being treated like a sacred object", "worshipping your partner's body for hours"],
+    # 15 — Dirty mirror / self-watching
+    ["watching yourself in a full-length mirror during sex", "being filmed and watching the footage after",
+     "live-streaming your own encounter privately", "narrating yourself", "reviewing what you look like mid-act"],
+    # 16 — Temperature / sensation play
+    ["ice traced across your skin during sex", "wax dripped carefully on your body",
+     "feather teasing before any contact", "alternating heat and cold", "deliberately slowing sensation to an unbearable pace"],
+    # 17 — Impact play
+    ["spanking as part of sex", "hair-pulling mid-act", "biting that leaves marks",
+     "being struck with an object you've agreed on", "the sound of impact as the primary turn-on"],
+    # 18 — Toys during partnered sex
+    ["a vibrator used on you while your partner watches", "remote-controlled toy in a public place",
+     "toy used on your partner by you", "strap-on play", "double penetration via toys"],
+    # 19 — Verbal humiliation / praise kink
+    ["being praised obsessively during sex", "being called specific names you've asked for",
+     "consensual degradation that only works because you chose it", "being talked down to and finding it hot",
+     "worship language that borders on religious"],
+    # 20 — Power reversal
+    ["a partner who is usually dominant letting you take over", "taking control mid-scene unexpectedly",
+     "swapping roles halfway through", "deliberately subverting the expected dynamic",
+     "role-switching as a game with no fixed outcome"],
+    # 21 — Non-monogamy scenarios
+    ["swinging with another couple", "open relationship encounter with full partner knowledge",
+     "watching your partner flirt with someone you've both agreed to", "compersion — being turned on by your partner's pleasure with another",
+     "a couple's shared lover dynamic"],
+    # 22 — Cuckolding / hotwife — gender-neutral version
+    ["your partner sleeping with someone else while you know about it in real time",
+     "being told every detail afterward", "watching your partner be desired by someone new",
+     "the humiliation/pride mix of your partner being wanted by others",
+     "orchestrating your partner's encounter from a distance"],
+    # 23 — Phone / remote sex
+    ["phone sex where you're directed by voice alone", "explicit voice notes sent throughout the day",
+     "sexting that describes exactly what you'd do", "video call sex with a partner in another city",
+     "being given instructions remotely and having to follow them alone"],
+    # 24 — Fantasy narration during sex
+    ["a partner narrating a fantasy scenario aloud while you have sex",
+     "being told a story that describes exactly what's happening",
+     "guided imagination during sex", "your partner voicing a character mid-act",
+     "audio erotica playing while you're both in the room"],
+    # 25 — Sleep-adjacent / stillness
+    ["being touched while pretending to be asleep (consensual somnophilia)",
+     "sex that starts before either of you fully wakes up", "keeping completely still while your partner moves",
+     "staying silent no matter what happens", "the fantasy of being acted on without responding"],
+    # 26 — Status / taboo dynamic
+    ["a boss and employee dynamic with no real-world overlap", "a mentor and student scenario",
+     "a formal hierarchy that only exists in the bedroom", "using titles during sex",
+     "the turn-on of someone technically 'above' you wanting you"],
+    # 27 — Competition / game
+    ["sex as a challenge — who breaks first", "orgasm competition", "being bet against",
+     "a game with sexual consequences for losing", "the thrill of trying to hold out longer"],
+    # 28 — Scent / taste fixation
+    ["a partner's specific scent being the main turn-on", "tasting someone before touching them",
+     "blindfolded identification by scent alone", "oral fixation as a standalone act",
+     "being eaten out or going down as the entire main event — not foreplay"],
+    # 29 — Location / setting fetish
+    ["sex in a specific location you've fixated on", "a hotel room with floor-to-ceiling windows",
+     "the back seat of a car", "a swimming pool or body of water after dark",
+     "a specific room in a house that isn't the bedroom"],
+    # 30 — Aftercare / intimacy as erotic
+    ["the vulnerability after sex being as erotic as the act", "crying or emotional release during sex",
+     "being held for a long time after as part of the sexual experience",
+     "silence and skin contact as an explicit act", "the morning after being as intentional as the night before"],
 ]
 
 
 def _build_generation_prompt() -> str:
-    seed = random.randint(100000, 999999)
-    today = datetime.date.today().isoformat()
-    clusters = random.sample(_FANTASY_POOLS, 4)
-    cluster_str = "\n".join(f"  - {', '.join(c)}" for c in clusters)
+    # uuid4 = globally unique, never repeats across all sessions ever
+    seed      = str(uuid.uuid4())
+    timestamp = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
 
-    return f"""You write questions for an adults-only desire quiz called "Read Between The Lines" inside Vice Vault, an adult lifestyle app. All users have verified their age and explicitly opted in to explicit sexual content.
+    # Sample 6 clusters for anchored questions, leave the rest available for freeform
+    clusters        = random.sample(_FANTASY_POOLS, 6)
+    cluster_labels  = [c[0] for c in clusters]   # first item is the headline kink
+    cluster_str     = "\n".join(f"  Cluster {i+1}: {', '.join(c)}" for i, c in enumerate(clusters))
+    excluded_labels = "; ".join(cluster_labels)
 
-SESSION SEED: {seed} | DATE: {today}
-This seed is unique — your questions MUST differ from any previous session. Never reuse scenarios, phrasings, or setups from prior runs.
+    return f"""You write questions for an adults-only desire quiz called "Read Between The Lines" inside Vice Vault, a verified 18+ adult lifestyle app. Every user has age-verified and explicitly consented to explicit sexual content.
 
-THIS SESSION'S FANTASY ANCHORS — build at least 6 of your 10 questions directly around these specific kink/fantasy clusters:
+SESSION ID: {seed}
+TIMESTAMP:  {timestamp}
+
+This session ID is globally unique and has never existed before. You MUST generate questions that have never appeared in any prior session. No recycled phrasings, no familiar scenario structures, no reused setups. Treat this as a blank slate.
+
+━━━ YOUR TASK ━━━
+Write exactly 10 quiz questions that surface what a person ACTUALLY wants — including things they haven't consciously admitted to themselves. Your questions should feel like they've read the user's mind and named something they've never said out loud.
+
+Use indirect, scenario-based framing. Don't ask "do you like X" — put the person inside a specific moment and ask how they respond. The question should create a small jolt of recognition.
+
+━━━ ANCHORED QUESTIONS (build exactly 6 from these clusters) ━━━
 {cluster_str}
 
-The remaining 4 questions can explore any sexual fantasy, kink, or dynamic not listed above — but they must be equally specific and explicit.
+Go beyond the surface label. For each cluster, construct a scenario that forces the person to locate themselves emotionally and physically — not just tick a preference box.
 
-RULES:
-1. Every question must be unambiguously about a specific sexual fantasy, kink, or dynamic.
-2. Each question must feel like it exposes something the person hasn't fully admitted to themselves.
-3. Measure one or more dimensions per question:
+━━━ FREE QUESTIONS (exactly 4) ━━━
+These must explore kinks, dynamics, or fantasies NOT covered by these clusters: {excluded_labels}
+Choose territory that is specific, psychologically revealing, and genuinely different from the anchors.
+
+━━━ RULES ━━━
+1. Every question is unambiguously sexual in nature — no metaphors, no euphemisms.
+2. Scenarios are second-person, present tense, specific. Put the person IN the moment.
+3. Each question should feel like it's exposing something the person hasn't fully said yes to yet.
+4. Measure one or more of these dimensions per question:
    - control     → dominance, submission, restraint, consensual power exchange
    - sensory     → physical sensation, pain/pleasure, texture, temperature, intensity
    - exhib       → being watched, performing, filming, public/semi-public scenarios
    - dynamic     → roleplay, personas, power games, specific fantasy scenarios
    - openness    → threesomes, group sex, non-monogamy, swinging, taboo kinks
-   - verbal      → dirty talk, sexting, explicit instructions, sound, narration during sex
-4. Exactly 4 answer options per question, escalating from vanilla (score 0) to deeply into it (score 3).
-5. Options must feel meaningfully different. The jump 1→2→3 should feel like crossing a line.
-6. Tone: bold, direct, a little confrontational.
-7. Use gender-neutral and orientation-neutral language throughout. Do not assume gender or role.
+   - verbal      → dirty talk, phone sex, explicit instructions, sound, narration
+5. Exactly 4 answer options per question, escalating:
+   - Option 0: avoidant / not for me
+   - Option 1: curious but haven't gone there
+   - Option 2: genuinely want this
+   - Option 3: I've already thought about this in detail and I want more
+   The jump from 2→3 should feel like crossing a psychological line.
+6. Options must be meaningfully distinct — not just more emphatic versions of the same thing.
+7. CRITICAL — fully gender-neutral and body-neutral language throughout. No pronouns that imply gender. No assumed body parts. No assumed role (top/bottom/giver/receiver). The questions must work for any person of any gender, body, and orientation.
+8. Tone: direct, a little confrontational, no clinical language, no hedging.
 
-Return ONLY valid JSON — no markdown fences, no explanation, no preamble. Format exactly:
+Return ONLY valid JSON — no markdown fences, no explanation, no preamble:
 [
   {{
-    "tag": "2-3 word label capturing the kink/fantasy",
-    "text": "The scenario — second person, present tense, specific and explicitly sexual",
-    "dims": {{"dim_name": [score_for_opt0, score_for_opt1, score_for_opt2, score_for_opt3]}},
-    "opts": ["Vanilla/avoidant response", "Curious but cautious", "Into it", "Already fantasised about exactly this"]
+    "tag": "2-3 word kink/fantasy label",
+    "text": "The scenario — second person, present tense, specific, explicitly sexual",
+    "dims": {{"dim_name": [score_opt0, score_opt1, score_opt2, score_opt3]}},
+    "opts": ["Avoidant response", "Curious but hasn't happened", "Genuinely want this", "Already fantasised in detail"]
   }}
 ]
-
 Scores are integers 0–3."""
 
 
-RECOMMENDATION_PROMPT = """You are a sex-positive, frank, and knowledgeable desire analyst for Vice Vault, an adult lifestyle app.
+RECOMMENDATION_PROMPT = """You are a frank, sex-positive, deeply knowledgeable desire analyst for Vice Vault, a verified adult lifestyle app.
 
-A user just completed a desire profile quiz. Based on their scores and actual answers, write 5 personalised recommendations for things they might enjoy exploring — specific experiences, scenarios, or dynamics.
+A user just completed a desire profile quiz. Using their dimension scores AND their actual chosen answers, write 5 personalised recommendations for experiences, scenarios, or dynamics worth exploring.
 
 Dimension scores (0–100%):
 {scores}
 
 Profile: {profile_name} — {profile_desc}
 
-What the user chose (things they expressed interest in — build on these):
+What the user expressed genuine interest in (build on these — these are your raw material):
 {chosen_answers}
 
-What the user actively rejected or rated zero/low interest in (DO NOT recommend anything in this territory — the user clearly said no):
+What the user actively rejected or scored zero on (HARD RULE — do not recommend these, do not gesture toward them, do not recommend adjacent versions):
 {rejected_answers}
 
 Guidelines:
-- CRITICAL: If something appears in the rejected list, do not suggest it, allude to it, or recommend adjacent versions of it. The user said no.
-- Build ONLY on what the user showed genuine interest in from their chosen answers.
-- Use completely gender-neutral and orientation-neutral language. Do not assume gender, body type, or preferred role.
-- Be specific, honest, and a little daring — this is an adults-only app.
-- Each rec should feel tailored to their exact answer pattern, not generic.
-- Tone: a knowledgeable, non-judgmental friend — not a therapist.
+- CRITICAL: Anything in the rejected list is off the table entirely. Not even a softer version.
+- Recommendations must feel like they were written specifically for this person's answer pattern — not generic sex advice.
+- Use fully gender-neutral, body-neutral, orientation-neutral language. No assumed pronouns, body parts, or roles.
+- Be specific and a little daring — this is an 18+ app with consenting adults.
+- Tone: knowledgeable, non-judgmental, like a frank friend who knows a lot — not a therapist or a content warning.
 - 1-2 sentences per recommendation, max.
 - Do NOT use bullet characters or numbering inside the strings.
 
@@ -175,7 +296,9 @@ def _call_openai(prompt: str) -> str:
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.97,
+        temperature=0.99,        # slightly higher than before for more variety
+        presence_penalty=0.6,    # penalise repetition of token clusters
+        frequency_penalty=0.4,
     )
     return response.choices[0].message.content.strip()
 
@@ -223,16 +346,14 @@ def _build_answer_context(questions: list, answers: list) -> tuple[str, str]:
     for qi, ai in enumerate(answers):
         if ai is None or qi >= len(questions):
             continue
-        q    = questions[qi]
-        tag  = q.get("tag", "")
-        opts = q.get("opts", [])
+        q        = questions[qi]
+        tag      = q.get("tag", "")
+        opts     = q.get("opts", [])
         opt_text = opts[ai] if ai < len(opts) else ""
 
-        # Score 0 or option index 0 = no interest
         if ai == 0:
             rejected.append(f"- {tag}: chose \"{opt_text}\" (no interest)")
         elif ai == 1:
-            # Mild interest — note but don't heavily weight
             chosen.append(f"- {tag}: chose \"{opt_text}\" (mild curiosity only)")
         else:
             chosen.append(f"- {tag}: chose \"{opt_text}\" (genuine interest)")
@@ -268,7 +389,6 @@ def _save_result_to_db(profile, dim_scores_pct, recs, total_pct, questions, answ
 # ─── CSS (page-specific overrides only — global CSS from styles.py) ───────────
 
 def _inject_page_css():
-    """Only the overrides that differ from global styles.py."""
     st.html("""
 <style>
 section.main .block-container { padding-top:0.5rem !important; max-width:720px !important; }
@@ -504,7 +624,6 @@ def _render_generating_result():
             f'  {DIMS[d]["label"]}: {_dim_pct(scores, dim_max, d)}%' for d in DIMS
         )
 
-        # Build chosen / rejected context from actual answers
         chosen_str, rejected_str = _build_answer_context(questions, answers)
 
         upd("Generating recommendations…", 55, "Writing your personalised profile")
