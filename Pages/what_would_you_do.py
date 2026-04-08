@@ -13,6 +13,9 @@ Changes from original:
   - Gender-neutral language enforced in generation prompt
   - No non-consensual stranger scenarios
   - Wider, more varied GOOD examples for richer question diversity
+  - GOOD examples now explicitly balanced across active/giving AND passive/receiving
+    perspectives so questions don't read as written for one gender
+  - Prompt instructs model to alternate perspective across questions
 """
 
 import streamlit as st
@@ -116,37 +119,63 @@ Questions should feel like a scenario a real person could picture themselves in.
 Casual, specific enough to be real, but not so blunt it reads like a checklist.
 Think: something a friend might say that makes you go "oh... yeah, actually."
 
-GOOD examples — match this energy exactly.
-Notice how each one puts you IN a specific moment, not just describes a category:
+PERSPECTIVE — CRITICAL:
+The questions must be written from a mix of perspectives across the full set of 10.
+Roughly split them as follows:
+  - ~4 questions from the ACTIVE/GIVING perspective (you are the one doing, controlling, initiating)
+  - ~4 questions from the PASSIVE/RECEIVING perspective (it's happening to you, you're the one reacting)
+  - ~2 questions that are neutral or mutual (both people equally involved)
 
+This is essential. If all or most questions are written from a passive/receiving angle,
+they will feel like they were written for a specific type of person. That is wrong.
+Both orientations must feel equally natural to answer.
+
+GOOD examples — ACTIVE/GIVING perspective (match this energy):
+"You pin your partner down and don't let them move until you decide."
+"You grip their hair and set the pace. They take it."
+"You're the one deciding when they finish. They have to wait."
+"You hold them against the wall and do exactly what you want."
+"You tie your partner up and take your time."
+"You whisper exactly what you're going to do before you do it."
+"You're in control the whole time. They don't make a single decision."
+"You spank your partner mid-sex and do it again because you want to."
+"You film your partner without them directing it — it's all you running the show."
+"You bring someone else in. Your partner watches."
+
+GOOD examples — PASSIVE/RECEIVING perspective (match this energy):
 "Your partner ties your wrists to the headboard and takes their time."
 "Your partner spanks you during sex and you want them to do it again."
-"Having sex in a changing room while people are right outside."
 "Being blindfolded and not knowing what they're going to do next."
-"Hooking up with someone and never finding out their name."
 "Your partner tells you not to move. You don't."
-"Filming yourselves having sex and watching it back the next morning."
-"Having sex in a place where anyone could walk in at any moment."
 "Your partner holds you down and doesn't let you move."
-"Watching your partner hook up with someone else in the same room and realising you love it."
 "Your partner keeps stopping right before you finish, and won't let you until they decide."
-"Having sex in a car while people walk past outside."
 "Your partner suggests inviting someone else in, and you say yes before they finish the sentence."
-"Your partner whispers exactly what they're going to do before they do it."
 "Being the only one undressed while your partner stays fully clothed."
 "Getting a message mid-day telling you exactly what's happening tonight."
-"Your partner hands you over to a friend for the night."
+
+GOOD examples — NEUTRAL/MUTUAL perspective:
+"Having sex in a changing room while people are right outside."
+"Filming yourselves having sex and watching it back the next morning."
+"Having sex in a place where anyone could walk in at any moment."
 "A third person joins halfway through and nobody stops."
-"Being told to stay still while your partner does whatever they want."
+"Hooking up with someone and never finding out their name."
+"Having sex in a car while people walk past outside."
 "Meeting someone at a bar, skipping the small talk entirely."
 
-GOOD examples for degradation/humiliation clusters — these are the standard to match:
+GOOD examples for degradation/humiliation clusters — these are the standard to match.
+Again, write roughly half from the giving side and half from the receiving side:
+
+Giving side:
+"You call your partner a filthy slut while you're fucking them and they ask for more."
+"You talk down to your partner the whole time. They love it."
+"You tell them they're yours to do whatever you want with. They don't argue."
+"You call them a good little thing for taking it. They nearly finish on the spot."
+
+Receiving side:
 "Your partner calls you a filthy slut while they're fucking you and you want them to say it again."
 "Being called a dirty little thing mid-sex and feeling yourself get more into it."
 "Your partner talks down to you the whole time and you're completely into it."
-"Being used and talked to like you're nothing — and wanting more of it."
 "Your partner tells you you're theirs to do whatever they want with. You don't argue."
-"Your partner calls you a good little slut for taking it and you nearly finish on the spot."
 
 BAD — these are descriptions, not scenarios. No context, can't picture it:
 "Being tied up and left at the mercy of your partner."
@@ -166,15 +195,19 @@ BAD — gendered or non-consensual framing. Never write these:
 
 Instead, make it specific. Add who does what, where, or what happens next:
 - Bad: "Switching traditional roles in bed."
-  Good: "Usually the one giving orders, but tonight your partner takes over completely."
+  Good (passive): "Usually the one giving orders, but tonight your partner takes over completely."
+  Good (active): "Usually the one being told what to do, but tonight you're the one in charge."
 - Bad: "Being tied up."
-  Good: "Your partner ties your wrists to the headboard and takes their time."
+  Good (passive): "Your partner ties your wrists to the headboard and takes their time."
+  Good (active): "You tie your partner's wrists and take your time."
 - Bad: "Sex in public."
   Good: "Having sex in a car while people walk past outside."
 - Bad: "A threesome."
-  Good: "Your partner suggests inviting someone else in, and you say yes before they finish the sentence."
+  Good (passive): "Your partner suggests inviting someone else in, and you say yes before they finish the sentence."
+  Good (active): "You suggest bringing someone else in. Your partner's face says yes before they speak."
 - Bad: "Being called names during sex."
-  Good: "Your partner calls you a filthy slut while they're fucking you and you want them to say it again."
+  Good (passive): "Your partner calls you a filthy slut while they're fucking you and you want them to say it again."
+  Good (active): "You call your partner a filthy slut while you're fucking them and they ask you to keep going."
 
 The test: can you picture exactly where you are and what's happening?
 If it reads like a menu item or a category label, rewrite it with a specific moment.
