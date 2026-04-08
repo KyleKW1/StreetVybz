@@ -171,7 +171,7 @@ def _send_email(to_email: str, token=None, reset_type="password") -> bool:
         msg["To"]   = to_email
         if reset_type == "password":
             msg["Subject"] = "ViceVault — Password Reset"
-            reset_url = f"https://your-app.streamlit.app/?reset_token={token}"
+            reset_url = f"testrun01.streamlit.app/?reset_token={token}"
             body = (
                 f"Click the link below to reset your password (valid 1 hour):\n{reset_url}\n\n"
                 "If you didn't request this, ignore this email."
