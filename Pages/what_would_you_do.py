@@ -10,6 +10,9 @@ Changes from original:
   - Recommendation prompt now receives chosen AND rejected answers for specificity
   - OpenAI client cached with @st.cache_resource
   - max_tokens=8000 to prevent JSON truncation
+  - Gender-neutral language enforced in generation prompt
+  - No non-consensual stranger scenarios
+  - Wider, more varied GOOD examples for richer question diversity
 """
 
 import streamlit as st
@@ -118,18 +121,24 @@ Notice how each one puts you IN a specific moment, not just describes a category
 
 "Your partner ties your wrists to the headboard and takes their time."
 "Your partner spanks you during sex and you want them to do it again."
-"Having sex with your partner and a friend joining halfway through."
+"Having sex in a changing room while people are right outside."
 "Being blindfolded and not knowing what they're going to do next."
 "Hooking up with someone and never finding out their name."
-"Your partner tells you exactly what to do and you just... do it."
-"Filming yourselves having sex and watching it back together."
+"Your partner tells you not to move. You don't."
+"Filming yourselves having sex and watching it back the next morning."
 "Having sex in a place where anyone could walk in at any moment."
 "Your partner holds you down and doesn't let you move."
-"Watching your partner have sex with someone else in the same room."
-"Your partner keeps you right on the edge but won't let you finish."
+"Watching your partner hook up with someone else in the same room and realising you love it."
+"Your partner keeps stopping right before you finish, and won't let you until they decide."
 "Having sex in a car while people walk past outside."
-"Someone you just met asks if they can tie you up."
+"Your partner suggests inviting someone else in, and you say yes before they finish the sentence."
 "Your partner whispers exactly what they're going to do before they do it."
+"Being the only one undressed while your partner stays fully clothed."
+"Getting a message mid-day telling you exactly what's happening tonight."
+"Your partner hands you over to a friend for the night."
+"A third person joins halfway through and nobody stops."
+"Being told to stay still while your partner does whatever they want."
+"Meeting someone at a bar, skipping the small talk entirely."
 
 BAD — these are descriptions, not scenarios. No context, can't picture it:
 "Being tied up and left at the mercy of your partner."
@@ -139,27 +148,35 @@ BAD — these are descriptions, not scenarios. No context, can't picture it:
 "Exploring bondage and restraint."
 "Engaging in impact play with a consenting partner."
 
-Instead, make it specific. Add who does what, where, or what happens next:
-- Bad: "Switching traditional roles in bed." 
-- Good: "Usually the one giving orders, but tonight your partner takes over completely."
-- Bad: "Being tied up."
-- Good: "Your partner ties your wrists to the headboard and takes their time."
-- Bad: "Sex in public."
-- Good: "Having sex in a car while people walk past outside."
-
-BAD — too dramatic:
+BAD — too dramatic, reads like a thriller not a scenario:
 "Wrists pinned. You can't move. They take their time."
 "You're in a darkened room and a hand finds you in the silence."
 
-The test: can you picture exactly where you are and what's happening? 
+BAD — gendered or non-consensual framing. Never write these:
+"Feeling someone's hand slip under your skirt in a crowd."
+"A stranger touches you without warning and it turns you on."
+
+Instead, make it specific. Add who does what, where, or what happens next:
+- Bad: "Switching traditional roles in bed."
+  Good: "Usually the one giving orders, but tonight your partner takes over completely."
+- Bad: "Being tied up."
+  Good: "Your partner ties your wrists to the headboard and takes their time."
+- Bad: "Sex in public."
+  Good: "Having sex in a car while people walk past outside."
+- Bad: "A threesome."
+  Good: "Your partner suggests inviting someone else in, and you say yes before they finish the sentence."
+
+The test: can you picture exactly where you are and what's happening?
 If it reads like a menu item or a category label, rewrite it with a specific moment.
 
 CRITICAL LANGUAGE RULES:
 - No jargon. If a regular person wouldn't say it in conversation, don't use it.
   Banned words: "impact play", "breath control", "edging", "dynamic", "incorporating", "consensual", "sensation play", "orgasm denial", "power exchange"
-- No act-specific language that assumes a body or role ("riding", "taking it", "giving it", "penetration")
-- Every question works for any gender, any body, any orientation
-- Use plain words: "having sex", "being touched", "hooking up", "being held down", "watching"
+- NEVER reference gendered clothing or body-specific terms. Use "they/them/their" only.
+- NEVER write scenarios involving non-consensual touch or surprise contact from strangers. Every scenario involves a partner or willing participant.
+- No act-specific language that assumes a particular body or role ("riding", "taking it", "giving it", "penetration")
+- Every question works identically for any gender, any body, any orientation
+- Use plain words: "your partner", "having sex", "being touched", "hooking up", "being held down", "watching"
 
 Rules:
 - "text": one plain sentence or short scenario, 8-16 words
