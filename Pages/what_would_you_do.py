@@ -9,6 +9,11 @@ Perf fixes vs original:
   - OpenAI client cached with @st.cache_resource (no re-instantiation per render)
   - CSS/fonts not re-injected (handled globally by styles.py)
   - Question generation prompt cached via @st.cache_data on the key seed inputs
+
+Fixes v2:
+  - Recommendation prompt now receives chosen AND rejected answers explicitly
+  - Model told never to suggest anything in rejected territory
+  - Gender/orientation-neutral language enforced in prompt
 """
 
 import streamlit as st
@@ -120,6 +125,7 @@ RULES:
 4. Exactly 4 answer options per question, escalating from vanilla (score 0) to deeply into it (score 3).
 5. Options must feel meaningfully different. The jump 1→2→3 should feel like crossing a line.
 6. Tone: bold, direct, a little confrontational.
+7. Use gender-neutral and orientation-neutral language throughout. Do not assume gender or role.
 
 Return ONLY valid JSON — no markdown fences, no explanation, no preamble. Format exactly:
 [
@@ -136,20 +142,28 @@ Scores are integers 0–3."""
 
 RECOMMENDATION_PROMPT = """You are a sex-positive, frank, and knowledgeable desire analyst for Vice Vault, an adult lifestyle app.
 
-A user just completed a desire profile quiz. Based on their scores, write 5 personalised recommendations for things they might enjoy exploring — specific experiences, scenarios, or dynamics.
+A user just completed a desire profile quiz. Based on their scores and actual answers, write 5 personalised recommendations for things they might enjoy exploring — specific experiences, scenarios, or dynamics.
 
 Dimension scores (0–100%):
 {scores}
 
 Profile: {profile_name} — {profile_desc}
 
+What the user chose (things they expressed interest in — build on these):
+{chosen_answers}
+
+What the user actively rejected or rated zero/low interest in (DO NOT recommend anything in this territory — the user clearly said no):
+{rejected_answers}
+
 Guidelines:
-- Be specific, honest, and a little daring — this is an adults-only app
-- Reference actual sexual dynamics, scenarios, or experiences where relevant
-- Each rec should feel tailored to their exact score pattern, not generic
-- Tone: a knowledgeable, non-judgmental friend — not a therapist
-- 1-2 sentences per recommendation, max
-- Do NOT use bullet characters or numbering inside the strings
+- CRITICAL: If something appears in the rejected list, do not suggest it, allude to it, or recommend adjacent versions of it. The user said no.
+- Build ONLY on what the user showed genuine interest in from their chosen answers.
+- Use completely gender-neutral and orientation-neutral language. Do not assume gender, body type, or preferred role.
+- Be specific, honest, and a little daring — this is an adults-only app.
+- Each rec should feel tailored to their exact answer pattern, not generic.
+- Tone: a knowledgeable, non-judgmental friend — not a therapist.
+- 1-2 sentences per recommendation, max.
+- Do NOT use bullet characters or numbering inside the strings.
 
 Return ONLY a JSON array of exactly 5 strings. No markdown, no preamble.
 ["Recommendation one.", "Recommendation two.", ...]
@@ -196,6 +210,36 @@ def _total_pct(scores: dict, dim_max: dict) -> int:
 
 def _dim_pct(scores: dict, dim_max: dict, d: str) -> int:
     return round((scores[d] / dim_max[d]) * 100) if dim_max.get(d) else 0
+
+
+def _build_answer_context(questions: list, answers: list) -> tuple[str, str]:
+    """
+    Returns (chosen_str, rejected_str) — human-readable summaries of what
+    the user picked vs what they passed on. Used to ground the recommendation prompt.
+    """
+    chosen   = []
+    rejected = []
+
+    for qi, ai in enumerate(answers):
+        if ai is None or qi >= len(questions):
+            continue
+        q    = questions[qi]
+        tag  = q.get("tag", "")
+        opts = q.get("opts", [])
+        opt_text = opts[ai] if ai < len(opts) else ""
+
+        # Score 0 or option index 0 = no interest
+        if ai == 0:
+            rejected.append(f"- {tag}: chose \"{opt_text}\" (no interest)")
+        elif ai == 1:
+            # Mild interest — note but don't heavily weight
+            chosen.append(f"- {tag}: chose \"{opt_text}\" (mild curiosity only)")
+        else:
+            chosen.append(f"- {tag}: chose \"{opt_text}\" (genuine interest)")
+
+    chosen_str   = "\n".join(chosen)   if chosen   else "Nothing stood out strongly."
+    rejected_str = "\n".join(rejected) if rejected else "Nothing explicitly rejected."
+    return chosen_str, rejected_str
 
 
 # ─── DB SAVE ──────────────────────────────────────────────────────────────────
@@ -459,11 +503,17 @@ def _render_generating_result():
         score_str = "\n".join(
             f'  {DIMS[d]["label"]}: {_dim_pct(scores, dim_max, d)}%' for d in DIMS
         )
+
+        # Build chosen / rejected context from actual answers
+        chosen_str, rejected_str = _build_answer_context(questions, answers)
+
         upd("Generating recommendations…", 55, "Writing your personalised profile")
         raw = _call_openai(RECOMMENDATION_PROMPT.format(
             scores=score_str,
             profile_name=profile["name"],
             profile_desc=profile["desc"],
+            chosen_answers=chosen_str,
+            rejected_answers=rejected_str,
         ))
         raw  = raw.replace("```json", "").replace("```", "").strip()
         upd("Finishing up…", 90, "Almost there")
