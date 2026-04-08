@@ -697,20 +697,40 @@ def _render_loading():
         for q in questions:
             if not isinstance(q, dict):
                 continue
-            if not all(k in q for k in ("tag", "text", "dims", "opts")):
+
+            # Must have text at minimum; fill missing keys with safe defaults
+            if not q.get("text"):
                 continue
-            if not isinstance(q.get("opts"), list) or len(q["opts"]) != 4:
-                continue
-            if not isinstance(q.get("dims"), dict):
-                continue
-            q["dims"] = {d: v for d, v in q["dims"].items() if d in DIMS}
+            q.setdefault("tag", "scenario")
+            q.setdefault("opts", [])
+            q.setdefault("dims", {})
+
+            # Salvage opts: trim if too long, pad if too short
+            opts = q["opts"] if isinstance(q["opts"], list) else []
+            defaults = ["Not my thing", "Kind of curious", "Would actually do this", "Already thought about this a lot"]
+            while len(opts) < 4:
+                opts.append(defaults[len(opts)])
+            q["opts"] = opts[:4]
+
+            # Filter dims to known keys; if none match, assign a fallback
+            if isinstance(q.get("dims"), dict):
+                q["dims"] = {d: v for d, v in q["dims"].items()
+                             if d in DIMS and isinstance(v, list) and len(v) >= 4}
             if not q["dims"]:
-                continue
+                q["dims"] = {"dynamic": [0, 1, 2, 3]}
+
+            # Ensure each dim score list has exactly 4 values
+            for d in q["dims"]:
+                scores = q["dims"][d]
+                while len(scores) < 4:
+                    scores.append(scores[-1] if scores else 0)
+                q["dims"][d] = scores[:4]
+
             valid.append(q)
 
-        if len(valid) < 5:
+        if len(valid) < 3:
             raise ValueError(
-                f"Only {len(valid)} valid question(s) returned — need at least 5. Please try again."
+                f"Only {len(valid)} usable question(s) returned — model output was too broken. Please try again."
             )
 
         random.shuffle(valid)
