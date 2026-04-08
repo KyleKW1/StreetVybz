@@ -22,8 +22,16 @@ Fixes v3:
   - Prompt rewritten to surface unconscious/hidden desires via indirect scenarios
   - All gendered language purged from pools and prompts
   - Answer options now required to feel like crossing a psychological line
+
+Fixes v4:
+  - max_tokens=4000 added to _call_openai to prevent truncated JSON
+  - _extract_json_array() robustly grabs the outermost [...] or {...} block,
+    ignoring any preamble / trailing text the model appends
+  - Both loading phases use _extract_json_array before json.loads
+  - Raw model output logged to kq_raw_debug on failure for easier debugging
 """
 
+import re
 import streamlit as st
 import json
 import random
@@ -250,7 +258,7 @@ Choose territory that is specific, psychologically revealing, and genuinely diff
 7. CRITICAL — fully gender-neutral and body-neutral language throughout. No pronouns that imply gender. No assumed body parts. No assumed role (top/bottom/giver/receiver). The questions must work for any person of any gender, body, and orientation.
 8. Tone: direct, a little confrontational, no clinical language, no hedging.
 
-Return ONLY valid JSON — no markdown fences, no explanation, no preamble:
+Return ONLY valid JSON — no markdown fences, no explanation, no preamble, no trailing text after the closing bracket:
 [
   {{
     "tag": "2-3 word kink/fantasy label",
@@ -259,7 +267,7 @@ Return ONLY valid JSON — no markdown fences, no explanation, no preamble:
     "opts": ["Avoidant response", "Curious but hasn't happened", "Genuinely want this", "Already fantasised in detail"]
   }}
 ]
-Scores are integers 0–3."""
+Scores are integers 0–3. Output the JSON array and nothing else."""
 
 
 RECOMMENDATION_PROMPT = """You are a frank, sex-positive, deeply knowledgeable desire analyst for Vice Vault, a verified adult lifestyle app.
@@ -286,9 +294,57 @@ Guidelines:
 - 1-2 sentences per recommendation, max.
 - Do NOT use bullet characters or numbering inside the strings.
 
-Return ONLY a JSON array of exactly 5 strings. No markdown, no preamble.
-["Recommendation one.", "Recommendation two.", ...]
-"""
+Return ONLY a JSON array of exactly 5 strings. No markdown, no preamble, no trailing text after the closing bracket.
+["Recommendation one.", "Recommendation two.", ...]"""
+
+
+# ─── JSON EXTRACTION HELPER ───────────────────────────────────────────────────
+
+def _extract_json_array(raw: str) -> str:
+    """
+    Robustly extract the first top-level JSON array from a model response.
+
+    Handles:
+      - Markdown fences (```json ... ```)
+      - Preamble text before the array
+      - Trailing text / notes after the closing bracket
+      - Cases where the model wraps the array in an object
+
+    Raises ValueError if no array is found.
+    """
+    # Strip markdown fences first
+    raw = raw.replace("```json", "").replace("```", "").strip()
+
+    # Walk character-by-character to find the outermost [...] block.
+    # This is more reliable than a regex for nested structures.
+    start = raw.find("[")
+    if start == -1:
+        raise ValueError("No JSON array found in model response")
+
+    depth   = 0
+    in_str  = False
+    escape  = False
+
+    for i, ch in enumerate(raw[start:], start=start):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_str:
+            escape = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return raw[start : i + 1]
+
+    raise ValueError("Malformed JSON array — no closing bracket found")
 
 
 def _call_openai(prompt: str) -> str:
@@ -296,9 +352,10 @@ def _call_openai(prompt: str) -> str:
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.99,        # slightly higher than before for more variety
-        presence_penalty=0.6,    # penalise repetition of token clusters
+        temperature=0.99,
+        presence_penalty=0.6,
         frequency_penalty=0.4,
+        max_tokens=4000,   # prevent truncated JSON on long question sets
     )
     return response.choices[0].message.content.strip()
 
@@ -420,6 +477,7 @@ def init_state():
         "kq_recs":      [],
         "kq_error":     "",
         "kq_saved":     False,
+        "kq_raw_debug": "",   # stores last raw model output on failure
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -460,6 +518,11 @@ def _render_start():
         st.warning(st.session_state.kq_error)
         st.session_state.kq_error = ""
 
+    # Debug expander — shows raw model output when a parse failure occurred
+    if st.session_state.get("kq_raw_debug"):
+        with st.expander("🛠 Debug: last raw model output"):
+            st.code(st.session_state.kq_raw_debug, language="text")
+
     st.html("""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:28px; margin-bottom:16px;">
@@ -478,7 +541,8 @@ def _render_start():
 </div>
 """)
     if st.button("Generate My Quiz →", use_container_width=True, type="primary"):
-        st.session_state.kq_phase = "loading"
+        st.session_state.kq_phase     = "loading"
+        st.session_state.kq_raw_debug = ""   # clear stale debug output
         st.rerun()
 
 
@@ -494,13 +558,14 @@ def _render_loading():
         ph_bar.progress(p)
         ph_status.caption(s)
 
+    raw = ""
     try:
         upd("Generating your quiz…", 10, "Writing fresh scenarios for you")
         raw = _call_openai(_build_generation_prompt())
-        raw = raw.replace("```json", "").replace("```", "").strip()
-        upd("Parsing questions…", 80, "Validating")
 
-        questions = json.loads(raw)
+        upd("Parsing questions…", 80, "Validating")
+        questions = json.loads(_extract_json_array(raw))
+
         valid = []
         for q in questions:
             if not all(k in q for k in ("tag", "text", "dims", "opts")):
@@ -513,7 +578,7 @@ def _render_loading():
             valid.append(q)
 
         if len(valid) < 5:
-            raise ValueError(f"Only {len(valid)} valid questions — try again.")
+            raise ValueError(f"Only {len(valid)} valid questions returned — try again.")
 
         random.shuffle(valid)
         final = valid[:10]
@@ -526,8 +591,9 @@ def _render_loading():
         st.rerun()
 
     except Exception as e:
-        st.session_state.kq_error = f"Couldn't generate questions: {e}"
-        st.session_state.kq_phase = "start"
+        st.session_state.kq_raw_debug = raw   # preserve for debugging
+        st.session_state.kq_error     = f"Couldn't generate questions: {e}"
+        st.session_state.kq_phase     = "start"
         st.rerun()
 
 
@@ -609,6 +675,7 @@ def _render_generating_result():
         ph_bar.progress(p)
         ph_status.caption(s)
 
+    raw = ""
     try:
         upd("Reading between the lines…", 20, "Analysing your answers")
         questions = st.session_state.kq_questions
@@ -634,10 +701,11 @@ def _render_generating_result():
             chosen_answers=chosen_str,
             rejected_answers=rejected_str,
         ))
-        raw  = raw.replace("```json", "").replace("```", "").strip()
+
         upd("Finishing up…", 90, "Almost there")
-        recs = json.loads(raw)
-        if not isinstance(recs, list): recs = []
+        recs = json.loads(_extract_json_array(raw))
+        if not isinstance(recs, list):
+            recs = []
 
         dim_scores_pct = {d: _dim_pct(scores, dim_max, d) for d in DIMS}
         st.session_state.kq_scores    = scores
@@ -651,9 +719,10 @@ def _render_generating_result():
         st.rerun()
 
     except Exception as e:
-        st.session_state.kq_error = f"Something went wrong: {e}"
-        st.session_state.kq_phase = "quiz"
-        st.session_state.kq_cur   = len(st.session_state.kq_questions) - 1
+        st.session_state.kq_raw_debug = raw
+        st.session_state.kq_error     = f"Something went wrong generating your result: {e}"
+        st.session_state.kq_phase     = "quiz"
+        st.session_state.kq_cur       = len(st.session_state.kq_questions) - 1
         st.rerun()
 
 
