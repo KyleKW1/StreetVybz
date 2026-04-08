@@ -24,7 +24,7 @@ Fixes v3:
   - Answer options now required to feel like crossing a psychological line
 
 Fixes v4:
-  - max_tokens=4000 added to _call_openai to prevent truncated JSON
+  - max_tokens=8000 (was 4000) — prevents truncated JSON on long responses
   - _extract_json_array() robustly grabs the outermost [...] or {...} block,
     ignoring any preamble / trailing text the model appends
   - Both loading phases use _extract_json_array before json.loads
@@ -38,6 +38,12 @@ Fixes v5:
     error to the user
   - JSONDecodeError now reports position + message for easier debugging
   - Fallback: questions that fail validation are skipped cleanly (was crashing)
+
+Fixes v6:
+  - max_tokens raised to 8000 — root cause of position-3560 truncation error
+  - _recover_partial_json() added: salvages complete objects from a truncated
+    array so a clipped response yields questions instead of a hard crash
+  - _render_loading now falls back to _recover_partial_json before giving up
 """
 
 import re
@@ -249,23 +255,24 @@ Choose territory that is specific, psychologically revealing, and genuinely diff
 2. Scenarios are second-person, present tense, specific. Put the person IN the moment.
 3. Each question should feel like it's exposing something the person hasn't fully said yes to yet.
 4. Measure one or more of these dimensions per question:
-   - control     → dominance, submission, restraint, consensual power exchange
-   - sensory     → physical sensation, pain/pleasure, texture, temperature, intensity
-   - exhib       → being watched, performing, filming, public/semi-public scenarios
-   - dynamic     → roleplay, personas, power games, specific fantasy scenarios
-   - openness    → threesomes, group sex, non-monogamy, swinging, taboo kinks
-   - verbal      → dirty talk, phone sex, explicit instructions, sound, narration
+   - control     -> dominance, submission, restraint, consensual power exchange
+   - sensory     -> physical sensation, pain/pleasure, texture, temperature, intensity
+   - exhib       -> being watched, performing, filming, public/semi-public scenarios
+   - dynamic     -> roleplay, personas, power games, specific fantasy scenarios
+   - openness    -> threesomes, group sex, non-monogamy, swinging, taboo kinks
+   - verbal      -> dirty talk, phone sex, explicit instructions, sound, narration
 5. Exactly 4 answer options per question, escalating:
    - Option 0: avoidant / not for me
    - Option 1: curious but haven't gone there
    - Option 2: genuinely want this
    - Option 3: I've already thought about this in detail and I want more
-   The jump from 2→3 should feel like crossing a psychological line.
+   The jump from 2->3 should feel like crossing a psychological line.
 6. Options must be meaningfully distinct — not just more emphatic versions of the same thing.
 7. CRITICAL — fully gender-neutral and body-neutral language throughout. No pronouns that imply gender. No assumed body parts. No assumed role (top/bottom/giver/receiver). The questions must work for any person of any gender, body, and orientation.
 8. Tone: direct, a little confrontational, no clinical language, no hedging.
-9. CRITICAL — output valid JSON using ASCII double quotes ONLY. No curly quotes, no backticks, no full-width punctuation (no ：, 、, ，). Every string must open and close with a standard " character.
+9. CRITICAL — output valid JSON using ASCII double quotes ONLY. No curly quotes, no backticks, no full-width punctuation (no colon variants, no full-width commas). Every string must open and close with a standard " character.
 10. The JSON array must end with a single ] on its own line. Do not write any text after that closing bracket.
+11. Keep each question object compact. Do not pad strings unnecessarily — brevity helps avoid truncation.
 
 Return ONLY valid JSON — no markdown fences, no explanation, no preamble, no trailing text after the closing bracket:
 [
@@ -276,14 +283,14 @@ Return ONLY valid JSON — no markdown fences, no explanation, no preamble, no t
     "opts": ["Avoidant response", "Curious but hasn't happened", "Genuinely want this", "Already fantasised in detail"]
   }}
 ]
-Scores are integers 0–3. Output the JSON array and nothing else."""
+Scores are integers 0-3. Output the JSON array and nothing else."""
 
 
 RECOMMENDATION_PROMPT = """You are a frank, sex-positive, deeply knowledgeable desire analyst for Vice Vault, a verified adult lifestyle app.
 
 A user just completed a desire profile quiz. Using their dimension scores AND their actual chosen answers, write 5 personalised recommendations for experiences, scenarios, or dynamics worth exploring.
 
-Dimension scores (0–100%):
+Dimension scores (0-100%):
 {scores}
 
 Profile: {profile_name} — {profile_desc}
@@ -321,7 +328,6 @@ def _sanitize_raw(raw: str) -> str:
       - Backtick-delimited strings inside arrays
       - Stray trailing commas before ] or }
     """
-    # Full-width and CJK punctuation → ASCII equivalents
     char_map = {
         "\uff1a": ":",   # ：
         "\u3001": ",",   # 、
@@ -338,7 +344,6 @@ def _sanitize_raw(raw: str) -> str:
         raw = raw.replace(bad, good)
 
     # Replace backtick-delimited strings: `foo` → "foo"
-    # Only inside what looks like a JSON array value position
     raw = re.sub(r"`([^`]*)`", r'"\1"', raw)
 
     # Remove trailing commas before ] or } (common model mistake)
@@ -393,6 +398,50 @@ def _extract_json_array(raw: str) -> str:
     raise ValueError("Malformed JSON array — no closing bracket found")
 
 
+def _recover_partial_json(raw: str) -> list:
+    """
+    Salvage complete JSON objects from a truncated / malformed array.
+    Called as a fallback when _parse_json_array raises.
+
+    Walks the sanitised string character-by-character and extracts every
+    syntactically complete top-level {...} block, ignoring anything after
+    the last successfully parsed object. Returns a (possibly empty) list.
+    """
+    objects   = []
+    sanitized = _sanitize_raw(raw)
+    depth     = 0
+    start     = None
+    in_str    = False
+    escape    = False
+
+    for i, ch in enumerate(sanitized):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_str:
+            escape = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start is not None:
+                try:
+                    objects.append(json.loads(sanitized[start : i + 1]))
+                except json.JSONDecodeError:
+                    pass   # skip malformed individual objects
+                start = None
+
+    return objects
+
+
 def _parse_json_array(raw: str) -> list:
     """Sanitise → extract → parse, with useful error messages on failure."""
     sanitized = _sanitize_raw(raw)
@@ -410,8 +459,11 @@ def _call_openai(prompt: str, retries: int = 3) -> str:
     Call the OpenAI API with automatic retry on failure.
     Returns the raw string content of the first successful response.
     Raises the last exception if all attempts fail.
+
+    max_tokens is set to 8000 (was 4000) to prevent JSON truncation on
+    large question sets — the root cause of the position-3560 parse error.
     """
-    client = _get_openai_client()
+    client   = _get_openai_client()
     last_exc = None
     for attempt in range(1, retries + 1):
         try:
@@ -421,7 +473,7 @@ def _call_openai(prompt: str, retries: int = 3) -> str:
                 temperature=0.99,
                 presence_penalty=0.6,
                 frequency_penalty=0.4,
-                max_tokens=4000,
+                max_tokens=8000,
             )
             return response.choices[0].message.content.strip()
         except Exception as exc:
@@ -634,11 +686,21 @@ def _render_loading():
         raw = _call_openai(_build_generation_prompt())
 
         upd("Parsing questions…", 80, "Validating")
-        questions = _parse_json_array(raw)
+
+        # Primary parse — expects a complete, valid JSON array
+        try:
+            questions = _parse_json_array(raw)
+        except (ValueError, json.JSONDecodeError):
+            # Fallback — response was truncated or malformed; salvage complete objects
+            questions = _recover_partial_json(raw)
+            if not questions:
+                raise ValueError(
+                    "Model returned unparseable output and no complete question objects could be recovered. "
+                    "Please try again."
+                )
 
         valid = []
         for q in questions:
-            # Skip malformed entries cleanly instead of crashing
             if not isinstance(q, dict):
                 continue
             if not all(k in q for k in ("tag", "text", "dims", "opts")):
@@ -653,7 +715,9 @@ def _render_loading():
             valid.append(q)
 
         if len(valid) < 5:
-            raise ValueError(f"Only {len(valid)} valid questions returned — try again.")
+            raise ValueError(
+                f"Only {len(valid)} valid question(s) returned — need at least 5. Please try again."
+            )
 
         random.shuffle(valid)
         final = valid[:10]
@@ -778,9 +842,18 @@ def _render_generating_result():
         ))
 
         upd("Finishing up…", 90, "Almost there")
-        recs = _parse_json_array(raw)
+
+        try:
+            recs = _parse_json_array(raw)
+        except (ValueError, json.JSONDecodeError):
+            # Fallback: try to recover string items from partial output
+            recs = _recover_partial_json(raw)
+
         if not isinstance(recs, list):
             recs = []
+
+        # Ensure recs is a flat list of strings (model occasionally returns dicts)
+        recs = [r if isinstance(r, str) else str(r) for r in recs]
 
         dim_scores_pct = {d: _dim_pct(scores, dim_max, d) for d in DIMS}
         st.session_state.kq_scores    = scores
