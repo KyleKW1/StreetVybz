@@ -114,25 +114,34 @@ Plain, direct, no drama. Just the scenario in one sentence.
 
 GOOD examples — match this energy exactly:
 "Having sex with your partner and inviting a friend to join."
-"Letting someone watch while you and your partner have sex."
-"Being tied up and not being able to move."
-"Hooking up with a complete stranger who doesn't know your name."
-"Being told exactly what to do in bed and just doing it."
-"Filming yourself having sex and watching it back."
 "Having sex somewhere you could easily get caught."
+"Being blindfolded during sex and not knowing what comes next."
+"Being tied up and completely unable to move."
+"Hooking up with someone whose name you never find out."
+"Being told exactly what to do in bed."
+"Filming yourself having sex and watching it back."
+"Having your partner watch while you're with someone else."
 
 BAD — do not write like this:
 "Wrists pinned. You can't move. They take their time."
 "You're in a darkened room and someone you trust has blindfolded you..."
 
+CRITICAL LANGUAGE RULES — violations will break the quiz:
+- NEVER imply penetration, giving or receiving, top or bottom, or any specific sex act that assumes a body part
+- NEVER use phrases like "getting it on", "riding", "taking it", "giving it" — these imply specific bodies/roles
+- Every question must work equally for any gender, any body, any orientation
+- Use: "having sex", "being touched", "hooking up", "being with someone" — not act-specific language
+- Bad: "Getting it on in the back seat of a car" (implies penetrative sex)
+- Good: "Having sex in the back seat of a car with someone watching"
+
 Rules:
-- "text": one plain sentence, 8-14 words, present participle style
+- "text": one plain sentence, 8-14 words, present participle style ("Having sex...", "Being tied...")
 - "opts": 4-7 words each, casual and honest
 - "tag": 2-3 words
-- Explicitly sexual, no euphemisms
-- 4 answer options per question, escalating 0-3
-- Gender-neutral and body-neutral throughout
+- Explicitly sexual, no euphemisms, but body/role neutral
+- EXACTLY 4 answer options per question, escalating 0-3
 - Score each option 0-3 across relevant dims: control, sensory, exhib, dynamic, openness, verbal
+- You MUST write all 10 questions. Do not stop early.
 - Return ONLY valid JSON. No markdown, no preamble, no text after the closing bracket.
 
 [
@@ -366,35 +375,40 @@ def _render_loading():
         ph_bar.progress(p)
         ph_status.caption(s)
 
-    try:
-        upd("Generating your quiz…", 10, "Writing fresh scenarios for you")
-        raw = _call_openai(_build_generation_prompt())
+    def _parse_questions(raw: str) -> list:
         raw = raw.replace("```json", "").replace("```", "").strip()
-
-        upd("Parsing questions…", 80, "Validating and shuffling")
         questions = json.loads(raw)
-
+        defaults = ["Not my thing", "Kind of curious", "Would actually do this", "Already thought about this a lot"]
         valid = []
         for q in questions:
             if not all(k in q for k in ("tag", "text", "dims", "opts")):
                 continue
             if not isinstance(q["opts"], list) or len(q["opts"]) < 2:
                 continue
-            # Pad opts to 4 if short, trim if over
-            defaults = ["Not my thing", "Kind of curious", "Would actually do this", "Already thought about this a lot"]
             while len(q["opts"]) < 4:
                 q["opts"].append(defaults[len(q["opts"])])
             q["opts"] = q["opts"][:4]
-            # Filter dims to known keys; fallback if empty
             if isinstance(q.get("dims"), dict):
                 q["dims"] = {d: v for d, v in q["dims"].items() if d in DIMS}
             if not q.get("dims"):
                 q["dims"] = {"dynamic": [0, 1, 2, 3]}
             valid.append(q)
+        return valid
+
+    try:
+        valid = []
+        for attempt in range(3):
+            pct = 10 + attempt * 20
+            upd("Generating your quiz…", pct, f"Writing fresh scenarios{'  (retry)' if attempt else ''}")
+            raw = _call_openai(_build_generation_prompt())
+            valid = _parse_questions(raw)
+            if len(valid) >= 8:
+                break
 
         if not valid:
             raise ValueError("No valid questions returned — please try again.")
 
+        upd("Parsing questions…", 80, "Validating and shuffling")
         random.shuffle(valid)
         final = valid[:10]
         upd("Ready.", 100, "Let's go")
