@@ -131,18 +131,28 @@ Notice how each one puts you IN a specific moment, not just describes a category
 "Someone you just met asks if they can tie you up."
 "Your partner whispers exactly what they're going to do before they do it."
 
-BAD — these are a description, not a scenario. You can't picture yourself in them:
+BAD — these are descriptions, not scenarios. No context, can't picture it:
 "Being tied up and left at the mercy of your partner."
 "Incorporating spanking into your sexual experiences."
 "Playing with breath control for heightened sensations."
+"Switching traditional roles in bed for something different."
 "Exploring bondage and restraint."
 "Engaging in impact play with a consenting partner."
 
-BAD — too dramatic and try-hard:
+Instead, make it specific. Add who does what, where, or what happens next:
+- Bad: "Switching traditional roles in bed." 
+- Good: "Usually the one giving orders, but tonight your partner takes over completely."
+- Bad: "Being tied up."
+- Good: "Your partner ties your wrists to the headboard and takes their time."
+- Bad: "Sex in public."
+- Good: "Having sex in a car while people walk past outside."
+
+BAD — too dramatic:
 "Wrists pinned. You can't move. They take their time."
 "You're in a darkened room and a hand finds you in the silence."
 
-The test: can you picture exactly where you are and what's happening? If yes, it's good. If it's a category label dressed up as a sentence, rewrite it.
+The test: can you picture exactly where you are and what's happening? 
+If it reads like a menu item or a category label, rewrite it with a specific moment.
 
 CRITICAL LANGUAGE RULES:
 - No jargon. If a regular person wouldn't say it in conversation, don't use it.
@@ -398,17 +408,16 @@ def _render_loading():
         defaults = ["Not my thing", "Kind of curious", "Would actually do this", "Already thought about this a lot"]
         valid = []
         for q in questions:
-            if not all(k in q for k in ("tag", "text", "dims", "opts")):
+            if not isinstance(q, dict) or not q.get("text"):
                 continue
-            if not isinstance(q["opts"], list) or len(q["opts"]) < 2:
-                continue
-            while len(q["opts"]) < 4:
-                q["opts"].append(defaults[len(q["opts"])])
-            q["opts"] = q["opts"][:4]
-            if isinstance(q.get("dims"), dict):
-                q["dims"] = {d: v for d, v in q["dims"].items() if d in DIMS}
-            if not q.get("dims"):
-                q["dims"] = {"dynamic": [0, 1, 2, 3]}
+            q.setdefault("tag", "scenario")
+            q.setdefault("dim", "dynamic")
+            if q["dim"] not in DIMS:
+                q["dim"] = "dynamic"
+            opts = q.get("opts") if isinstance(q.get("opts"), list) else []
+            while len(opts) < 4:
+                opts.append(defaults[len(opts)])
+            q["opts"] = opts[:4]
             valid.append(q)
         return valid
 
