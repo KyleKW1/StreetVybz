@@ -140,6 +140,14 @@ Notice how each one puts you IN a specific moment, not just describes a category
 "Being told to stay still while your partner does whatever they want."
 "Meeting someone at a bar, skipping the small talk entirely."
 
+GOOD examples for degradation/humiliation clusters — these are the standard to match:
+"Your partner calls you a filthy slut while they're fucking you and you want them to say it again."
+"Being called a dirty little thing mid-sex and feeling yourself get more into it."
+"Your partner talks down to you the whole time and you're completely into it."
+"Being used and talked to like you're nothing — and wanting more of it."
+"Your partner tells you you're theirs to do whatever they want with. You don't argue."
+"Your partner calls you a good little slut for taking it and you nearly finish on the spot."
+
 BAD — these are descriptions, not scenarios. No context, can't picture it:
 "Being tied up and left at the mercy of your partner."
 "Incorporating spanking into your sexual experiences."
@@ -165,6 +173,8 @@ Instead, make it specific. Add who does what, where, or what happens next:
   Good: "Having sex in a car while people walk past outside."
 - Bad: "A threesome."
   Good: "Your partner suggests inviting someone else in, and you say yes before they finish the sentence."
+- Bad: "Being called names during sex."
+  Good: "Your partner calls you a filthy slut while they're fucking you and you want them to say it again."
 
 The test: can you picture exactly where you are and what's happening?
 If it reads like a menu item or a category label, rewrite it with a specific moment.
@@ -172,17 +182,26 @@ If it reads like a menu item or a category label, rewrite it with a specific mom
 CRITICAL LANGUAGE RULES:
 - No jargon. If a regular person wouldn't say it in conversation, don't use it.
   Banned words: "impact play", "breath control", "edging", "dynamic", "incorporating", "consensual", "sensation play", "orgasm denial", "power exchange"
-- NEVER reference gendered clothing or body-specific terms. Use "they/them/their" only.
+
+- BODY & ANATOMY — STRICT RULES:
+  * NEVER reference gendered anatomy or clothing. No "inside you", "between your legs", "skirt", "cock", "pussy", "dick", "breasts" etc.
+  * Use act-focused or sensation-focused language instead: "while they're fucking you", "while you're fucking them", "being used", "taking it", "giving it to them"
+  * Phrases like "while they're fucking you" or "while you're fucking them" work for any body or role — use these freely
+  * Neutral terms like "their body", "your body", "all of you" are fine
+
+- DEGRADATION EXCEPTION — crude names and acts ARE allowed:
+  * Words like "slut", "whore", "filthy", "dirty little thing", "good girl/boy", "mine to use" are explicitly permitted for humiliation/degradation scenarios
+  * Keep the scenario act-focused not anatomy-focused even when crude
+
 - NEVER write scenarios involving non-consensual touch or surprise contact from strangers. Every scenario involves a partner or willing participant.
-- No act-specific language that assumes a particular body or role ("riding", "taking it", "giving it", "penetration")
-- Every question works identically for any gender, any body, any orientation
-- Use plain words: "your partner", "having sex", "being touched", "hooking up", "being held down", "watching"
+- Every question must work identically for any gender, any body, any orientation.
+- Use plain words: "your partner", "having sex", "being touched", "hooking up", "being held down", "watching", "fucking"
 
 Rules:
 - "text": one plain sentence or short scenario, 8-16 words
 - "opts": 4-7 words each, casual and honest
 - "tag": 2-3 words
-- Explicitly sexual in meaning, but not crude for its own sake
+- Explicitly sexual in meaning across all clusters — do not sanitise
 - EXACTLY 4 answer options per question, escalating 0-3
 - Score each option 0-3 across relevant dims: control, sensory, exhib, dynamic, openness, verbal
 - You MUST write all 10 questions. Do not stop early.
@@ -655,7 +674,7 @@ def _render_result():
 
     if recs:
         st.html("""<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-            text-transform:uppercase; color:var(--muted); margin:20px 0 12px;">Things worth exploring</div>""")
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px; margin-top:20px;">Things worth exploring</div>""")
         dim_colors = [v["color"] for v in DIMS.values()]
         for i, rec in enumerate(recs):
             color = dim_colors[i % len(dim_colors)]
