@@ -79,7 +79,7 @@ PROFILES = [
 
 _FANTASY_POOLS = [
     ["bondage & restraint", "blindfolds", "handcuffs", "rope play", "sensory deprivation"],
-    ["threesomes", "group sex", "watching your partner with someone else", "being shared"],
+    ["group sex", "watching your partner with someone else", "being shared"],
     ["dominance", "being in control", "giving orders", "deciding when your partner finishes"],
     ["submission", "being told what to do", "giving up control", "obeying without question"],
     ["exhibitionism", "being watched during sex", "performing for someone", "sex in public"],
@@ -88,11 +88,10 @@ _FANTASY_POOLS = [
     ["impact play", "spanking", "hair pulling", "biting", "leaving marks"],
     ["orgasm control", "edging", "being denied", "forced orgasm"],
     ["roleplay", "power dynamic scenarios", "stranger fantasy", "authority figure dynamic"],
-    ["anonymous sex", "no-name hookup", "glory hole", "masked encounter"],
     ["filming & watching", "being recorded", "watching footage back", "live streaming privately"],
     ["temperature play", "ice during sex", "wax play", "alternating heat and cold"],
-    ["group dynamics", "swinging", "open relationship encounters", "shared partners"],
-    ["praise & degradation kink", "being called names during sex", "humiliation play", "worship dynamic"],
+    ["group dynamics", "open relationship encounters", "shared partners"],
+    ["praise & degradation kink", "being called names during sex", "worship dynamic"],
 ]
 
 
@@ -231,8 +230,8 @@ CRITICAL LANGUAGE RULES:
 - Use plain words: "your partner", "having sex", "being touched", "hooking up", "being held down", "watching", "fucking"
 
 Rules:
-- "text": one plain sentence or short scenario, 8-16 words
-- "opts": 4-7 words each, casual and honest
+- "text": 2-3 plain sentences, 15-35 words total. Set the scene, then add one specific detail that makes it feel real. Not so long it becomes a story — just enough to picture it clearly.
+- "opts": 4-10 words each, casual and honest
 - "tag": 2-3 words
 - Explicitly sexual in meaning across all clusters — do not sanitise
 - EXACTLY 4 answer options per question, escalating 0-3
