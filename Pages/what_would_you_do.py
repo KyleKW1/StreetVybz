@@ -108,37 +108,47 @@ Write exactly 10 quiz questions. 6 must come from these clusters:
 
 The other 4 can cover any sexual fantasy or kink NOT in: {excluded}
 
-STYLE — MOST IMPORTANT:
-Questions must sound like something a friend would casually say out loud.
-Plain, direct, no drama. Just the scenario in one sentence.
+STYLE — THE MOST IMPORTANT THING:
+Questions should feel like a scenario a real person could picture themselves in.
+Casual, specific enough to be real, but not so blunt it reads like a checklist.
+Think: something a friend might say that makes you go "oh... yeah, actually."
 
 GOOD examples — match this energy exactly:
-"Having sex with your partner and inviting a friend to join."
-"Having sex somewhere you could easily get caught."
-"Being blindfolded during sex and not knowing what comes next."
-"Being tied up and completely unable to move."
-"Hooking up with someone whose name you never find out."
-"Being told exactly what to do in bed."
-"Filming yourself having sex and watching it back."
-"Having your partner watch while you're with someone else."
+"Your partner spanks you during sex and you want them to do it again."
+"Having sex with your partner and a friend joining halfway through."
+"Being blindfolded and genuinely not knowing what's coming next."
+"Hooking up with someone and never finding out their name."
+"Your partner tells you exactly what to do and you just... do it."
+"Filming yourselves having sex and watching it back together."
+"Having sex somewhere anyone could walk in at any moment."
+"Your partner holds you down just enough that you can't move."
+"Being with two people at the same time."
+"Your partner watches while you're with someone else."
 
-BAD — do not write like this:
+BAD — too clinical, too jargon-heavy, too on-the-nose:
+"Incorporating spanking into your sexual experiences."
+"Playing with breath control for heightened sensations."
+"Exploring edging and orgasm denial dynamics."
+"Engaging in impact play with a consenting partner."
+
+BAD — too dramatic and try-hard:
 "Wrists pinned. You can't move. They take their time."
-"You're in a darkened room and someone you trust has blindfolded you..."
+"You're in a darkened room and a hand finds you in the silence."
 
-CRITICAL LANGUAGE RULES — violations will break the quiz:
-- NEVER imply penetration, giving or receiving, top or bottom, or any specific sex act that assumes a body part
-- NEVER use phrases like "getting it on", "riding", "taking it", "giving it" — these imply specific bodies/roles
-- Every question must work equally for any gender, any body, any orientation
-- Use: "having sex", "being touched", "hooking up", "being with someone" — not act-specific language
-- Bad: "Getting it on in the back seat of a car" (implies penetrative sex)
-- Good: "Having sex in the back seat of a car with someone watching"
+The right tone is: casual, real, slightly surprising. Like the question already knows something about you.
+
+CRITICAL LANGUAGE RULES:
+- No jargon. If a regular person wouldn't say it in conversation, don't use it.
+  Banned words: "impact play", "breath control", "edging", "dynamic", "incorporating", "consensual", "sensation play", "orgasm denial", "power exchange"
+- No act-specific language that assumes a body or role ("riding", "taking it", "giving it", "penetration")
+- Every question works for any gender, any body, any orientation
+- Use plain words: "having sex", "being touched", "hooking up", "being held down", "watching"
 
 Rules:
-- "text": one plain sentence, 8-14 words, present participle style ("Having sex...", "Being tied...")
+- "text": one plain sentence or short scenario, 8-16 words
 - "opts": 4-7 words each, casual and honest
 - "tag": 2-3 words
-- Explicitly sexual, no euphemisms, but body/role neutral
+- Explicitly sexual in meaning, but not crude for its own sake
 - EXACTLY 4 answer options per question, escalating 0-3
 - Score each option 0-3 across relevant dims: control, sensory, exhib, dynamic, openness, verbal
 - You MUST write all 10 questions. Do not stop early.
