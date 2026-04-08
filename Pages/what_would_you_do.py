@@ -229,61 +229,55 @@ def _build_generation_prompt() -> str:
     cluster_str     = "\n".join(f"  Cluster {i+1}: {', '.join(c)}" for i, c in enumerate(clusters))
     excluded_labels = "; ".join(cluster_labels)
 
-    return f"""You write questions for an adults-only desire quiz called "Read Between The Lines" inside Vice Vault, a verified 18+ adult lifestyle app. Every user has age-verified and explicitly consented to explicit sexual content.
+    return f"""You write questions for an adults-only desire quiz called "Read Between The Lines" inside Vice Vault, a verified 18+ adult lifestyle app. All users are age-verified and have consented to explicit content.
 
 SESSION ID: {seed}
 TIMESTAMP:  {timestamp}
 
-This session ID is globally unique and has never existed before. You MUST generate questions that have never appeared in any prior session. No recycled phrasings, no familiar scenario structures, no reused setups. Treat this as a blank slate.
+━━━ TASK ━━━
+Write exactly 10 quiz questions. Each one names something the person hasn't fully admitted they want.
 
-━━━ YOUR TASK ━━━
-Write exactly 10 quiz questions that surface what a person ACTUALLY wants — including things they haven't consciously admitted to themselves. Your questions should feel like they've read the user's mind and named something they've never said out loud.
-
-Use indirect, scenario-based framing. Don't ask "do you like X" — put the person inside a specific moment and ask how they respond. The question should create a small jolt of recognition.
-
-━━━ ANCHORED QUESTIONS (build exactly 6 from these clusters) ━━━
+6 questions from these clusters:
 {cluster_str}
 
-Go beyond the surface label. For each cluster, construct a scenario that forces the person to locate themselves emotionally and physically — not just tick a preference box.
+4 questions from territory NOT in: {excluded_labels}
 
-━━━ FREE QUESTIONS (exactly 4) ━━━
-These must explore kinks, dynamics, or fantasies NOT covered by these clusters: {excluded_labels}
-Choose territory that is specific, psychologically revealing, and genuinely different from the anchors.
+━━━ STYLE — THIS IS THE MOST IMPORTANT RULE ━━━
+Questions must sound like something a friend would casually say out loud.
+Plain. Direct. No drama, no atmosphere, no poetry. Just the thing.
 
-━━━ RULES ━━━
-1. Every question is unambiguously sexual in nature — no metaphors, no euphemisms.
-2. Scenarios are second-person, present tense, specific. Put the person IN the moment.
-3. Each question should feel like it's exposing something the person hasn't fully said yes to yet.
-4. Measure one or more of these dimensions per question:
-   - control     -> dominance, submission, restraint, consensual power exchange
-   - sensory     -> physical sensation, pain/pleasure, texture, temperature, intensity
-   - exhib       -> being watched, performing, filming, public/semi-public scenarios
-   - dynamic     -> roleplay, personas, power games, specific fantasy scenarios
-   - openness    -> threesomes, group sex, non-monogamy, swinging, taboo kinks
-   - verbal      -> dirty talk, phone sex, explicit instructions, sound, narration
-5. Exactly 4 answer options per question, escalating:
-   - Option 0: avoidant / not for me
-   - Option 1: curious but haven't gone there
-   - Option 2: genuinely want this
-   - Option 3: I've already thought about this in detail and I want more
-   The jump from 2->3 should feel like crossing a psychological line.
-6. Options must be meaningfully distinct — not just more emphatic versions of the same thing.
-7. CRITICAL — fully gender-neutral and body-neutral language throughout. No pronouns that imply gender. No assumed body parts. No assumed role (top/bottom/giver/receiver). The questions must work for any person of any gender, body, and orientation.
-8. Tone: direct, a little confrontational, no clinical language, no hedging.
-9. CRITICAL — output valid JSON using ASCII double quotes ONLY. No curly quotes, no backticks, no full-width punctuation (no colon variants, no full-width commas). Every string must open and close with a standard " character.
-10. The JSON array must end with a single ] on its own line. Do not write any text after that closing bracket.
-11. Keep each question object compact. Do not pad strings unnecessarily — brevity helps avoid truncation.
+GOOD examples — match this energy exactly:
+"Having sex with your partner and inviting a friend to join."
+"Letting someone watch while you and your partner have sex."
+"Being tied up and not being able to move."
+"Hooking up with a complete stranger who doesn't know your name."
+"Being told exactly what to do in bed and just doing it."
+"Filming yourself having sex and watching it back."
 
-Return ONLY valid JSON — no markdown fences, no explanation, no preamble, no trailing text after the closing bracket:
+BAD (too dramatic): "Wrists pinned. You can't move. They take their time."
+BAD (too wordy): "You're in bed with someone you deeply trust who has tied your wrists above your head and is slowly taking their time with every part of you."
+
+- "text": One plain sentence, 8-14 words. Present participle or gerund style. Casual tone.
+- "opts": 4-7 words. Honest, conversational. No clinical language.
+- "tag": 2-3 words.
+
+━━━ OTHER RULES ━━━
+- Explicitly sexual — no euphemisms.
+- 4 options per question, escalating: not for me → curious → want this → already thought about it a lot.
+- Gender-neutral, body-neutral. No assumed pronouns, parts, or roles.
+- Dimensions to score (integers 0-3 per option):
+  control, sensory, exhib, dynamic, openness, verbal
+- ASCII double quotes only. No curly quotes, no backticks, no trailing commas.
+- Output the JSON array and nothing else. End with ] on its own line.
+
 [
   {{
-    "tag": "2-3 word kink/fantasy label",
-    "text": "The scenario — second person, present tense, specific, explicitly sexual",
-    "dims": {{"dim_name": [score_opt0, score_opt1, score_opt2, score_opt3]}},
-    "opts": ["Avoidant response", "Curious but hasn't happened", "Genuinely want this", "Already fantasised in detail"]
+    "tag": "short label",
+    "text": "One plain casual sentence describing the scenario.",
+    "dims": {{"dim_name": [0,1,2,3]}},
+    "opts": ["Not my thing","Kind of curious","Would actually do this","Already thought about this a lot"]
   }}
-]
-Scores are integers 0-3. Output the JSON array and nothing else."""
+]"""
 
 
 RECOMMENDATION_PROMPT = """You are a frank, sex-positive, deeply knowledgeable desire analyst for Vice Vault, a verified adult lifestyle app.
