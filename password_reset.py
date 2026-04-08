@@ -9,7 +9,7 @@ import secrets
 import smtplib
 from email.message import EmailMessage
 
-# ── DB config (was missing — caused NameError on every call) ──────────────────
+# ── DB config ─────────────────────────────────────────────────────────────────
 try:
     from config import DB_CONFIG, EMAIL_CONFIG
     APP_EMAIL          = EMAIL_CONFIG.get("sender_email", "")
@@ -171,9 +171,11 @@ def _send_email(to_email: str, token=None, reset_type="password") -> bool:
         msg["To"]   = to_email
         if reset_type == "password":
             msg["Subject"] = "ViceVault — Password Reset"
-            reset_url = f"testrun01.streamlit.app/?reset_token={token}"
+            # FIX: added https:// so email clients render it as a clickable link
+            reset_url = f"https://testrun01.streamlit.app/?reset_token={token}"
             body = (
-                f"Click the link below to reset your password (valid 1 hour):\n{reset_url}\n\n"
+                f"Click the link below to reset your password (valid 1 hour):\n\n"
+                f"{reset_url}\n\n"
                 "If you didn't request this, ignore this email."
             )
         else:
@@ -181,16 +183,34 @@ def _send_email(to_email: str, token=None, reset_type="password") -> bool:
             if not username:
                 return False
             msg["Subject"] = "ViceVault — Username Recovery"
-            body = f"Your username is: {username}"
+            body = f"Your ViceVault username is: {username}"
         msg.set_content(body)
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10) as server:
-            server.ehlo(); server.starttls(); server.ehlo()
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
             server.login(APP_EMAIL, APP_EMAIL_PASSWORD)
             server.send_message(msg)
         return True
     except Exception as e:
         st.error(f"Email send failed: {e}")
         return False
+
+
+# ─── QUERY PARAM HANDLER ──────────────────────────────────────────────────────
+
+def handle_reset_token_from_url():
+    """
+    Call this at the TOP of your main app.py before any page routing.
+    If a ?reset_token=... param is present in the URL, it stores the token
+    in session_state, sets the page to 'reset_password', and clears the URL param.
+    """
+    params = st.query_params
+    if "reset_token" in params:
+        st.session_state["reset_token"] = params["reset_token"]
+        st.session_state["page"] = "reset_password"
+        st.query_params.clear()
+        st.rerun()
 
 
 # ─── PAGES ────────────────────────────────────────────────────────────────────
@@ -262,7 +282,8 @@ def reset_password_page():
         if not token:
             st.error("Invalid or expired reset link.")
             if st.button("← Back to login"):
-                st.session_state.page = "login"; st.rerun()
+                st.session_state.page = "login"
+                st.rerun()
             return
 
         valid, email = _verify_reset_token(token)
