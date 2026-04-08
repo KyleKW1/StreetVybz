@@ -2,7 +2,7 @@ import streamlit as st
 from auth import logout
 from styles import apply_custom_styles
 from Pages.auth_page import login_page, register_page
-from password_reset import forgot_password_page, reset_password_page
+from password_reset import forgot_password_page, reset_password_page, handle_reset_token_from_url
 
 
 # ─── DB SYNC HELPERS ──────────────────────────────────────────────────────────
@@ -103,14 +103,18 @@ def main():
         if key not in st.session_state:
             st.session_state[key] = default
 
+    # ── MUST be called before any page routing ─────────────────────────────
+    handle_reset_token_from_url()
+
     apply_custom_styles()
 
     if not st.session_state.authenticated:
-        if st.session_state.page == 'register':
+        page = st.session_state.page
+        if page == 'register':
             register_page()
-        elif st.session_state.page == 'forgot':
+        elif page == 'forgot':
             forgot_password_page()
-        elif st.session_state.page == 'reset':
+        elif page == 'reset_password':          # ← fixed: was 'reset'
             reset_password_page()
         else:
             login_page()
