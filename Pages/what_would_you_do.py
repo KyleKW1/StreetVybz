@@ -113,29 +113,36 @@ Questions should feel like a scenario a real person could picture themselves in.
 Casual, specific enough to be real, but not so blunt it reads like a checklist.
 Think: something a friend might say that makes you go "oh... yeah, actually."
 
-GOOD examples — match this energy exactly:
+GOOD examples — match this energy exactly.
+Notice how each one puts you IN a specific moment, not just describes a category:
+
+"Your partner ties your wrists to the headboard and takes their time."
 "Your partner spanks you during sex and you want them to do it again."
 "Having sex with your partner and a friend joining halfway through."
-"Being blindfolded and genuinely not knowing what's coming next."
+"Being blindfolded and not knowing what they're going to do next."
 "Hooking up with someone and never finding out their name."
 "Your partner tells you exactly what to do and you just... do it."
 "Filming yourselves having sex and watching it back together."
-"Having sex somewhere anyone could walk in at any moment."
-"Your partner holds you down just enough that you can't move."
-"Being with two people at the same time."
-"Your partner watches while you're with someone else."
+"Having sex in a place where anyone could walk in at any moment."
+"Your partner holds you down and doesn't let you move."
+"Watching your partner have sex with someone else in the same room."
+"Your partner keeps you right on the edge but won't let you finish."
+"Having sex in a car while people walk past outside."
+"Someone you just met asks if they can tie you up."
+"Your partner whispers exactly what they're going to do before they do it."
 
-BAD — too clinical, too jargon-heavy, too on-the-nose:
+BAD — these are a description, not a scenario. You can't picture yourself in them:
+"Being tied up and left at the mercy of your partner."
 "Incorporating spanking into your sexual experiences."
 "Playing with breath control for heightened sensations."
-"Exploring edging and orgasm denial dynamics."
+"Exploring bondage and restraint."
 "Engaging in impact play with a consenting partner."
 
 BAD — too dramatic and try-hard:
 "Wrists pinned. You can't move. They take their time."
 "You're in a darkened room and a hand finds you in the silence."
 
-The right tone is: casual, real, slightly surprising. Like the question already knows something about you.
+The test: can you picture exactly where you are and what's happening? If yes, it's good. If it's a category label dressed up as a sentence, rewrite it.
 
 CRITICAL LANGUAGE RULES:
 - No jargon. If a regular person wouldn't say it in conversation, don't use it.
