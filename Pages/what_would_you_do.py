@@ -1,52 +1,17 @@
 """
 Pages/what_would_you_do.py
 AI-generated desire & fantasy profile quiz.
-10 fresh indirect scenario questions generated per session.
-Profiles across 6 dimensions, returns personalised exploration recommendations.
-Results saved to quiz_results table on completion.
+GPT-4o-mini generates 10 fresh indirect scenario questions every session.
+Profiles across 6 dimensions and returns personalised exploration recommendations.
+Results are saved to the quiz_results table on completion.
 
-Perf fixes vs original:
-  - OpenAI client cached with @st.cache_resource (no re-instantiation per render)
-  - CSS/fonts not re-injected (handled globally by styles.py)
-
-Fixes v2:
-  - Recommendation prompt now receives chosen AND rejected answers explicitly
-  - Model told never to suggest anything in rejected territory
-  - Gender/orientation-neutral language enforced in prompt
-
-Fixes v3:
-  - uuid4 seed (truly unique per session, never collides)
-  - Timestamp injected to second-level precision (kills caching at model level)
-  - _FANTASY_POOLS massively expanded; 6 clusters sampled (was 4)
-  - Remaining 4 free questions must come from OUTSIDE the sampled clusters
-  - Prompt rewritten to surface unconscious/hidden desires via indirect scenarios
-  - All gendered language purged from pools and prompts
-  - Answer options now required to feel like crossing a psychological line
-
-Fixes v4:
-  - max_tokens=8000 (was 4000) — prevents truncated JSON on long responses
-  - _extract_json_array() robustly grabs the outermost [...] or {...} block,
-    ignoring any preamble / trailing text the model appends
-  - Both loading phases use _extract_json_array before json.loads
-  - Raw model output logged to kq_raw_debug on failure for easier debugging
-
-Fixes v5:
-  - _sanitize_raw() normalises full-width punctuation and curly quotes before
-    JSON extraction — prevents parse failures from CJK-style model drift
-  - Prompt hardened: ASCII-only JSON, explicit closing-bracket rule
-  - Generation call wrapped in retry loop (up to 3 attempts) before surfacing
-    error to the user
-  - JSONDecodeError now reports position + message for easier debugging
-  - Fallback: questions that fail validation are skipped cleanly (was crashing)
-
-Fixes v6:
-  - max_tokens raised to 8000 — root cause of position-3560 truncation error
-  - _recover_partial_json() added: salvages complete objects from a truncated
-    array so a clipped response yields questions instead of a hard crash
-  - _render_loading now falls back to _recover_partial_json before giving up
+Changes from original:
+  - Question style rewritten: casual plain English, not dramatic fragments
+  - Recommendation prompt now receives chosen AND rejected answers for specificity
+  - OpenAI client cached with @st.cache_resource
+  - max_tokens=8000 to prevent JSON truncation
 """
 
-import re
 import streamlit as st
 import json
 import random
@@ -104,119 +69,24 @@ PROFILES = [
     },
 ]
 
-# ─── EXPANDED FANTASY POOLS ───────────────────────────────────────────────────
-# 30 distinct clusters. Each session samples 6 — giving C(30,6) = 593,775
-# possible combinations before the free-question wildcard layer.
-# ALL language is body-neutral and orientation-neutral.
+# ─── FANTASY POOLS ────────────────────────────────────────────────────────────
 
 _FANTASY_POOLS = [
-    # 1 — Restraint
-    ["being physically restrained during sex", "wrists tied above your head", "full-body rope bondage",
-     "being unable to move while your partner does whatever they want", "spreader bars"],
-    # 2 — Blindfolds / sensory removal
-    ["blindfolds during sex", "not knowing what will happen next", "sensory deprivation hoods",
-     "earplugs + blindfold combination", "being guided somewhere with no context"],
-    # 3 — Group / multi-partner
-    ["threesomes", "group sex with strangers", "being the centre of attention for multiple partners",
-     "watching two people together while you participate", "an orgy scenario"],
-    # 4 — Watching / voyeurism
-    ["watching two people have sex without them knowing", "being let in to watch as a deliberate act",
-     "live sex shows", "watching your partner with someone else", "covert observation fantasy"],
-    # 5 — Being watched / exhibitionism
-    ["having sex while someone watches", "performing for a stranger's gaze", "being filmed without direction",
-     "sex in a room with a window", "knowing someone can hear everything"],
-    # 6 — Public / risk
-    ["sex in a place you could be caught", "outdoors with people nearby", "under a table at a restaurant",
-     "in a changing room", "risk-of-discovery as the core turn-on"],
-    # 7 — Dominance — giving
-    ["being in complete control of another person's pleasure", "giving orders and having them obeyed",
-     "deciding when your partner is allowed to come", "owning someone's body for a scene",
-     "using a partner however you want with their full consent"],
-    # 8 — Submission — receiving
-    ["being told exactly what to do in bed", "giving up all control to a trusted partner",
-     "being used for someone else's pleasure", "obeying without question",
-     "not being allowed to speak unless given permission"],
-    # 9 — Orgasm control
-    ["being kept on the edge without being allowed to finish", "denying your own orgasm on command",
-     "forced orgasm against your will (consensually)", "multiple orgasms with no break",
-     "edging for a prolonged period before release"],
-    # 10 — Dirty talk
-    ["being narrated during sex", "explicit instructions whispered mid-act",
-     "being told in graphic detail what's about to happen", "degrading language you've pre-agreed to",
-     "praise that borders on obsession"],
-    # 11 — Roleplay / personas
-    ["playing a character who isn't you during sex", "stranger-meeting-stranger scenario despite knowing each other",
-     "authority figure and subordinate dynamic", "rescuer and rescued", "predator and prey consensual chase"],
-    # 12 — Anonymous / no-identity
-    ["sex with someone whose name you never learn", "anonymous encounter in a darkened room",
-     "glory hole fantasy", "hotel-hallway knock with no context", "masked encounter"],
-    # 13 — Fetish wear / texture
-    ["latex worn during sex", "leather restraints", "full-body stockings", "uniforms worn during sex",
-     "partner in specific clothing that triggers arousal"],
-    # 14 — Body worship
-    ["having every part of your body kissed slowly", "spending an entire session on one body part",
-     "foot or leg focus", "being treated like a sacred object", "worshipping your partner's body for hours"],
-    # 15 — Dirty mirror / self-watching
-    ["watching yourself in a full-length mirror during sex", "being filmed and watching the footage after",
-     "live-streaming your own encounter privately", "narrating yourself", "reviewing what you look like mid-act"],
-    # 16 — Temperature / sensation play
-    ["ice traced across your skin during sex", "wax dripped carefully on your body",
-     "feather teasing before any contact", "alternating heat and cold", "deliberately slowing sensation to an unbearable pace"],
-    # 17 — Impact play
-    ["spanking as part of sex", "hair-pulling mid-act", "biting that leaves marks",
-     "being struck with an object you've agreed on", "the sound of impact as the primary turn-on"],
-    # 18 — Toys during partnered sex
-    ["a vibrator used on you while your partner watches", "remote-controlled toy in a public place",
-     "toy used on your partner by you", "strap-on play", "double penetration via toys"],
-    # 19 — Verbal humiliation / praise kink
-    ["being praised obsessively during sex", "being called specific names you've asked for",
-     "consensual degradation that only works because you chose it", "being talked down to and finding it hot",
-     "worship language that borders on religious"],
-    # 20 — Power reversal
-    ["a partner who is usually dominant letting you take over", "taking control mid-scene unexpectedly",
-     "swapping roles halfway through", "deliberately subverting the expected dynamic",
-     "role-switching as a game with no fixed outcome"],
-    # 21 — Non-monogamy scenarios
-    ["swinging with another couple", "open relationship encounter with full partner knowledge",
-     "watching your partner flirt with someone you've both agreed to", "compersion — being turned on by your partner's pleasure with another",
-     "a couple's shared lover dynamic"],
-    # 22 — Cuckolding / hotwife — gender-neutral version
-    ["your partner sleeping with someone else while you know about it in real time",
-     "being told every detail afterward", "watching your partner be desired by someone new",
-     "the humiliation/pride mix of your partner being wanted by others",
-     "orchestrating your partner's encounter from a distance"],
-    # 23 — Phone / remote sex
-    ["phone sex where you're directed by voice alone", "explicit voice notes sent throughout the day",
-     "sexting that describes exactly what you'd do", "video call sex with a partner in another city",
-     "being given instructions remotely and having to follow them alone"],
-    # 24 — Fantasy narration during sex
-    ["a partner narrating a fantasy scenario aloud while you have sex",
-     "being told a story that describes exactly what's happening",
-     "guided imagination during sex", "your partner voicing a character mid-act",
-     "audio erotica playing while you're both in the room"],
-    # 25 — Sleep-adjacent / stillness
-    ["being touched while pretending to be asleep (consensual somnophilia)",
-     "sex that starts before either of you fully wakes up", "keeping completely still while your partner moves",
-     "staying silent no matter what happens", "the fantasy of being acted on without responding"],
-    # 26 — Status / taboo dynamic
-    ["a boss and employee dynamic with no real-world overlap", "a mentor and student scenario",
-     "a formal hierarchy that only exists in the bedroom", "using titles during sex",
-     "the turn-on of someone technically 'above' you wanting you"],
-    # 27 — Competition / game
-    ["sex as a challenge — who breaks first", "orgasm competition", "being bet against",
-     "a game with sexual consequences for losing", "the thrill of trying to hold out longer"],
-    # 28 — Scent / taste fixation
-    ["a partner's specific scent being the main turn-on", "tasting someone before touching them",
-     "blindfolded identification by scent alone", "oral fixation as a standalone act",
-     "being eaten out or going down as the entire main event — not foreplay"],
-    # 29 — Location / setting fetish
-    ["sex in a specific location you've fixated on", "a hotel room with floor-to-ceiling windows",
-     "the back seat of a car", "a swimming pool or body of water after dark",
-     "a specific room in a house that isn't the bedroom"],
-    # 30 — Aftercare / intimacy as erotic
-    ["the vulnerability after sex being as erotic as the act", "crying or emotional release during sex",
-     "being held for a long time after as part of the sexual experience",
-     "silence and skin contact as an explicit act", "the morning after being as intentional as the night before"],
+    ["bondage & restraint", "blindfolds", "handcuffs", "rope play", "sensory deprivation"],
+    ["threesomes", "group sex", "watching your partner with someone else", "being shared"],
+    ["dominance", "being in control", "giving orders", "deciding when your partner finishes"],
+    ["submission", "being told what to do", "giving up control", "obeying without question"],
+    ["exhibitionism", "being watched during sex", "performing for someone", "sex in public"],
+    ["voyeurism", "watching others have sex", "observing without being seen"],
+    ["dirty talk", "explicit instructions during sex", "being narrated", "verbal degradation"],
+    ["impact play", "spanking", "hair pulling", "biting", "leaving marks"],
+    ["orgasm control", "edging", "being denied", "forced orgasm"],
+    ["roleplay", "power dynamic scenarios", "stranger fantasy", "authority figure dynamic"],
+    ["anonymous sex", "no-name hookup", "glory hole", "masked encounter"],
+    ["filming & watching", "being recorded", "watching footage back", "live streaming privately"],
+    ["temperature play", "ice during sex", "wax play", "alternating heat and cold"],
+    ["group dynamics", "swinging", "open relationship encounters", "shared partners"],
+    ["praise & degradation kink", "being called names during sex", "humiliation play", "worship dynamic"],
 ]
 
 
@@ -224,27 +94,23 @@ def _build_generation_prompt() -> str:
     seed      = str(uuid.uuid4())
     timestamp = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
 
-    clusters        = random.sample(_FANTASY_POOLS, 6)
-    cluster_labels  = [c[0] for c in clusters]
-    cluster_str     = "\n".join(f"  Cluster {i+1}: {', '.join(c)}" for i, c in enumerate(clusters))
-    excluded_labels = "; ".join(cluster_labels)
+    clusters    = random.sample(_FANTASY_POOLS, 6)
+    cluster_str = "\n".join(f"  - {', '.join(c)}" for c in clusters)
+    excluded    = "; ".join(c[0] for c in clusters)
 
-    return f"""You write questions for an adults-only desire quiz called "Read Between The Lines" inside Vice Vault, a verified 18+ adult lifestyle app. All users are age-verified and have consented to explicit content.
+    return f"""You write questions for an adults-only desire quiz inside Vice Vault, a verified 18+ adult lifestyle app.
 
 SESSION ID: {seed}
 TIMESTAMP:  {timestamp}
 
-━━━ TASK ━━━
-Write exactly 10 quiz questions. Each one names something the person hasn't fully admitted they want.
-
-6 questions from these clusters:
+Write exactly 10 quiz questions. 6 must come from these clusters:
 {cluster_str}
 
-4 questions from territory NOT in: {excluded_labels}
+The other 4 can cover any sexual fantasy or kink NOT in: {excluded}
 
-━━━ STYLE — THIS IS THE MOST IMPORTANT RULE ━━━
+STYLE — MOST IMPORTANT:
 Questions must sound like something a friend would casually say out loud.
-Plain. Direct. No drama, no atmosphere, no poetry. Just the thing.
+Plain, direct, no drama. Just the scenario in one sentence.
 
 GOOD examples — match this energy exactly:
 "Having sex with your partner and inviting a friend to join."
@@ -253,228 +119,69 @@ GOOD examples — match this energy exactly:
 "Hooking up with a complete stranger who doesn't know your name."
 "Being told exactly what to do in bed and just doing it."
 "Filming yourself having sex and watching it back."
+"Having sex somewhere you could easily get caught."
 
-BAD (too dramatic): "Wrists pinned. You can't move. They take their time."
-BAD (too wordy): "You're in bed with someone you deeply trust who has tied your wrists above your head and is slowly taking their time with every part of you."
+BAD — do not write like this:
+"Wrists pinned. You can't move. They take their time."
+"You're in a darkened room and someone you trust has blindfolded you..."
 
-- "text": One plain sentence, 8-14 words. Present participle or gerund style. Casual tone.
-- "opts": 4-7 words. Honest, conversational. No clinical language.
-- "tag": 2-3 words.
-
-━━━ OTHER RULES ━━━
-- Explicitly sexual — no euphemisms.
-- 4 options per question, escalating: not for me → curious → want this → already thought about it a lot.
-- Gender-neutral, body-neutral. No assumed pronouns, parts, or roles.
-- Dimensions to score (integers 0-3 per option):
-  control, sensory, exhib, dynamic, openness, verbal
-- ASCII double quotes only. No curly quotes, no backticks, no trailing commas.
-- Output the JSON array and nothing else. End with ] on its own line.
+Rules:
+- "text": one plain sentence, 8-14 words, present participle style
+- "opts": 4-7 words each, casual and honest
+- "tag": 2-3 words
+- Explicitly sexual, no euphemisms
+- 4 answer options per question, escalating 0-3
+- Gender-neutral and body-neutral throughout
+- Score each option 0-3 across relevant dims: control, sensory, exhib, dynamic, openness, verbal
+- Return ONLY valid JSON. No markdown, no preamble, no text after the closing bracket.
 
 [
   {{
     "tag": "short label",
-    "text": "One plain casual sentence describing the scenario.",
+    "text": "One plain casual sentence.",
     "dims": {{"dim_name": [0,1,2,3]}},
     "opts": ["Not my thing","Kind of curious","Would actually do this","Already thought about this a lot"]
   }}
 ]"""
 
 
-RECOMMENDATION_PROMPT = """You are a frank, sex-positive, deeply knowledgeable desire analyst for Vice Vault, a verified adult lifestyle app.
+RECOMMENDATION_PROMPT = """You are a sex-positive, frank, and knowledgeable desire analyst for Vice Vault, an adult lifestyle app.
 
-A user just completed a desire profile quiz. Using their dimension scores AND their actual chosen answers, write 5 personalised recommendations for experiences, scenarios, or dynamics worth exploring.
+A user just completed a desire profile quiz. Write 5 personalised recommendations based on their scores AND their actual answers.
 
 Dimension scores (0-100%):
 {scores}
 
 Profile: {profile_name} — {profile_desc}
 
-What the user expressed genuine interest in (build on these — these are your raw material):
+What they showed genuine interest in (build on these):
 {chosen_answers}
 
-What the user actively rejected or scored zero on (HARD RULE — do not recommend these, do not gesture toward them, do not recommend adjacent versions):
+What they actively rejected (do NOT recommend these or anything adjacent):
 {rejected_answers}
 
 Guidelines:
-- CRITICAL: Anything in the rejected list is off the table entirely. Not even a softer version.
-- Recommendations must feel like they were written specifically for this person's answer pattern — not generic sex advice.
-- Use fully gender-neutral, body-neutral, orientation-neutral language. No assumed pronouns, body parts, or roles.
-- Be specific and a little daring — this is an 18+ app with consenting adults.
-- Tone: knowledgeable, non-judgmental, like a frank friend who knows a lot — not a therapist or a content warning.
+- Rejected items are completely off the table — not even a softer version.
+- Recommendations must feel written specifically for this person, not generic advice.
+- Gender-neutral, body-neutral, orientation-neutral language throughout.
+- Tone: a knowledgeable, non-judgmental friend — not a therapist.
 - 1-2 sentences per recommendation, max.
 - Do NOT use bullet characters or numbering inside the strings.
-- CRITICAL — output valid JSON using ASCII double quotes ONLY. No curly quotes, no backticks, no full-width punctuation.
-- The JSON array must end with a single ] on its own line. Do not write any text after that closing bracket.
+- Return ONLY a JSON array of exactly 5 strings. No markdown, no preamble.
 
-Return ONLY a JSON array of exactly 5 strings. No markdown, no preamble, no trailing text after the closing bracket.
 ["Recommendation one.", "Recommendation two.", ...]"""
 
 
-# ─── RAW OUTPUT SANITIZER ─────────────────────────────────────────────────────
+# ─── OPENAI CALL ──────────────────────────────────────────────────────────────
 
-def _sanitize_raw(raw: str) -> str:
-    """
-    Normalise common model output quirks before JSON extraction.
-
-    Handles:
-      - Full-width / CJK punctuation the model occasionally emits
-      - Curly / typographic quotes
-      - Backtick-delimited strings inside arrays
-      - Stray trailing commas before ] or }
-    """
-    char_map = {
-        "\uff1a": ":",   # ：
-        "\u3001": ",",   # 、
-        "\uff0c": ",",   # ，
-        "\u3002": ".",   # 。
-        "\u2018": "'",   # left single quote
-        "\u2019": "'",   # right single quote
-        "\u201c": '"',   # left double quote
-        "\u201d": '"',   # right double quote
-        "\u2013": "-",   # en dash
-        "\u2014": "-",   # em dash
-    }
-    for bad, good in char_map.items():
-        raw = raw.replace(bad, good)
-
-    # Replace backtick-delimited strings: `foo` → "foo"
-    raw = re.sub(r"`([^`]*)`", r'"\1"', raw)
-
-    # Remove trailing commas before ] or } (common model mistake)
-    raw = re.sub(r",\s*([}\]])", r"\1", raw)
-
-    return raw
-
-
-# ─── JSON EXTRACTION HELPER ───────────────────────────────────────────────────
-
-def _extract_json_array(raw: str) -> str:
-    """
-    Robustly extract the first top-level JSON array from a model response.
-
-    Handles:
-      - Markdown fences (```json ... ```)
-      - Preamble text before the array
-      - Trailing text / notes after the closing bracket
-      - Cases where the model wraps the array in an object
-
-    Raises ValueError with position detail if no valid array is found.
-    """
-    raw = raw.replace("```json", "").replace("```", "").strip()
-
-    start = raw.find("[")
-    if start == -1:
-        raise ValueError("No JSON array found in model response")
-
-    depth   = 0
-    in_str  = False
-    escape  = False
-
-    for i, ch in enumerate(raw[start:], start=start):
-        if escape:
-            escape = False
-            continue
-        if ch == "\\" and in_str:
-            escape = True
-            continue
-        if ch == '"':
-            in_str = not in_str
-            continue
-        if in_str:
-            continue
-        if ch == "[":
-            depth += 1
-        elif ch == "]":
-            depth -= 1
-            if depth == 0:
-                return raw[start : i + 1]
-
-    raise ValueError("Malformed JSON array — no closing bracket found")
-
-
-def _recover_partial_json(raw: str) -> list:
-    """
-    Salvage complete JSON objects from a truncated / malformed array.
-    Called as a fallback when _parse_json_array raises.
-
-    Walks the sanitised string character-by-character and extracts every
-    syntactically complete top-level {...} block, ignoring anything after
-    the last successfully parsed object. Returns a (possibly empty) list.
-    """
-    objects   = []
-    sanitized = _sanitize_raw(raw)
-    depth     = 0
-    start     = None
-    in_str    = False
-    escape    = False
-
-    for i, ch in enumerate(sanitized):
-        if escape:
-            escape = False
-            continue
-        if ch == "\\" and in_str:
-            escape = True
-            continue
-        if ch == '"':
-            in_str = not in_str
-            continue
-        if in_str:
-            continue
-        if ch == "{":
-            if depth == 0:
-                start = i
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0 and start is not None:
-                try:
-                    objects.append(json.loads(sanitized[start : i + 1]))
-                except json.JSONDecodeError:
-                    pass   # skip malformed individual objects
-                start = None
-
-    return objects
-
-
-def _parse_json_array(raw: str) -> list:
-    """Sanitise → extract → parse, with useful error messages on failure."""
-    sanitized = _sanitize_raw(raw)
-    extracted = _extract_json_array(sanitized)
-    try:
-        return json.loads(extracted)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"JSON parse error at position {e.pos}: {e.msg}") from e
-
-
-# ─── OPENAI CALL WITH RETRY ───────────────────────────────────────────────────
-
-def _call_openai(prompt: str, retries: int = 3) -> str:
-    """
-    Call the OpenAI API with automatic retry on failure.
-    Returns the raw string content of the first successful response.
-    Raises the last exception if all attempts fail.
-
-    max_tokens is set to 8000 (was 4000) to prevent JSON truncation on
-    large question sets — the root cause of the position-3560 parse error.
-    """
-    client   = _get_openai_client()
-    last_exc = None
-    for attempt in range(1, retries + 1):
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.99,
-                presence_penalty=0.6,
-                frequency_penalty=0.4,
-                max_tokens=8000,
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as exc:
-            last_exc = exc
-            if attempt < retries:
-                continue
-    raise last_exc
+def _call_openai(prompt: str) -> str:
+    response = _get_openai_client().chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.97,
+        max_tokens=8000,
+    )
+    return response.choices[0].message.content.strip()
 
 
 # ─── SCORING HELPERS ──────────────────────────────────────────────────────────
@@ -510,13 +217,8 @@ def _dim_pct(scores: dict, dim_max: dict, d: str) -> int:
 
 
 def _build_answer_context(questions: list, answers: list) -> tuple[str, str]:
-    """
-    Returns (chosen_str, rejected_str) — human-readable summaries of what
-    the user picked vs what they passed on. Used to ground the recommendation prompt.
-    """
     chosen   = []
     rejected = []
-
     for qi, ai in enumerate(answers):
         if ai is None or qi >= len(questions):
             continue
@@ -524,14 +226,10 @@ def _build_answer_context(questions: list, answers: list) -> tuple[str, str]:
         tag      = q.get("tag", "")
         opts     = q.get("opts", [])
         opt_text = opts[ai] if ai < len(opts) else ""
-
         if ai == 0:
-            rejected.append(f"- {tag}: chose \"{opt_text}\" (no interest)")
-        elif ai == 1:
-            chosen.append(f"- {tag}: chose \"{opt_text}\" (mild curiosity only)")
+            rejected.append(f"- {tag}: \"{opt_text}\"")
         else:
-            chosen.append(f"- {tag}: chose \"{opt_text}\" (genuine interest)")
-
+            chosen.append(f"- {tag}: \"{opt_text}\" ({'mild curiosity' if ai == 1 else 'genuine interest'})")
     chosen_str   = "\n".join(chosen)   if chosen   else "Nothing stood out strongly."
     rejected_str = "\n".join(rejected) if rejected else "Nothing explicitly rejected."
     return chosen_str, rejected_str
@@ -560,7 +258,7 @@ def _save_result_to_db(profile, dim_scores_pct, recs, total_pct, questions, answ
         pass
 
 
-# ─── CSS (page-specific overrides only — global CSS from styles.py) ───────────
+# ─── CSS ──────────────────────────────────────────────────────────────────────
 
 def _inject_page_css():
     st.html("""
@@ -594,7 +292,6 @@ def init_state():
         "kq_recs":      [],
         "kq_error":     "",
         "kq_saved":     False,
-        "kq_raw_debug": "",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -635,10 +332,6 @@ def _render_start():
         st.warning(st.session_state.kq_error)
         st.session_state.kq_error = ""
 
-    if st.session_state.get("kq_raw_debug"):
-        with st.expander("🛠 Debug: last raw model output"):
-            st.code(st.session_state.kq_raw_debug, language="text")
-
     st.html("""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:28px; margin-bottom:16px;">
@@ -657,8 +350,7 @@ def _render_start():
 </div>
 """)
     if st.button("Generate My Quiz →", use_container_width=True, type="primary"):
-        st.session_state.kq_phase     = "loading"
-        st.session_state.kq_raw_debug = ""
+        st.session_state.kq_phase = "loading"
         st.rerun()
 
 
@@ -674,64 +366,34 @@ def _render_loading():
         ph_bar.progress(p)
         ph_status.caption(s)
 
-    raw = ""
     try:
         upd("Generating your quiz…", 10, "Writing fresh scenarios for you")
         raw = _call_openai(_build_generation_prompt())
+        raw = raw.replace("```json", "").replace("```", "").strip()
 
-        upd("Parsing questions…", 80, "Validating")
-
-        # Primary parse — expects a complete, valid JSON array
-        try:
-            questions = _parse_json_array(raw)
-        except (ValueError, json.JSONDecodeError):
-            # Fallback — response was truncated or malformed; salvage complete objects
-            questions = _recover_partial_json(raw)
-            if not questions:
-                raise ValueError(
-                    "Model returned unparseable output and no complete question objects could be recovered. "
-                    "Please try again."
-                )
+        upd("Parsing questions…", 80, "Validating and shuffling")
+        questions = json.loads(raw)
 
         valid = []
         for q in questions:
-            if not isinstance(q, dict):
+            if not all(k in q for k in ("tag", "text", "dims", "opts")):
                 continue
-
-            # Must have text at minimum; fill missing keys with safe defaults
-            if not q.get("text"):
+            if not isinstance(q["opts"], list) or len(q["opts"]) < 2:
                 continue
-            q.setdefault("tag", "scenario")
-            q.setdefault("opts", [])
-            q.setdefault("dims", {})
-
-            # Salvage opts: trim if too long, pad if too short
-            opts = q["opts"] if isinstance(q["opts"], list) else []
+            # Pad opts to 4 if short, trim if over
             defaults = ["Not my thing", "Kind of curious", "Would actually do this", "Already thought about this a lot"]
-            while len(opts) < 4:
-                opts.append(defaults[len(opts)])
-            q["opts"] = opts[:4]
-
-            # Filter dims to known keys; if none match, assign a fallback
+            while len(q["opts"]) < 4:
+                q["opts"].append(defaults[len(q["opts"])])
+            q["opts"] = q["opts"][:4]
+            # Filter dims to known keys; fallback if empty
             if isinstance(q.get("dims"), dict):
-                q["dims"] = {d: v for d, v in q["dims"].items()
-                             if d in DIMS and isinstance(v, list) and len(v) >= 4}
-            if not q["dims"]:
+                q["dims"] = {d: v for d, v in q["dims"].items() if d in DIMS}
+            if not q.get("dims"):
                 q["dims"] = {"dynamic": [0, 1, 2, 3]}
-
-            # Ensure each dim score list has exactly 4 values
-            for d in q["dims"]:
-                scores = q["dims"][d]
-                while len(scores) < 4:
-                    scores.append(scores[-1] if scores else 0)
-                q["dims"][d] = scores[:4]
-
             valid.append(q)
 
-        if len(valid) < 3:
-            raise ValueError(
-                f"Only {len(valid)} usable question(s) returned — model output was too broken. Please try again."
-            )
+        if not valid:
+            raise ValueError("No valid questions returned — please try again.")
 
         random.shuffle(valid)
         final = valid[:10]
@@ -744,9 +406,8 @@ def _render_loading():
         st.rerun()
 
     except Exception as e:
-        st.session_state.kq_raw_debug = raw
-        st.session_state.kq_error     = f"Couldn't generate questions: {e}"
-        st.session_state.kq_phase     = "start"
+        st.session_state.kq_error = f"Couldn't generate questions: {e}"
+        st.session_state.kq_phase = "start"
         st.rerun()
 
 
@@ -828,7 +489,6 @@ def _render_generating_result():
         ph_bar.progress(p)
         ph_status.caption(s)
 
-    raw = ""
     try:
         upd("Reading between the lines…", 20, "Analysing your answers")
         questions = st.session_state.kq_questions
@@ -854,20 +514,12 @@ def _render_generating_result():
             chosen_answers=chosen_str,
             rejected_answers=rejected_str,
         ))
+        raw = raw.replace("```json", "").replace("```", "").strip()
 
         upd("Finishing up…", 90, "Almost there")
-
-        try:
-            recs = _parse_json_array(raw)
-        except (ValueError, json.JSONDecodeError):
-            # Fallback: try to recover string items from partial output
-            recs = _recover_partial_json(raw)
-
+        recs = json.loads(raw)
         if not isinstance(recs, list):
             recs = []
-
-        # Ensure recs is a flat list of strings (model occasionally returns dicts)
-        recs = [r if isinstance(r, str) else str(r) for r in recs]
 
         dim_scores_pct = {d: _dim_pct(scores, dim_max, d) for d in DIMS}
         st.session_state.kq_scores    = scores
@@ -881,10 +533,9 @@ def _render_generating_result():
         st.rerun()
 
     except Exception as e:
-        st.session_state.kq_raw_debug = raw
-        st.session_state.kq_error     = f"Something went wrong generating your result: {e}"
-        st.session_state.kq_phase     = "quiz"
-        st.session_state.kq_cur       = len(st.session_state.kq_questions) - 1
+        st.session_state.kq_error = f"Something went wrong building your profile: {e}"
+        st.session_state.kq_phase = "quiz"
+        st.session_state.kq_cur   = len(st.session_state.kq_questions) - 1
         st.rerun()
 
 
