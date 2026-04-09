@@ -7,16 +7,14 @@ Status machine (4 steps, nobody can cheat):
   responded   → Recipient answered sender's questions. Sender must now answer recipient's.
   revealed    → Sender answered. Full exchange visible to both. Simultaneous unlock.
 
-Question validation:
-  - Must be at least 8 characters
-  - Must end with '?' OR start with a recognised question word
-  - No duplicate questions within the same submission
+Auto-delete: revealed exchanges are deleted from DB after 60 seconds.
+             This is enforced server-side on every page load — no JS required.
 
-Security features:
-  - Auto-delete revealed exchanges after 60 seconds
-  - Viewer's username watermarked across ALL revealed content (traceable)
-  - "Report screenshot" button at every step — saves a persistent notification to the other person
-  - Screenshot alerts survive confession deletion
+Screenshot detection: Desktop PrintScreen key only (reliable).
+             visibilitychange / blur are NOT used — they fire on normal phone
+             usage (lock screen, notification pull-down, app switch) and produce
+             constant false positives. You cannot reliably detect screenshots in
+             a browser. The PrintScreen key is the only genuinely trustworthy signal.
 """
 
 import streamlit as st
@@ -24,6 +22,7 @@ import secrets
 import string
 import re
 import time
+from datetime import datetime, timedelta
 
 
 # ─── CSS ─────────────────────────────────────────────────────────────────────
@@ -94,124 +93,154 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 """)
 
 
-# ─── WATERMARK ───────────────────────────────────────────────────────────────
+# ─── COUNTDOWN BANNER (pure CSS/JS — no page-unload side effects) ─────────────
 
-def _watermark_svg(username: str) -> str:
+def inject_countdown_banner(confession_code: str, revealed_at_iso: str):
     """
-    Diagonal repeating SVG watermark stamped over revealed content.
-    Uses a <pattern> so it tiles at any height automatically.
-    Opacity is low enough to read content through it, but visible in screenshots.
-    """
-    safe = username.replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-    return f"""
-<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"
-     style="position:absolute;inset:0;pointer-events:none;z-index:10;border-radius:4px;"
-     preserveAspectRatio="xMidYMid slice">
-  <defs>
-    <pattern id="wm-{safe}" x="0" y="0" width="280" height="130"
-             patternUnits="userSpaceOnUse" patternTransform="rotate(-28)">
-      <text x="10" y="52" font-family="Space Mono,monospace" font-size="13"
-            font-weight="700" fill="rgba(255,45,120,0.15)" letter-spacing="3">
-        {safe}
-      </text>
-      <text x="60" y="105" font-family="Space Mono,monospace" font-size="10"
-            fill="rgba(198,255,0,0.10)" letter-spacing="2">
-        ViceVault · {safe}
-      </text>
-    </pattern>
-  </defs>
-  <rect width="100%" height="100%" fill="url(#wm-{safe})" />
-</svg>"""
-
-
-def _watermarked_card(label: str, color: str, questions: list,
-                      answers: list, viewer: str):
-    """Each Q&A card rendered with the viewer's username tiled diagonally over it."""
-    st.html(f"""
-<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-            text-transform:uppercase; color:{color}; margin-bottom:8px;">{label}</div>
-""")
-    wm = _watermark_svg(viewer)
-    for i, (q, a) in enumerate(zip(questions, answers)):
-        st.html(f"""
-<div style="position:relative; overflow:hidden; background:var(--card);
-            border:1px solid var(--border); border-left:2px solid {color};
-            border-radius:4px; padding:16px 18px; margin-bottom:10px;
-            user-select:none; -webkit-user-select:none;">
-  {wm}
-  <div style="position:relative; z-index:1;">
-    <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
-                letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Q{i+1}</div>
-    <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text);
-                line-height:1.6; margin-bottom:10px;">{q}</div>
-    <div style="height:1px; background:var(--border); margin-bottom:10px;"></div>
-    <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
-                letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Answer</div>
-    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:{color};
-                line-height:1.7; font-style:italic;">"{a}"</div>
-  </div>
-</div>
-""")
-
-
-# ─── AUTO-DELETE COUNTDOWN ───────────────────────────────────────────────────
-
-def _inject_countdown(confession_code: str):
-    """
-    Fixed bottom banner: counts down 60 s.
-    At zero appends ?delete_code=CODE to the URL → server deletes on next rerun.
-    Safe to call multiple times — JS guards against duplicate banners.
+    Shows a fixed bottom banner counting down to 0.
+    When it hits 0 it sets a query param and reloads — server then deletes.
+    Uses the server-recorded revealed_at time so the countdown is accurate
+    even if the user refreshes.
     """
     st.html(f"""
 <script>
 (function() {{
-  var code = "{confession_code}";
-  if (document.getElementById("vv-countdown-banner")) return;
+  var code        = "{confession_code}";
+  var revealedAt  = new Date("{revealed_at_iso}").getTime();
+  var deleteAfter = 60 * 1000;  // 60 seconds in ms
 
-  var banner = document.createElement("div");
-  banner.id = "vv-countdown-banner";
-  banner.style.cssText = [
-    "position:fixed","bottom:0","left:0","right:0",
-    "background:#0a0a0b","border-top:2px solid #ff2d78",
-    "padding:10px 24px","display:flex","align-items:center",
-    "justify-content:space-between","z-index:9999",
-    "font-family:'Space Mono',monospace","gap:12px","flex-wrap:wrap"
-  ].join(";");
-  banner.innerHTML = `
-    <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#5a5a72;">
-      EXCHANGE SELF-DESTRUCTS IN
-    </div>
-    <div id="vv-timer" style="font-size:24px;color:#ff2d78;font-weight:700;letter-spacing:4px;">
-      1:00
-    </div>
-    <div style="font-size:9px;letter-spacing:1px;color:#5a5a72;text-transform:uppercase;">
-      Your name is on every screenshot
-    </div>
-  `;
-  document.body.appendChild(banner);
+  // Create banner if not already present
+  var banner = document.getElementById("vv-countdown-banner");
+  if (!banner) {{
+    banner = document.createElement("div");
+    banner.id = "vv-countdown-banner";
+    banner.style.cssText = [
+      "position:fixed","bottom:0","left:0","right:0",
+      "background:#0a0a0b","border-top:2px solid #ff2d78",
+      "padding:12px 24px","display:flex","align-items:center",
+      "justify-content:space-between","z-index:9999",
+      "font-family:'Space Mono',monospace"
+    ].join(";");
+    banner.innerHTML = `
+      <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#5a5a72;">
+        THIS EXCHANGE SELF-DESTRUCTS IN
+      </div>
+      <div id="vv-timer" style="font-size:22px;color:#ff2d78;font-weight:700;letter-spacing:3px;">
+        1:00
+      </div>
+      <div style="font-size:10px;letter-spacing:1px;color:#5a5a72;text-transform:uppercase;">
+        PrintScreen = logged out
+      </div>
+    `;
+    document.body.appendChild(banner);
+  }}
 
-  var secondsLeft = 60;
   var timerEl = document.getElementById("vv-timer");
 
-  var interval = setInterval(function() {{
-    secondsLeft--;
-    var m = Math.floor(secondsLeft / 60);
-    var s = secondsLeft % 60;
-    if (timerEl) {{
-      timerEl.textContent = m + ":" + (s < 10 ? "0" + s : s);
-      if (secondsLeft <= 10) timerEl.style.color = "#c6ff00";
-      if (secondsLeft <= 5)  timerEl.style.color = "#ffffff";
+  // Desktop PrintScreen detection (genuinely reliable)
+  document.addEventListener("keyup", function(e) {{
+    if (e.key === "PrintScreen" || e.keyCode === 44) {{
+      var url = new URL(window.location.href);
+      url.searchParams.set("screenshot_code",  code);
+      window.location.href = url.toString();
     }}
-    if (secondsLeft <= 0) {{
+  }});
+
+  var interval = setInterval(function() {{
+    var elapsed   = Date.now() - revealedAt;
+    var remaining = Math.max(0, Math.ceil((deleteAfter - elapsed) / 1000));
+
+    if (timerEl) {{
+      var m = Math.floor(remaining / 60);
+      var s = remaining % 60;
+      timerEl.textContent = m + ":" + (s < 10 ? "0" + s : s);
+      if (remaining <= 10) timerEl.style.color = "#c6ff00";
+      if (remaining <= 5)  timerEl.style.color = "#ffffff";
+    }}
+
+    if (remaining <= 0) {{
       clearInterval(interval);
       var url = new URL(window.location.href);
       url.searchParams.set("delete_code", code);
       window.location.href = url.toString();
     }}
-  }}, 1000);
+  }}, 500);
 }})();
 </script>
 """)
+
+
+def inject_printscreen_guard(confession_code: str):
+    """
+    Inject desktop PrintScreen detection only (no visibilitychange/blur).
+    Safe to use on non-revealed phases too.
+    """
+    st.html(f"""
+<script>
+(function() {{
+  var code     = "{confession_code}";
+  var reported = false;
+  document.addEventListener("keyup", function(e) {{
+    if (!reported && (e.key === "PrintScreen" || e.keyCode === 44)) {{
+      reported = true;
+      var url = new URL(window.location.href);
+      url.searchParams.set("screenshot_code", code);
+      window.location.href = url.toString();
+    }}
+  }});
+}})();
+</script>
+""")
+
+
+# ─── SERVER-SIDE AUTO-DELETE CHECK ───────────────────────────────────────────
+
+_DELETE_AFTER_SECONDS = 60
+
+
+def _auto_delete_expired_revealed(items: list) -> list:
+    """
+    Called after loading inbox/outbox. For any item with status='revealed',
+    check if it's been revealed for >60s. If so, delete it from DB and
+    remove it from the list.
+    Returns the filtered list.
+    """
+    kept = []
+    for item in items:
+        if item.get("status") != "revealed":
+            kept.append(item)
+            continue
+
+        updated_at = item.get("updated_at")
+        if updated_at is None:
+            kept.append(item)
+            continue
+
+        if isinstance(updated_at, str):
+            try:
+                updated_at = datetime.fromisoformat(updated_at)
+            except Exception:
+                kept.append(item)
+                continue
+
+        age = (datetime.now() - updated_at).total_seconds()
+        if age > _DELETE_AFTER_SECONDS:
+            _db_delete_confession(item["code"])
+            # Don't add to kept — it's gone
+        else:
+            kept.append(item)
+
+    return kept
+
+
+def _get_revealed_at_iso(item: dict) -> str:
+    """Return the ISO string of when the exchange was revealed (updated_at)."""
+    updated_at = item.get("updated_at")
+    if updated_at is None:
+        return datetime.now().isoformat()
+    if hasattr(updated_at, "isoformat"):
+        return updated_at.isoformat()
+    return str(updated_at)
 
 
 # ─── QUESTION VALIDATION ─────────────────────────────────────────────────────
@@ -227,24 +256,29 @@ QUESTION_WORDS = {
 def _validate_questions(questions: list) -> list:
     errors = []
     seen   = {}
+
     for i, raw in enumerate(questions):
         q   = raw.strip()
         num = i + 1
+
         if not q:
             errors.append(f"Question {num} is empty.")
             continue
         if len(q) < 8:
             errors.append(f"Question {num} is too short — ask something real.")
             continue
+
         ends_with_q = q.endswith("?")
         first_word  = re.split(r'\W+', q.lower())[0]
         starts_as_q = first_word in QUESTION_WORDS
+
         if not ends_with_q and not starts_as_q:
             errors.append(
                 f"Question {num} doesn't look like a question. "
                 "End it with '?' or start with a question word (what, why, how, would, etc.)."
             )
             continue
+
         normalised = re.sub(r'[^\w\s]', '', q.lower()).strip()
         if normalised in seen:
             errors.append(
@@ -253,6 +287,7 @@ def _validate_questions(questions: list) -> list:
             )
         else:
             seen[normalised] = num
+
     return errors
 
 
@@ -265,12 +300,14 @@ def _db_save_confession(sender_id, recipient_id, code, questions):
     except Exception:
         return False
 
+
 def _db_load_inbox(user_id):
     try:
         import database as db
         return db.load_confessions_inbox(user_id)
     except Exception:
         return []
+
 
 def _db_load_outbox(user_id):
     try:
@@ -279,12 +316,14 @@ def _db_load_outbox(user_id):
     except Exception:
         return []
 
+
 def _db_recipient_submit_questions(code, recipient_questions):
     try:
         import database as db
         return db.confession_recipient_submit_questions(code, recipient_questions)
     except Exception:
         return False
+
 
 def _db_recipient_answer(code, recipient_answers):
     try:
@@ -293,12 +332,14 @@ def _db_recipient_answer(code, recipient_answers):
     except Exception:
         return False
 
+
 def _db_sender_answer(code, sender_answers):
     try:
         import database as db
         return db.confession_sender_answer(code, sender_answers)
     except Exception:
         return False
+
 
 def _db_get_user_by_username(username):
     try:
@@ -307,6 +348,7 @@ def _db_get_user_by_username(username):
     except Exception:
         return None
 
+
 def _db_delete_confession(code):
     try:
         import database as db
@@ -314,20 +356,16 @@ def _db_delete_confession(code):
     except Exception:
         return False
 
-def _db_save_screenshot_alert(code, reporter_id, reporter_username,
-                               accused_username, alert_recipient_username):
-    """
-    Saves a screenshot report. Persists even after the confession is deleted.
-    alert_recipient_username = the person who will SEE the alert in their banner.
-    """
+
+def _db_save_screenshot_alert(code, screenshotter_id, screenshotter_username, other_username):
     try:
         import database as db
         return db.save_screenshot_alert(
-            code, reporter_id, reporter_username,
-            accused_username, alert_recipient_username
+            code, screenshotter_id, screenshotter_username, other_username
         )
     except Exception:
         return False
+
 
 def _db_load_screenshot_alerts(user_id):
     try:
@@ -335,6 +373,7 @@ def _db_load_screenshot_alerts(user_id):
         return db.load_screenshot_alerts(user_id)
     except Exception:
         return []
+
 
 def _db_dismiss_screenshot_alert(alert_id):
     try:
@@ -344,121 +383,131 @@ def _db_dismiss_screenshot_alert(alert_id):
         return False
 
 
+def _db_logout_user(user_id):
+    try:
+        import database as db
+        db.invalidate_user_sessions(user_id)
+    except Exception:
+        pass
+
+
 # ─── UTILS ───────────────────────────────────────────────────────────────────
 
 def _gen_code(n=8):
     chars = string.ascii_uppercase + string.digits
     return "".join(secrets.choice(chars) for _ in range(n))
 
+
 def _current_user():
     return st.session_state.get("user", {})
+
 
 def _current_uid():
     u = _current_user()
     return u.get("id") if u else None
+
 
 def _current_username():
     u = _current_user()
     return u.get("username", "You")
 
 
-# ─── QUERY-PARAM SIGNAL HANDLER ──────────────────────────────────────────────
+def _force_logout():
+    uid = _current_uid()
+    if uid:
+        _db_logout_user(uid)
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
+
+
+# ─── QUERY-PARAM SIGNAL HANDLERS ─────────────────────────────────────────────
 
 def _handle_query_params():
-    """Reads signals posted by JS (auto-delete timer) and acts server-side."""
+    """
+    Called once at the top of confessions_page().
+    Handles:
+      ?delete_code=XXXX          → delete the confession and rerun
+      ?screenshot_code=XXXX      → save alert, log out user, rerun
+    """
     params = st.query_params
+
+    # ── Auto-delete signal (from countdown timer JS) ──────────────────────────
     delete_code = params.get("delete_code")
     if delete_code:
         _db_delete_confession(delete_code)
         st.query_params.clear()
         st.rerun()
 
+    # ── Screenshot signal (PrintScreen key only) ──────────────────────────────
+    ss_code = params.get("screenshot_code")
+    if ss_code:
+        uid      = _current_uid()
+        username = _current_username()
 
-# ─── SCREENSHOT ALERTS BANNER ────────────────────────────────────────────────
+        # Figure out the other party from the confession record
+        try:
+            import database as db
+            item = db.get_confession_by_code(ss_code)
+        except Exception:
+            item = None
+
+        other = ""
+        if item:
+            if item.get("sender_id") == uid:
+                other = item.get("recipient_username", "")
+            else:
+                other = item.get("sender_username", "")
+
+        if uid and other:
+            _db_save_screenshot_alert(ss_code, uid, username, other)
+
+        st.query_params.clear()
+
+        st.error(
+            f"⚠️  Screenshot detected (PrintScreen key). You've been logged out. "
+            f"{other or 'The other person'} has been notified."
+        )
+        time.sleep(2)
+        _force_logout()
+
+
+# ─── SCREENSHOT ALERTS BANNER ─────────────────────────────────────────────────
 
 def _render_screenshot_alerts():
-    """
-    Top-of-page persistent alerts.
-    Written to a separate DB table — survive confession deletion.
-    Shown to the person who was reported against (the accused's exchange partner).
-    """
     uid    = _current_uid()
     alerts = _db_load_screenshot_alerts(uid)
     if not alerts:
         return
 
     for alert in alerts:
-        accused  = alert.get("accused_username", "Someone")
-        reporter = alert.get("reporter_username", "your exchange partner")
-        ts       = str(alert.get("created_at", ""))[:16]
-        alert_id = alert.get("id")
+        screenshotter = alert.get("screenshotter_username", "Someone")
+        ts            = str(alert.get("created_at", ""))[:16]
+        alert_id      = alert.get("id")
 
         st.html(f"""
 <div style="background:#1a0a0e; border:1px solid var(--magenta);
             border-left:4px solid var(--magenta); border-radius:4px;
-            padding:14px 18px; margin-bottom:10px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--magenta); margin-bottom:6px;">
-    📸  Screenshot Report
-  </div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--text); line-height:1.7;">
-    <strong style="color:var(--soft);">{reporter}</strong> reported that
-    <strong style="color:var(--magenta);">{accused}</strong>
-    may have screenshotted your confession exchange.
-    <span style="color:var(--muted); font-size:11px; margin-left:6px;">{ts}</span>
-    <br>
-    <span style="font-family:'Space Mono',monospace; font-size:10px; color:var(--muted);">
-      Their username was watermarked on any screenshot they captured.
-    </span>
+            padding:14px 18px; margin-bottom:10px; display:flex;
+            align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+  <div>
+    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+                text-transform:uppercase; color:var(--magenta); margin-bottom:4px;">
+      ⚠  Screenshot Alert
+    </div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--text); line-height:1.6;">
+      <strong style="color:var(--magenta);">{screenshotter}</strong>
+      pressed PrintScreen during your confession exchange.
+      <span style="color:var(--muted); font-size:11px; margin-left:8px;">{ts}</span>
+    </div>
   </div>
 </div>
 """)
-        col_dismiss, _ = st.columns([1, 5])
+        col_dismiss, _ = st.columns([1, 4])
         with col_dismiss:
             if st.button("Dismiss", key=f"dismiss_alert_{alert_id}"):
                 _db_dismiss_screenshot_alert(alert_id)
                 st.rerun()
-
-
-# ─── REPORT SCREENSHOT BUTTON ────────────────────────────────────────────────
-
-def _render_report_button(confession_code: str, accused_username: str,
-                           alert_recipient_username: str):
-    """
-    Manual report button shown at every step.
-    Pressing it saves a persistent alert to the accused person's banner.
-    accused_username         = who you think took the screenshot
-    alert_recipient_username = who gets notified (usually the accused themselves,
-                               or their exchange partner depending on context)
-    """
-    col_btn, col_note = st.columns([3, 4])
-    with col_btn:
-        btn_key = f"report_ss_{confession_code}_{accused_username}"
-        if st.button(f"📸  Report screenshot by {accused_username}", key=btn_key):
-            uid      = _current_uid()
-            reporter = _current_username()
-            saved    = _db_save_screenshot_alert(
-                confession_code,
-                uid,
-                reporter,
-                accused_username,
-                alert_recipient_username,
-            )
-            if saved:
-                st.success(
-                    f"Reported. {accused_username} has been notified. "
-                    "Their username is watermarked on anything they captured."
-                )
-            else:
-                st.error("Couldn't save the report. Try again.")
-    with col_note:
-        st.html(f"""
-<div style="font-family:'DM Sans',sans-serif; font-size:11px; color:var(--muted);
-            padding-top:8px; line-height:1.6;">
-  Any screenshot <strong style="color:var(--soft);">{accused_username}</strong>
-  took already has their username stamped on it.
-</div>
-""")
 
 
 # ─── SHARED UI HELPERS ───────────────────────────────────────────────────────
@@ -485,12 +534,13 @@ def _status_badge(status, sender, recipient, is_sender):
             False: ("var(--amber)",   "WAITING",    f"Waiting for {sender} to answer your questions"),
         },
         "revealed": {
-            True:  ("var(--lime)",    "REVEALED",   "Deletes in 60 s · your username is watermarked on every screenshot"),
-            False: ("var(--lime)",    "REVEALED",   "Deletes in 60 s · your username is watermarked on every screenshot"),
+            True:  ("var(--lime)",    "REVEALED",   "Exchange unlocked — deletes in 60 seconds"),
+            False: ("var(--lime)",    "REVEALED",   "Exchange unlocked — deletes in 60 seconds"),
         },
     }
     defaults = ("var(--muted)", status.upper(), "")
     color, label, detail = cfg.get(status, {}).get(is_sender, defaults)
+
     st.html(f"""
 <div style="display:inline-flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
@@ -516,6 +566,29 @@ def _question_fields(prefix, count, sender_name=None):
         )
         for i in range(count)
     ]
+
+
+def _exchange_card(label, color, questions, answers):
+    st.html(f"""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+            text-transform:uppercase; color:{color}; margin-bottom:8px;">{label}</div>
+""")
+    for i, (q, a) in enumerate(zip(questions, answers)):
+        st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-left:2px solid {color}; border-radius:4px;
+            padding:16px 18px; margin-bottom:10px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
+              letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Q{i+1}</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text);
+              line-height:1.6; margin-bottom:10px;">{q}</div>
+  <div style="height:1px; background:var(--border); margin-bottom:10px;"></div>
+  <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
+              letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Answer</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:{color};
+              line-height:1.7; font-style:italic;">"{a}"</div>
+</div>
+""")
 
 
 # ─── COMPOSE ─────────────────────────────────────────────────────────────────
@@ -548,8 +621,7 @@ def _render_compose():
     <br><br>
     <span style="font-family:'Space Mono',monospace; font-size:10px; color:var(--magenta);">
       Nobody sees anything until every step is done. No shortcuts.
-      Revealed exchanges auto-delete in 60 seconds.
-      Every screenshot has your username stamped on it — permanently traceable.
+      The exchange auto-deletes 60 seconds after it's revealed.
     </span>
   </div>
 </div>
@@ -580,6 +652,7 @@ def _render_compose():
 """)
 
     questions = _question_fields(f"conf_q_{gen}", n)
+
     st.html("<div style='height:12px'></div>")
 
     if st.button(
@@ -627,7 +700,7 @@ def _render_inbox():
     inject_css()
     _section_label("Inbox — Confessions sent to you")
 
-    items = _db_load_inbox(_current_uid())
+    items = _auto_delete_expired_revealed(_db_load_inbox(_current_uid()))
 
     if not items:
         st.html("""
@@ -652,7 +725,9 @@ def _render_inbox_item(item):
     status      = item["status"]
     num_q       = len(item.get("sender_questions", []))
     ts          = str(item.get("created_at", ""))[:16]
-    viewer      = _current_username()
+
+    # PrintScreen guard on all phases
+    inject_printscreen_guard(code)
 
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
@@ -669,13 +744,8 @@ def _render_inbox_item(item):
 </div>
 """)
 
-    _status_badge(status, sender_name, viewer, is_sender=False)
+    _status_badge(status, sender_name, _current_username(), is_sender=False)
 
-    # Report button available at every step (accuse the sender of screenshotting)
-    _render_report_button(code, accused_username=sender_name,
-                          alert_recipient_username=sender_name)
-
-    # ── STEP 1 ───────────────────────────────────────────────────────────────
     if status == "sent":
         with st.expander(
             f"Step 1 / 2 — Write your {num_q} question{'s' if num_q != 1 else ''} for {sender_name}",
@@ -691,19 +761,18 @@ def _render_inbox_item(item):
     Commit to your <strong style="color:var(--text);">{num_q} question{'s' if num_q != 1 else ''}</strong>
     for <strong style="color:var(--text);">{sender_name}</strong> before you see what they asked you.
     The moment you submit, their questions unlock — and you answer them.
-    <br><br>
-    <span style="font-family:'Space Mono',monospace; font-size:10px; color:var(--magenta);">
-      Must end with ? or start with a question word. No duplicates.
-    </span>
   </div>
 </div>
 """)
-            recipient_questions = _question_fields(f"inbox_rq_{code}", num_q, sender_name=sender_name)
+            recipient_questions = _question_fields(
+                f"inbox_rq_{code}", num_q, sender_name=sender_name
+            )
             st.html("<div style='height:8px'></div>")
-
             if st.button(
                 f"Lock in my questions & see {sender_name}'s →",
-                key=f"inbox_step1_{code}", type="primary", use_container_width=True,
+                key=f"inbox_step1_{code}",
+                type="primary",
+                use_container_width=True,
             ):
                 errs = _validate_questions(recipient_questions)
                 if errs:
@@ -716,10 +785,12 @@ def _render_inbox_item(item):
                     else:
                         st.error("Something went wrong. Try again.")
 
-    # ── STEP 2 ───────────────────────────────────────────────────────────────
     elif status == "questioning":
         sender_questions = item.get("sender_questions", [])
-        with st.expander(f"Step 2 / 2 — Answer {sender_name}'s questions", expanded=True):
+        with st.expander(
+            f"Step 2 / 2 — Answer {sender_name}'s questions",
+            expanded=True,
+        ):
             st.html(f"""
 <div style="padding:14px 16px; background:var(--surface); border-radius:4px; margin-bottom:16px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
@@ -728,7 +799,7 @@ def _render_inbox_item(item):
   </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
     Answer <strong style="color:var(--text);">{sender_name}'s questions</strong> honestly.
-    When you submit, they'll answer yours — and the exchange reveals simultaneously.
+    When you submit, they'll answer yours — and the exchange reveals for both simultaneously.
   </div>
 </div>
 """)
@@ -741,8 +812,10 @@ def _render_inbox_item(item):
             margin-bottom:6px; line-height:1.6;">{q}</div>
 """)
                 ans = st.text_area(
-                    "Your answer", placeholder="Be honest…",
-                    key=f"inbox_ans_{code}_{i}", height=80,
+                    "Your answer",
+                    placeholder="Be honest…",
+                    key=f"inbox_ans_{code}_{i}",
+                    height=80,
                     label_visibility="collapsed",
                 )
                 recipient_answers.append(ans)
@@ -751,7 +824,9 @@ def _render_inbox_item(item):
             st.html("<div style='height:8px'></div>")
             if st.button(
                 f"Submit answers — {sender_name} answers yours next →",
-                key=f"inbox_step2_{code}", type="primary", use_container_width=True,
+                key=f"inbox_step2_{code}",
+                type="primary",
+                use_container_width=True,
             ):
                 blank = [i+1 for i, a in enumerate(recipient_answers) if not a.strip()]
                 if blank:
@@ -783,10 +858,8 @@ def _render_inbox_item(item):
 """)
 
     elif status == "revealed":
-        _inject_countdown(code)
-        _render_revealed(item, is_sender=False, viewer_username=viewer)
-        _render_report_button(code, accused_username=sender_name,
-                              alert_recipient_username=sender_name)
+        inject_countdown_banner(code, _get_revealed_at_iso(item))
+        _render_revealed(item, is_sender=False)
 
     st.html("<div style='height:12px'></div>")
 
@@ -797,7 +870,7 @@ def _render_outbox():
     inject_css()
     _section_label("Sent — Confessions you started")
 
-    items = _db_load_outbox(_current_uid())
+    items = _auto_delete_expired_revealed(_db_load_outbox(_current_uid()))
 
     if not items:
         st.html("""
@@ -822,7 +895,8 @@ def _render_outbox_item(item):
     status         = item["status"]
     num_q          = len(item.get("sender_questions", []))
     ts             = str(item.get("created_at", ""))[:16]
-    viewer         = _current_username()
+
+    inject_printscreen_guard(code)
 
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
@@ -839,11 +913,7 @@ def _render_outbox_item(item):
 </div>
 """)
 
-    _status_badge(status, viewer, recipient_name, is_sender=True)
-
-    # Report button — accuse the recipient of screenshotting
-    _render_report_button(code, accused_username=recipient_name,
-                          alert_recipient_username=recipient_name)
+    _status_badge(status, _current_username(), recipient_name, is_sender=True)
 
     if status == "sent":
         st.html(f"""
@@ -879,9 +949,8 @@ def _render_outbox_item(item):
   </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
     <strong style="color:var(--text);">{recipient_name}</strong> answered your questions.
-    Answer theirs — both sides reveal at the exact same time.
-    Exchange <strong style="color:var(--magenta);">auto-deletes in 60 seconds</strong> after reveal.
-    Every screenshot carries your username as a permanent watermark.
+    Answer theirs — then both sides reveal at the exact same time.
+    The exchange <strong style="color:var(--magenta);">auto-deletes 60 seconds after reveal</strong>.
   </div>
 </div>
 """)
@@ -894,8 +963,10 @@ def _render_outbox_item(item):
             margin-bottom:6px; line-height:1.6;">{q}</div>
 """)
                 ans = st.text_area(
-                    "Your answer", placeholder="Be honest…",
-                    key=f"outbox_ans_{code}_{i}", height=80,
+                    "Your answer",
+                    placeholder="Be honest…",
+                    key=f"outbox_ans_{code}_{i}",
+                    height=80,
                     label_visibility="collapsed",
                 )
                 sender_answers.append(ans)
@@ -904,7 +975,9 @@ def _render_outbox_item(item):
             st.html("<div style='height:8px'></div>")
             if st.button(
                 "Submit — reveal the exchange →",
-                key=f"outbox_submit_{code}", type="primary", use_container_width=True,
+                key=f"outbox_submit_{code}",
+                type="primary",
+                use_container_width=True,
             ):
                 blank = [i+1 for i, a in enumerate(sender_answers) if not a.strip()]
                 if blank:
@@ -913,44 +986,33 @@ def _render_outbox_item(item):
                     st.error(f"Answer{'s' if len(blank) > 1 else ''} {nums} {plural} empty.")
                 else:
                     if _db_sender_answer(code, sender_answers):
-                        st.success("Exchange revealed. It auto-deletes in 60 seconds.")
+                        st.success("Exchange revealed. It will auto-delete in 60 seconds.")
                         st.rerun()
                     else:
                         st.error("Something went wrong. Try again.")
 
     elif status == "revealed":
-        _inject_countdown(code)
-        _render_revealed(item, is_sender=True, viewer_username=viewer)
-        _render_report_button(code, accused_username=recipient_name,
-                              alert_recipient_username=recipient_name)
+        inject_countdown_banner(code, _get_revealed_at_iso(item))
+        _render_revealed(item, is_sender=True)
 
     st.html("<div style='height:12px'></div>")
 
 
 # ─── REVEALED VIEW ───────────────────────────────────────────────────────────
 
-def _render_revealed(item, is_sender: bool, viewer_username: str):
-    """
-    Full exchange display with the viewer's username watermarked
-    diagonally across every single card.
-    """
+def _render_revealed(item, is_sender: bool):
     sender_name    = item.get("sender_username",    "Sender")
     recipient_name = item.get("recipient_username", "Recipient")
 
-    st.html(f"""
-<div style="position:relative; overflow:hidden; background:var(--card);
-            border:1px solid var(--border); border-top:2px solid var(--lime);
-            border-radius:4px; padding:16px 20px; margin-bottom:16px; text-align:center;">
-  {_watermark_svg(viewer_username)}
-  <div style="position:relative; z-index:1;">
-    <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--lime);
-                letter-spacing:2px; margin-bottom:6px;">EXCHANGE REVEALED</div>
-    <div style="font-family:'Space Mono',monospace; font-size:10px; color:var(--muted);
-                letter-spacing:1px; line-height:2;">
-      ⏱ Auto-deletes in 60 s
-      &nbsp;·&nbsp;
-      🔏 <span style="color:var(--magenta);">{viewer_username}</span> watermarked on every screenshot
-    </div>
+    st.html("""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-top:2px solid var(--lime); border-radius:4px;
+            padding:16px 20px; margin-bottom:16px; text-align:center;">
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--lime);
+              letter-spacing:2px; margin-bottom:4px;">EXCHANGE REVEALED</div>
+  <div style="font-family:'Space Mono',monospace; font-size:10px; letter-spacing:1px;
+              color:var(--magenta);">
+    ⏱  Auto-deletes in 60 seconds
   </div>
 </div>
 """)
@@ -961,31 +1023,21 @@ def _render_revealed(item, is_sender: bool, viewer_username: str):
     sa = item.get("sender_answers",      [])
 
     if is_sender:
-        _watermarked_card(
-            f"Your questions → {recipient_name}'s answers",
-            "#c6ff00", sq, ra, viewer_username
-        )
+        _exchange_card(f"Your questions → {recipient_name}'s answers", "#c6ff00", sq, ra)
         st.html("<div style='height:12px'></div>")
-        _watermarked_card(
-            f"{recipient_name}'s questions → Your answers",
-            "#ff2d78", rq, sa, viewer_username
-        )
+        _exchange_card(f"{recipient_name}'s questions → Your answers", "#ff2d78", rq, sa)
     else:
-        _watermarked_card(
-            f"{sender_name}'s questions → Your answers",
-            "#ff2d78", sq, ra, viewer_username
-        )
+        _exchange_card(f"{sender_name}'s questions → Your answers", "#ff2d78", sq, ra)
         st.html("<div style='height:12px'></div>")
-        _watermarked_card(
-            f"Your questions → {sender_name}'s answers",
-            "#c6ff00", rq, sa, viewer_username
-        )
+        _exchange_card(f"Your questions → {sender_name}'s answers", "#c6ff00", rq, sa)
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
 def confessions_page():
     inject_css()
+
+    # Handle JS signals first
     _handle_query_params()
 
     st.html("""
@@ -1005,21 +1057,20 @@ def confessions_page():
         st.error("Log in to use Confessions.")
         return
 
-    # Persistent screenshot alert banner
     _render_screenshot_alerts()
 
     if "conf_tab" not in st.session_state:
         st.session_state.conf_tab = "compose"
 
-    inbox_items  = _db_load_inbox(uid)
-    outbox_items = _db_load_outbox(uid)
+    # Load and auto-delete expired revealed items
+    inbox_items  = _auto_delete_expired_revealed(_db_load_inbox(uid))
+    outbox_items = _auto_delete_expired_revealed(_db_load_outbox(uid))
 
     inbox_action  = sum(1 for i in inbox_items  if i["status"] in ("sent", "questioning"))
     outbox_action = sum(1 for i in outbox_items if i["status"] == "responded")
     revealed_all  = [i for i in inbox_items + outbox_items if i["status"] == "revealed"]
 
     col1, col2, col3, col4 = st.columns(4)
-
     with col1:
         if st.button(
             "◈  Compose", use_container_width=True,
@@ -1027,7 +1078,6 @@ def confessions_page():
             key="tab_compose",
         ):
             st.session_state.conf_tab = "compose"; st.rerun()
-
     with col2:
         b2 = f"  ({inbox_action})" if inbox_action else ""
         if st.button(
@@ -1036,7 +1086,6 @@ def confessions_page():
             key="tab_inbox",
         ):
             st.session_state.conf_tab = "inbox"; st.rerun()
-
     with col3:
         b3 = f"  ({outbox_action})" if outbox_action else ""
         if st.button(
@@ -1045,7 +1094,6 @@ def confessions_page():
             key="tab_sent",
         ):
             st.session_state.conf_tab = "sent"; st.rerun()
-
     with col4:
         b4 = f"  ({len(revealed_all)})" if revealed_all else ""
         if st.button(
@@ -1077,7 +1125,6 @@ def confessions_page():
 </div>
 """)
         else:
-            viewer = _current_username()
             seen, unique = set(), []
             for item in revealed_all:
                 if item["code"] not in seen:
@@ -1087,8 +1134,6 @@ def confessions_page():
                 is_s  = item.get("sender_id") == uid
                 other = item.get("recipient_username") if is_s else item.get("sender_username")
                 ts    = str(item.get("created_at", ""))[:16]
-                _inject_countdown(item["code"])
+                inject_countdown_banner(item["code"], _get_revealed_at_iso(item))
                 with st.expander(f"Exchange with {other} · {ts}", expanded=False):
-                    _render_revealed(item, is_sender=is_s, viewer_username=viewer)
-                    _render_report_button(item["code"], accused_username=other,
-                                          alert_recipient_username=other)
+                    _render_revealed(item, is_sender=is_s)
