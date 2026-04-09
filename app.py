@@ -155,7 +155,7 @@ def main():
             hotspots_page()
             
         elif feature == 'confessions':
-            from Pages.confessions import confessions_page
+            from Pages.confession import confessions_page
             confessions_page()            
 
         else:  # 'stats' or default
