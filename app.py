@@ -77,6 +77,10 @@ def render_sidebar():
             st.session_state.selected_feature = 'hotspots'
             st.rerun()
 
+        if st.button("💬  Confessions", use_container_width=True):
+            st.session_state.selected_feature = 'confessions'
+            st.rerun()
+
         st.markdown("<div style='height:1px; background:#2a2a35; margin:12px 0;'></div>",
                     unsafe_allow_html=True)
 
@@ -149,10 +153,20 @@ def main():
         elif feature == 'hotspots':
             from Pages.hotspots import hotspots_page
             hotspots_page()
+            
+        elif feature == 'confessions':
+            from Pages.confessions import confessions_page
+            confessions_page()
+            
+      
+ 
 
         else:  # 'stats' or default
             from Pages.dashboard import stats_page
             stats_page()
+
+
+
 
 
 if __name__ == "__main__":
