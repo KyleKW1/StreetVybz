@@ -1,22 +1,22 @@
 """
 Pages/confessions.py — Mutual blind confession exchange.
 
-Flow:
-  1. Sender picks a recipient (by username) and writes N questions (1–10).
-  2. Recipient opens their Inbox, answers those N questions AND writes N questions back.
-  3. Sender sees recipient responded, answers recipient's N questions.
-  4. REVEAL: both sides unlock simultaneously — neither saw anything until both were done.
+Status machine (4 steps, nobody can cheat):
+  sent        → Recipient must submit THEIR questions first (blind — sender's hidden)
+  questioning → Recipient submitted their questions. Now they unlock sender's questions to answer.
+  responded   → Recipient answered sender's questions. Sender must now answer recipient's.
+  revealed    → Sender answered. Full exchange visible to both. Simultaneous unlock.
 
-The lock mechanic:
-  - status='sent'      → recipient hasn't answered yet. Sender sees "waiting…"
-  - status='responded' → recipient done. Sender must now answer. Recipient sees "waiting…"
-  - status='revealed'  → both submitted. Full exchange visible to both parties.
+Question validation:
+  - Must be at least 8 characters
+  - Must end with '?' OR start with a recognised question word
+  - No duplicate questions within the same submission
 """
 
 import streamlit as st
 import secrets
 import string
-from datetime import datetime
+import re
 
 
 # ─── CSS ─────────────────────────────────────────────────────────────────────
@@ -60,23 +60,89 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 .stButton > button[kind="primary"]:hover {
   background:#ff5590 !important; box-shadow:0 0 20px rgba(255,45,120,0.25) !important;
 }
-.stTextInput > div > div > input, .stTextArea > div > div > textarea, .stNumberInput > div > div > input {
+.stTextInput > div > div > input,
+.stTextArea > div > div > textarea,
+.stNumberInput > div > div > input {
   background:var(--card) !important; border:1px solid var(--border) !important;
   border-radius:4px !important; color:var(--text) !important;
   font-family:'DM Sans',sans-serif !important; font-size:14px !important;
 }
-.stTextInput > div > div > input:focus, .stTextArea > div > div > textarea:focus {
-  border-color:var(--magenta) !important; box-shadow:0 0 0 2px rgba(255,45,120,0.12) !important;
+.stTextInput > div > div > input:focus,
+.stTextArea > div > div > textarea:focus {
+  border-color:var(--magenta) !important;
+  box-shadow:0 0 0 2px rgba(255,45,120,0.12) !important;
 }
-.stTextInput label, .stTextArea label, .stNumberInput label, .stSelectbox label {
+.stTextInput label, .stTextArea label,
+.stNumberInput label, .stSelectbox label {
   font-family:'Space Mono',monospace !important; font-size:9px !important;
-  letter-spacing:2px !important; text-transform:uppercase !important; color:var(--muted) !important;
+  letter-spacing:2px !important; text-transform:uppercase !important;
+  color:var(--muted) !important;
 }
-.stSelectbox > div > div { background:var(--card) !important; border:1px solid var(--border) !important; color:var(--text) !important; }
-.stRadio label { font-family:'DM Sans',sans-serif !important; font-size:13px !important; color:var(--soft) !important; }
+.stSelectbox > div > div {
+  background:var(--card) !important; border:1px solid var(--border) !important;
+  color:var(--text) !important;
+}
 #MainMenu { visibility:hidden; } footer { visibility:hidden; }
 </style>
 """)
+
+
+# ─── QUESTION VALIDATION ─────────────────────────────────────────────────────
+
+QUESTION_WORDS = {
+    "what", "why", "how", "when", "where", "who", "whom", "which", "whose",
+    "would", "could", "should", "do", "did", "does", "have", "has", "had",
+    "are", "is", "was", "were", "will", "can", "may", "might", "shall",
+    "if", "tell", "describe", "explain", "name",
+}
+
+
+def _validate_questions(questions: list) -> list:
+    """
+    Returns a list of error strings. Empty list = all valid.
+    Rules per question:
+      - Not blank
+      - At least 8 non-whitespace characters
+      - Ends with '?' OR first word is a recognised question word
+      - No duplicate questions in the same submission
+    """
+    errors = []
+    seen   = {}
+
+    for i, raw in enumerate(questions):
+        q   = raw.strip()
+        num = i + 1
+
+        if not q:
+            errors.append(f"Question {num} is empty.")
+            continue
+
+        if len(q) < 8:
+            errors.append(f"Question {num} is too short — ask something real.")
+            continue
+
+        ends_with_q = q.endswith("?")
+        first_word  = re.split(r'\W+', q.lower())[0]
+        starts_as_q = first_word in QUESTION_WORDS
+
+        if not ends_with_q and not starts_as_q:
+            errors.append(
+                f"Question {num} doesn't look like a question. "
+                "End it with '?' or start with a question word (what, why, how, would, etc.)."
+            )
+            continue
+
+        # Duplicate check — strip punctuation, lowercase, compare
+        normalised = re.sub(r'[^\w\s]', '', q.lower()).strip()
+        if normalised in seen:
+            errors.append(
+                f"Question {num} is the same as question {seen[normalised]}. "
+                "They deserve something different."
+            )
+        else:
+            seen[normalised] = num
+
+    return errors
 
 
 # ─── DB HELPERS ──────────────────────────────────────────────────────────────
@@ -86,7 +152,7 @@ def _db_save_confession(sender_id, recipient_id, code, questions):
         import database as db
         return db.save_confession(sender_id, recipient_id, code, questions)
     except Exception:
-        return None
+        return False
 
 
 def _db_load_inbox(user_id):
@@ -105,23 +171,26 @@ def _db_load_outbox(user_id):
         return []
 
 
-def _db_get_confession(code):
+def _db_recipient_submit_questions(code, recipient_questions):
+    """Step 1 for recipient: submit their questions blind. sent -> questioning."""
     try:
         import database as db
-        return db.get_confession_by_code(code)
+        return db.confession_recipient_submit_questions(code, recipient_questions)
     except Exception:
-        return None
+        return False
 
 
-def _db_recipient_respond(code, recipient_answers, recipient_questions):
+def _db_recipient_answer(code, recipient_answers):
+    """Step 2 for recipient: answer sender's now-visible questions. questioning -> responded."""
     try:
         import database as db
-        return db.confession_recipient_respond(code, recipient_answers, recipient_questions)
+        return db.confession_recipient_answer(code, recipient_answers)
     except Exception:
         return False
 
 
 def _db_sender_answer(code, sender_answers):
+    """Sender answers recipient's questions. responded -> revealed."""
     try:
         import database as db
         return db.confession_sender_answer(code, sender_answers)
@@ -168,38 +237,56 @@ def _section_label(text):
 
 
 def _status_badge(status, sender, recipient, is_sender):
-    colors = {
-        "sent":      ("var(--amber)",   "PENDING"),
-        "responded": ("var(--cyan)",    "YOUR TURN"),
-        "revealed":  ("var(--lime)",    "REVEALED"),
+    cfg = {
+        "sent": {
+            True:  ("var(--amber)",   "WAITING",    f"Waiting for {recipient} to send their questions first"),
+            False: ("var(--magenta)", "YOUR MOVE",  f"Write your questions before you can see {sender}'s"),
+        },
+        "questioning": {
+            True:  ("var(--amber)",   "WAITING",    f"{recipient} sent their questions — waiting for them to answer yours"),
+            False: ("var(--cyan)",    "YOUR TURN",  f"Your questions are locked in — now answer {sender}'s"),
+        },
+        "responded": {
+            True:  ("var(--cyan)",    "YOUR TURN",  f"{recipient} answered — now answer their questions to reveal"),
+            False: ("var(--amber)",   "WAITING",    f"Waiting for {sender} to answer your questions"),
+        },
+        "revealed": {
+            True:  ("var(--lime)",    "REVEALED",   "Exchange unlocked for both of you"),
+            False: ("var(--lime)",    "REVEALED",   "Exchange unlocked for both of you"),
+        },
     }
-    color, label = colors.get(status, ("var(--muted)", status.upper()))
-
-    if status == "sent":
-        if is_sender:
-            detail = f"Waiting for {recipient} to answer & send back"
-        else:
-            detail = f"{sender} sent you questions — your move"
-    elif status == "responded":
-        if is_sender:
-            detail = f"{recipient} answered — now answer their questions to reveal"
-        else:
-            detail = f"Waiting for {sender} to answer your questions"
-    else:
-        detail = "Both sides complete — exchange unlocked"
+    defaults = ("var(--muted)", status.upper(), "")
+    color, label, detail = cfg.get(status, {}).get(is_sender, defaults)
 
     st.html(f"""
-<div style="display:inline-flex; align-items:center; gap:10px; margin-bottom:16px;">
+<div style="display:inline-flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
               text-transform:uppercase; color:{color}; border:1px solid {color};
-              border-radius:2px; padding:4px 10px;">{label}</div>
+              border-radius:2px; padding:4px 10px; white-space:nowrap;">{label}</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);">{detail}</div>
 </div>
 """)
 
 
+def _question_fields(prefix, count, sender_name=None):
+    """Render `count` question text areas; return list of raw strings."""
+    ph = (
+        f"Ask {sender_name} something real…"
+        if sender_name else
+        "Ask them something you actually want to know…"
+    )
+    return [
+        st.text_area(
+            f"Question {i + 1}",
+            placeholder=ph,
+            key=f"{prefix}_{i}",
+            height=80,
+        )
+        for i in range(count)
+    ]
+
+
 def _exchange_card(label, color, questions, answers):
-    """Render a set of Q&A pairs side by side."""
     st.html(f"""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
             text-transform:uppercase; color:{color}; margin-bottom:8px;">{label}</div>
@@ -222,22 +309,36 @@ def _exchange_card(label, color, questions, answers):
 """)
 
 
-# ─── SUB-PAGES ───────────────────────────────────────────────────────────────
+# ─── COMPOSE ─────────────────────────────────────────────────────────────────
 
 def _render_compose():
     inject_css()
     _section_label("New Confession Exchange")
 
+    if "conf_form_gen" not in st.session_state:
+        st.session_state.conf_form_gen = 0
+    if "conf_sent_to" not in st.session_state:
+        st.session_state.conf_sent_to = None
+
+    gen = st.session_state.conf_form_gen
+
+    if st.session_state.conf_sent_to:
+        st.success(
+            f"Sent. {st.session_state.conf_sent_to} must write their own questions "
+            "before they can even see what you asked."
+        )
+        st.session_state.conf_sent_to = None
+
     st.html("""
 <div style="background:var(--card); border:1px solid var(--border); border-top:2px solid var(--magenta);
             border-radius:4px; padding:20px 22px; margin-bottom:24px;">
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.9;">
-    You write <strong style="color:var(--text);">N questions</strong> for someone.
-    They must answer yours <em>and</em> send back exactly N questions of their own.
-    You answer theirs. Then — and only then — do both of you see everything.
+    Write <strong style="color:var(--text);">N questions</strong> for someone.
+    Before they can see a single one, they have to write their own N questions back — blind.
+    Then they answer yours. Then you answer theirs. Then everything reveals at once.
     <br><br>
     <span style="font-family:'Space Mono',monospace; font-size:10px; color:var(--magenta);">
-      Nobody sees anything until both sides are done.
+      Nobody sees anything until every step is done. No shortcuts.
     </span>
   </div>
 </div>
@@ -246,72 +347,77 @@ def _render_compose():
     recipient_username = st.text_input(
         "Send to (username)",
         placeholder="Enter their ViceVault username",
-        key="conf_recipient",
+        key=f"conf_recipient_{gen}",
     )
 
-    n = st.number_input("Number of questions", min_value=1, max_value=10, value=3, step=1, key="conf_n")
-    n = int(n)
+    n = int(st.number_input(
+        "Number of questions (they'll have to match this)",
+        min_value=1, max_value=10, value=3, step=1,
+        key=f"conf_n_{gen}",
+    ))
 
     st.html("<div style='height:8px'></div>")
     _section_label(f"Your {n} question{'s' if n != 1 else ''}")
 
-    questions = []
-    for i in range(n):
-        q = st.text_area(
-            f"Question {i+1}",
-            placeholder=f"Ask them something you actually want to know…",
-            key=f"conf_q_{i}",
-            height=80,
-        )
-        questions.append(q)
+    st.html("""
+<div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);
+            margin-bottom:12px; padding:8px 12px; background:var(--surface); border-radius:4px;">
+  Each question must end with <strong style="color:var(--text);">?</strong> or
+  start with a question word (what, why, how, would, etc.).
+  No copy-pasting the same question twice.
+</div>
+""")
+
+    questions = _question_fields(f"conf_q_{gen}", n)
 
     st.html("<div style='height:12px'></div>")
 
-    if st.button("Send Confession →", type="primary", use_container_width=True, key="conf_send"):
-        uid = _current_uid()
+    if st.button(
+        "Send Confession →", type="primary",
+        use_container_width=True, key=f"conf_send_{gen}",
+    ):
+        uid   = _current_uid()
+        rname = (recipient_username or "").strip()
+
         if not uid:
             st.error("Not logged in.")
             return
-
-        if not recipient_username or not recipient_username.strip():
+        if not rname:
             st.error("Enter a recipient username.")
             return
-
-        if recipient_username.strip().lower() == _current_username().lower():
+        if rname.lower() == _current_username().lower():
             st.error("You can't send a confession to yourself.")
             return
 
-        blanks = [i+1 for i, q in enumerate(questions) if not q.strip()]
-        if blanks:
-            st.error(f"Question{'s' if len(blanks) > 1 else ''} {', '.join(str(b) for b in blanks)} {'are' if len(blanks) > 1 else 'is'} empty.")
+        errs = _validate_questions(questions)
+        if errs:
+            for e in errs:
+                st.error(e)
             return
 
-        recipient = _db_get_user_by_username(recipient_username.strip())
+        recipient = _db_get_user_by_username(rname)
         if not recipient:
-            st.error(f"No user found with username '{recipient_username.strip()}'.")
+            st.error(f"No user found with username '{rname}'.")
             return
 
-        code = _gen_code()
+        code    = _gen_code()
         success = _db_save_confession(uid, recipient["id"], code, questions)
 
         if success:
-            st.success(f"Sent. Now we wait for {recipient_username.strip()} to answer — and send their questions back.")
-            # Clear fields
-            for i in range(n):
-                if f"conf_q_{i}" in st.session_state:
-                    del st.session_state[f"conf_q_{i}"]
-            st.session_state.conf_recipient = ""
+            st.session_state.conf_form_gen += 1
+            st.session_state.conf_sent_to  = rname
             st.rerun()
         else:
-            st.error("Something went wrong saving the confession. Try again.")
+            st.error("Something went wrong. Try again.")
 
+
+# ─── INBOX ───────────────────────────────────────────────────────────────────
 
 def _render_inbox():
     inject_css()
     _section_label("Inbox — Confessions sent to you")
 
-    uid = _current_uid()
-    items = _db_load_inbox(uid)
+    items = _db_load_inbox(_current_uid())
 
     if not items:
         st.html("""
@@ -331,14 +437,12 @@ def _render_inbox():
 
 
 def _render_inbox_item(item):
-    code         = item["code"]
-    sender_name  = item.get("sender_username", "Someone")
-    status       = item["status"]
-    num_q        = len(item.get("sender_questions", []))
-    created_at   = item.get("created_at", "")
-    ts           = str(created_at)[:16] if created_at else ""
+    code        = item["code"]
+    sender_name = item.get("sender_username", "Someone")
+    status      = item["status"]
+    num_q       = len(item.get("sender_questions", []))
+    ts          = str(item.get("created_at", ""))[:16]
 
-    # Header card
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:3px solid var(--magenta); border-radius:4px;
@@ -349,45 +453,91 @@ def _render_inbox_item(item):
     <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);">{ts}</div>
   </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft);">
-    {num_q} question{'s' if num_q != 1 else ''} waiting
+    {num_q} question{'s' if num_q != 1 else ''} — but you can't see them yet
   </div>
 </div>
 """)
 
     _status_badge(status, sender_name, _current_username(), is_sender=False)
 
+    # ── STEP 1: Write your questions BLIND before seeing theirs ──────────────
     if status == "sent":
-        # Recipient must answer sender's questions AND write their own
-        with st.expander(f"Answer {sender_name}'s questions & send yours back", expanded=True):
-            sender_questions = item.get("sender_questions", [])
-
+        with st.expander(
+            f"Step 1 / 2 — Write your {num_q} question{'s' if num_q != 1 else ''} for {sender_name}",
+            expanded=True,
+        ):
             st.html(f"""
-<div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
-            line-height:1.8; margin-bottom:16px; padding:12px;
-            background:var(--surface); border-radius:4px;">
-  Answer <strong style="color:var(--text);">{sender_name}'s {num_q} question{'s' if num_q != 1 else ''}</strong>
-  below, then write <strong style="color:var(--text);">{num_q} question{'s' if num_q != 1 else ''}</strong>
-  of your own to send back. Submit both at once.
-  <br><span style="color:var(--magenta); font-family:'Space Mono',monospace; font-size:10px;">
-    {sender_name} won't see your answers until they've answered yours.
-  </span>
+<div style="padding:14px 16px; background:var(--surface); border-radius:4px; margin-bottom:16px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--magenta); margin-bottom:6px;">
+    You haven't seen their questions. That's the point.
+  </div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
+    Commit to your <strong style="color:var(--text);">{num_q} question{'s' if num_q != 1 else ''}</strong>
+    for <strong style="color:var(--text);">{sender_name}</strong> before you see what they asked you.
+    The moment you submit, their questions unlock — and you answer them.
+    <br><br>
+    <span style="font-family:'Space Mono',monospace; font-size:10px; color:var(--magenta);">
+      Must end with ? or start with a question word. No duplicates.
+    </span>
+  </div>
 </div>
 """)
 
-            st.html(f"""<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--magenta); margin-bottom:12px;">
-                Your answers to {sender_name}'s questions</div>""")
+            recipient_questions = _question_fields(
+                f"inbox_rq_{code}", num_q, sender_name=sender_name
+            )
+
+            st.html("<div style='height:8px'></div>")
+
+            if st.button(
+                f"Lock in my questions & see {sender_name}'s →",
+                key=f"inbox_step1_{code}",
+                type="primary",
+                use_container_width=True,
+            ):
+                errs = _validate_questions(recipient_questions)
+                if errs:
+                    for e in errs:
+                        st.error(e)
+                else:
+                    if _db_recipient_submit_questions(code, recipient_questions):
+                        st.success(f"Locked in. {sender_name}'s questions are now visible below.")
+                        st.rerun()
+                    else:
+                        st.error("Something went wrong. Try again.")
+
+    # ── STEP 2: Questions committed — now answer sender's ────────────────────
+    elif status == "questioning":
+        sender_questions = item.get("sender_questions", [])
+
+        with st.expander(
+            f"Step 2 / 2 — Answer {sender_name}'s questions",
+            expanded=True,
+        ):
+            st.html(f"""
+<div style="padding:14px 16px; background:var(--surface); border-radius:4px; margin-bottom:16px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--cyan); margin-bottom:6px;">
+    Your questions are locked. No going back.
+  </div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
+    Answer <strong style="color:var(--text);">{sender_name}'s questions</strong> honestly.
+    When you submit, they'll answer yours — and the exchange reveals for both of you simultaneously.
+  </div>
+</div>
+""")
 
             recipient_answers = []
             for i, q in enumerate(sender_questions):
                 st.html(f"""
 <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text);
-            margin-bottom:6px; padding:10px 14px; background:var(--surface);
-            border-left:2px solid var(--magenta); border-radius:0 3px 3px 0;">
-  {q}
-</div>""")
+            padding:10px 14px; background:var(--surface);
+            border-left:2px solid var(--magenta); border-radius:0 3px 3px 0;
+            margin-bottom:6px; line-height:1.6;">{q}</div>
+""")
                 ans = st.text_area(
-                    f"Your answer",
+                    "Your answer",
                     placeholder="Be honest…",
                     key=f"inbox_ans_{code}_{i}",
                     height=80,
@@ -396,42 +546,25 @@ def _render_inbox_item(item):
                 recipient_answers.append(ans)
                 st.html("<div style='height:4px'></div>")
 
-            st.html("<div style='height:16px'></div>")
-            st.html(f"""<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--cyan); margin-bottom:12px;">
-                Your {num_q} question{'s' if num_q != 1 else ''} for {sender_name}</div>""")
-            st.html(f"""
-<div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);
-            margin-bottom:12px;">{sender_name} must answer these before either of you sees anything.</div>""")
-
-            recipient_questions = []
-            for i in range(num_q):
-                q = st.text_area(
-                    f"Question {i+1}",
-                    placeholder=f"Ask {sender_name} something real…",
-                    key=f"inbox_rq_{code}_{i}",
-                    height=80,
-                )
-                recipient_questions.append(q)
-
             st.html("<div style='height:8px'></div>")
+
             if st.button(
-                f"Submit answers & send {sender_name} your questions →",
-                key=f"inbox_submit_{code}",
+                f"Submit answers — {sender_name} answers yours next →",
+                key=f"inbox_step2_{code}",
                 type="primary",
                 use_container_width=True,
             ):
-                blank_ans = [i+1 for i, a in enumerate(recipient_answers) if not a.strip()]
-                blank_rq  = [i+1 for i, q in enumerate(recipient_questions) if not q.strip()]
-
-                if blank_ans:
-                    st.error(f"Answer{'s' if len(blank_ans) > 1 else ''} {', '.join(str(b) for b in blank_ans)} {'are' if len(blank_ans) > 1 else 'is'} empty.")
-                elif blank_rq:
-                    st.error(f"Your question{'s' if len(blank_rq) > 1 else ''} {', '.join(str(b) for b in blank_rq)} {'are' if len(blank_rq) > 1 else 'is'} empty.")
+                blank = [i+1 for i, a in enumerate(recipient_answers) if not a.strip()]
+                if blank:
+                    nums = ', '.join(str(b) for b in blank)
+                    plural = 'are' if len(blank) > 1 else 'is'
+                    st.error(f"Answer{'s' if len(blank) > 1 else ''} {nums} {plural} empty.")
                 else:
-                    ok = _db_recipient_respond(code, recipient_answers, recipient_questions)
-                    if ok:
-                        st.success(f"Sent. Waiting for {sender_name} to answer your questions. When they do, the exchange unlocks for both of you.")
+                    if _db_recipient_answer(code, recipient_answers):
+                        st.success(
+                            f"Done. Waiting for {sender_name} to answer your questions. "
+                            "Everything reveals the moment they submit."
+                        )
                         st.rerun()
                     else:
                         st.error("Something went wrong. Try again.")
@@ -441,10 +574,10 @@ def _render_inbox_item(item):
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:16px 18px; margin-bottom:12px;">
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
-    You've answered {sender_name}'s questions and sent yours back.
-    <br>Waiting for <strong style="color:var(--text);">{sender_name}</strong> to answer your questions.
-    <br><span style="color:var(--cyan); font-family:'Space Mono',monospace; font-size:10px;">
-      The exchange unlocks the moment they submit.
+    You've done your part. {sender_name} is answering your questions now.
+    <br>
+    <span style="font-family:'Space Mono',monospace; font-size:10px; color:var(--cyan);">
+      The exchange reveals the moment they submit.
     </span>
   </div>
 </div>
@@ -456,12 +589,13 @@ def _render_inbox_item(item):
     st.html("<div style='height:12px'></div>")
 
 
+# ─── OUTBOX ──────────────────────────────────────────────────────────────────
+
 def _render_outbox():
     inject_css()
     _section_label("Sent — Confessions you started")
 
-    uid = _current_uid()
-    items = _db_load_outbox(uid)
+    items = _db_load_outbox(_current_uid())
 
     if not items:
         st.html("""
@@ -470,7 +604,7 @@ def _render_outbox():
   <div style="font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:3px;
               color:var(--muted); margin-bottom:8px;">NOTHING SENT YET</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted);">
-    Start a new confession from the Compose tab.
+    Start one from the Compose tab.
   </div>
 </div>
 """)
@@ -485,8 +619,7 @@ def _render_outbox_item(item):
     recipient_name = item.get("recipient_username", "them")
     status         = item["status"]
     num_q          = len(item.get("sender_questions", []))
-    created_at     = item.get("created_at", "")
-    ts             = str(created_at)[:16] if created_at else ""
+    ts             = str(item.get("created_at", ""))[:16]
 
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
@@ -510,28 +643,38 @@ def _render_outbox_item(item):
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:16px 18px; margin-bottom:12px;">
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
-    Waiting for <strong style="color:var(--text);">{recipient_name}</strong> to answer your questions
-    and send theirs back.
+    {recipient_name} must write their own questions first — before they can even see yours.
+  </div>
+</div>
+""")
+
+    elif status == "questioning":
+        st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:16px 18px; margin-bottom:12px;">
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
+    {recipient_name} locked in their questions and is now answering yours.
   </div>
 </div>
 """)
 
     elif status == "responded":
-        # Sender must now answer recipient's questions
-        with st.expander(f"{recipient_name} answered — now answer their questions to unlock", expanded=True):
-            recipient_questions = item.get("recipient_questions", [])
-            num_rq = len(recipient_questions)
+        recipient_questions = item.get("recipient_questions", [])
 
+        with st.expander(
+            f"{recipient_name} answered — final step: answer their questions to reveal everything",
+            expanded=True,
+        ):
             st.html(f"""
-<div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
-            line-height:1.8; margin-bottom:16px; padding:12px;
-            background:var(--surface); border-radius:4px;">
-  <strong style="color:var(--text);">{recipient_name}</strong> answered your questions and sent
-  <strong style="color:var(--text);">{num_rq} question{'s' if num_rq != 1 else ''}</strong> back.
-  Answer theirs to reveal everything — simultaneously — for both of you.
-  <br><span style="color:var(--lime); font-family:'Space Mono',monospace; font-size:10px;">
-    The second you submit, both sides unlock.
-  </span>
+<div style="padding:14px 16px; background:var(--surface); border-radius:4px; margin-bottom:16px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--lime); margin-bottom:6px;">
+    Final step — submit and everything unlocks simultaneously.
+  </div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
+    <strong style="color:var(--text);">{recipient_name}</strong> answered your questions.
+    Answer theirs — then both sides reveal at the exact same time.
+  </div>
 </div>
 """)
 
@@ -539,12 +682,12 @@ def _render_outbox_item(item):
             for i, q in enumerate(recipient_questions):
                 st.html(f"""
 <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text);
-            margin-bottom:6px; padding:10px 14px; background:var(--surface);
-            border-left:2px solid var(--lime); border-radius:0 3px 3px 0;">
-  {q}
-</div>""")
+            padding:10px 14px; background:var(--surface);
+            border-left:2px solid var(--lime); border-radius:0 3px 3px 0;
+            margin-bottom:6px; line-height:1.6;">{q}</div>
+""")
                 ans = st.text_area(
-                    f"Your answer",
+                    "Your answer",
                     placeholder="Be honest…",
                     key=f"outbox_ans_{code}_{i}",
                     height=80,
@@ -554,19 +697,21 @@ def _render_outbox_item(item):
                 st.html("<div style='height:4px'></div>")
 
             st.html("<div style='height:8px'></div>")
+
             if st.button(
-                "Submit answers — unlock the exchange →",
+                "Submit — reveal the exchange →",
                 key=f"outbox_submit_{code}",
                 type="primary",
                 use_container_width=True,
             ):
                 blank = [i+1 for i, a in enumerate(sender_answers) if not a.strip()]
                 if blank:
-                    st.error(f"Answer{'s' if len(blank) > 1 else ''} {', '.join(str(b) for b in blank)} {'are' if len(blank) > 1 else 'is'} empty.")
+                    nums   = ', '.join(str(b) for b in blank)
+                    plural = 'are' if len(blank) > 1 else 'is'
+                    st.error(f"Answer{'s' if len(blank) > 1 else ''} {nums} {plural} empty.")
                 else:
-                    ok = _db_sender_answer(code, sender_answers)
-                    if ok:
-                        st.success("Exchange unlocked. Check the Revealed tab.")
+                    if _db_sender_answer(code, sender_answers):
+                        st.success("Exchange revealed. Check the Revealed tab.")
                         st.rerun()
                     else:
                         st.error("Something went wrong. Try again.")
@@ -577,59 +722,37 @@ def _render_outbox_item(item):
     st.html("<div style='height:12px'></div>")
 
 
+# ─── REVEALED VIEW ───────────────────────────────────────────────────────────
+
 def _render_revealed(item, is_sender: bool):
-    """Full mutual exchange view — only shown when status='revealed'."""
     sender_name    = item.get("sender_username",    "Sender")
     recipient_name = item.get("recipient_username", "Recipient")
-    me             = _current_username()
-    them           = recipient_name if is_sender else sender_name
 
-    st.html(f"""
+    st.html("""
 <div style="background:var(--card); border:1px solid var(--border);
             border-top:2px solid var(--lime); border-radius:4px;
             padding:16px 20px; margin-bottom:16px; text-align:center;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--lime);
               letter-spacing:2px; margin-bottom:4px;">EXCHANGE REVEALED</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);">
-    Both sides answered. Here's everything.
+    Every step done. Here's everything.
   </div>
 </div>
 """)
 
-    sender_questions    = item.get("sender_questions",    [])
-    recipient_answers   = item.get("recipient_answers",   [])
-    recipient_questions = item.get("recipient_questions", [])
-    sender_answers      = item.get("sender_answers",      [])
+    sq = item.get("sender_questions",    [])
+    ra = item.get("recipient_answers",   [])
+    rq = item.get("recipient_questions", [])
+    sa = item.get("sender_answers",      [])
 
-    # What YOU asked, what THEY answered
     if is_sender:
-        _exchange_card(
-            f"Your questions → {recipient_name}'s answers",
-            "#c6ff00",
-            sender_questions,
-            recipient_answers,
-        )
+        _exchange_card(f"Your questions → {recipient_name}'s answers", "#c6ff00", sq, ra)
         st.html("<div style='height:12px'></div>")
-        _exchange_card(
-            f"{recipient_name}'s questions → Your answers",
-            "#ff2d78",
-            recipient_questions,
-            sender_answers,
-        )
+        _exchange_card(f"{recipient_name}'s questions → Your answers", "#ff2d78", rq, sa)
     else:
-        _exchange_card(
-            f"{sender_name}'s questions → Your answers",
-            "#ff2d78",
-            sender_questions,
-            recipient_answers,
-        )
+        _exchange_card(f"{sender_name}'s questions → Your answers", "#ff2d78", sq, ra)
         st.html("<div style='height:12px'></div>")
-        _exchange_card(
-            f"Your questions → {sender_name}'s answers",
-            "#c6ff00",
-            recipient_questions,
-            sender_answers,
-        )
+        _exchange_card(f"Your questions → {sender_name}'s answers", "#c6ff00", rq, sa)
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
@@ -642,9 +765,7 @@ def confessions_page():
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
               text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Vice Vault</div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:var(--text);
-              letter-spacing:3px; line-height:0.95;">
-    CONFESSIONS
-  </div>
+              letter-spacing:3px; line-height:0.95;">CONFESSIONS</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-top:6px;">
     Mutual. Blind. Nobody blinks first — because neither of you can.
   </div>
@@ -656,45 +777,51 @@ def confessions_page():
         st.error("Log in to use Confessions.")
         return
 
-    # Tab selector
     if "conf_tab" not in st.session_state:
         st.session_state.conf_tab = "compose"
 
-    # Count inbox items that need action
     inbox_items  = _db_load_inbox(uid)
     outbox_items = _db_load_outbox(uid)
-    inbox_action  = sum(1 for i in inbox_items  if i["status"] == "sent")
+
+    inbox_action  = sum(1 for i in inbox_items  if i["status"] in ("sent", "questioning"))
     outbox_action = sum(1 for i in outbox_items if i["status"] == "responded")
     revealed_all  = [i for i in inbox_items + outbox_items if i["status"] == "revealed"]
 
-    col_compose, col_inbox, col_sent, col_revealed = st.columns(4)
+    col1, col2, col3, col4 = st.columns(4)
 
-    with col_compose:
-        label = "◈  Compose"
-        if st.button(label, use_container_width=True,
-                     type="primary" if st.session_state.conf_tab == "compose" else "secondary",
-                     key="tab_compose"):
+    with col1:
+        if st.button(
+            "◈  Compose", use_container_width=True,
+            type="primary" if st.session_state.conf_tab == "compose" else "secondary",
+            key="tab_compose",
+        ):
             st.session_state.conf_tab = "compose"; st.rerun()
 
-    with col_inbox:
-        badge = f"  ({inbox_action})" if inbox_action > 0 else ""
-        if st.button(f"↓  Inbox{badge}", use_container_width=True,
-                     type="primary" if st.session_state.conf_tab == "inbox" else "secondary",
-                     key="tab_inbox"):
+    with col2:
+        b2 = f"  ({inbox_action})" if inbox_action else ""
+        if st.button(
+            f"↓  Inbox{b2}", use_container_width=True,
+            type="primary" if st.session_state.conf_tab == "inbox" else "secondary",
+            key="tab_inbox",
+        ):
             st.session_state.conf_tab = "inbox"; st.rerun()
 
-    with col_sent:
-        badge = f"  ({outbox_action})" if outbox_action > 0 else ""
-        if st.button(f"↑  Sent{badge}", use_container_width=True,
-                     type="primary" if st.session_state.conf_tab == "sent" else "secondary",
-                     key="tab_sent"):
+    with col3:
+        b3 = f"  ({outbox_action})" if outbox_action else ""
+        if st.button(
+            f"↑  Sent{b3}", use_container_width=True,
+            type="primary" if st.session_state.conf_tab == "sent" else "secondary",
+            key="tab_sent",
+        ):
             st.session_state.conf_tab = "sent"; st.rerun()
 
-    with col_revealed:
-        badge = f"  ({len(revealed_all)})" if revealed_all else ""
-        if st.button(f"⚡  Revealed{badge}", use_container_width=True,
-                     type="primary" if st.session_state.conf_tab == "revealed" else "secondary",
-                     key="tab_revealed"):
+    with col4:
+        b4 = f"  ({len(revealed_all)})" if revealed_all else ""
+        if st.button(
+            f"⚡  Revealed{b4}", use_container_width=True,
+            type="primary" if st.session_state.conf_tab == "revealed" else "secondary",
+            key="tab_revealed",
+        ):
             st.session_state.conf_tab = "revealed"; st.rerun()
 
     st.html("<div style='height:1.5rem'></div>")
@@ -703,13 +830,10 @@ def confessions_page():
 
     if tab == "compose":
         _render_compose()
-
     elif tab == "inbox":
         _render_inbox()
-
     elif tab == "sent":
         _render_outbox()
-
     elif tab == "revealed":
         inject_css()
         _section_label("Revealed exchanges")
@@ -722,18 +846,14 @@ def confessions_page():
 </div>
 """)
         else:
-            # Deduplicate by code
-            seen = set()
-            unique = []
+            seen, unique = set(), []
             for item in revealed_all:
                 if item["code"] not in seen:
                     seen.add(item["code"])
                     unique.append(item)
-
             for item in unique:
-                is_s = item.get("sender_id") == uid
+                is_s  = item.get("sender_id") == uid
                 other = item.get("recipient_username") if is_s else item.get("sender_username")
-                ts = str(item.get("created_at", ""))[:16]
-
+                ts    = str(item.get("created_at", ""))[:16]
                 with st.expander(f"Exchange with {other} · {ts}", expanded=False):
                     _render_revealed(item, is_sender=is_s)
