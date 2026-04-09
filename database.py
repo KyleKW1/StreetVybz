@@ -78,7 +78,8 @@ def ensure_tables():
             id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             code                VARCHAR(16) NOT NULL UNIQUE,
             sender_id           INT NOT NULL,
-            recipient_id        INT NOT NULL,
+            recipient_id        INT          DEFAULT NULL,
+            recipient_email     VARCHAR(255) DEFAULT NULL,
             sender_questions    JSON NOT NULL,
             recipient_answers   JSON,
             recipient_questions JSON,
@@ -112,12 +113,28 @@ def ensure_tables():
         for ddl in ddl_statements:
             cur.execute(ddl)
         conn.commit()
+
         # Add revealed_at to existing confessions table if missing
         try:
             cur.execute("ALTER TABLE confessions ADD COLUMN revealed_at DATETIME DEFAULT NULL")
             conn.commit()
         except Exception:
             pass  # column already exists — fine
+
+        # Make recipient_id nullable for email-invite confessions
+        try:
+            cur.execute("ALTER TABLE confessions MODIFY COLUMN recipient_id INT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            pass
+
+        # Add recipient_email column if missing
+        try:
+            cur.execute("ALTER TABLE confessions ADD COLUMN recipient_email VARCHAR(255) DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            pass
+
         cur.close()
     except Exception as e:
         st.error(f"Schema bootstrap error: {e}")
@@ -364,6 +381,29 @@ def save_confession(sender_id: int, recipient_id: int, code: str, questions: lis
         conn.close()
 
 
+def save_confession_invite(sender_id: int, recipient_email: str, code: str, questions: list) -> bool:
+    """Save a confession for a recipient who isn't on the app yet (email invite path)."""
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO confessions
+               (code, sender_id, recipient_id, recipient_email, sender_questions, status)
+               VALUES (%s, %s, NULL, %s, %s, 'sent')""",
+            (code, sender_id, recipient_email, json.dumps(questions))
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception as e:
+        st.error(f"Error saving confession invite: {e}")
+        return False
+    finally:
+        conn.close()
+
+
 def get_confession_by_code(code: str):
     conn = create_connection()
     if not conn:
@@ -371,10 +411,12 @@ def get_confession_by_code(code: str):
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """SELECT c.*, s.username AS sender_username, r.username AS recipient_username
+            """SELECT c.*,
+                      s.username AS sender_username,
+                      r.username AS recipient_username
                FROM confessions c
                JOIN users s ON s.id = c.sender_id
-               JOIN users r ON r.id = c.recipient_id
+               LEFT JOIN users r ON r.id = c.recipient_id
                WHERE c.code = %s""",
             (code,)
         )
@@ -394,10 +436,12 @@ def load_confessions_inbox(user_id: int) -> list:
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """SELECT c.*, s.username AS sender_username, r.username AS recipient_username
+            """SELECT c.*,
+                      s.username AS sender_username,
+                      r.username AS recipient_username
                FROM confessions c
                JOIN users s ON s.id = c.sender_id
-               JOIN users r ON r.id = c.recipient_id
+               LEFT JOIN users r ON r.id = c.recipient_id
                WHERE c.recipient_id = %s
                ORDER BY c.created_at DESC""",
             (user_id,)
@@ -419,10 +463,12 @@ def load_confessions_outbox(user_id: int) -> list:
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """SELECT c.*, s.username AS sender_username, r.username AS recipient_username
+            """SELECT c.*,
+                      s.username AS sender_username,
+                      r.username AS recipient_username
                FROM confessions c
                JOIN users s ON s.id = c.sender_id
-               JOIN users r ON r.id = c.recipient_id
+               LEFT JOIN users r ON r.id = c.recipient_id
                WHERE c.sender_id = %s
                ORDER BY c.created_at DESC""",
             (user_id,)
