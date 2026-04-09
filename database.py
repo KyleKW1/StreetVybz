@@ -686,3 +686,79 @@ def _parse_confession_row(row):
         elif val is None:
             row[col] = []
     return row
+
+
+
+# ── 1. Delete a confession by code ────────────────────────────────────────────
+def delete_confession(code: str) -> bool:
+    """
+    Hard-delete the confession row (and any related answers/questions) by code.
+    Screenshot alert rows are in a SEPARATE table and are NOT deleted here —
+    they survive so the victim can still see the notification.
+    """
+    # Example (adapt to your ORM / raw SQL):
+    # db.execute("DELETE FROM confessions WHERE code = %s", (code,))
+    # db.commit()
+    raise NotImplementedError("Implement this in your database.py")
+ 
+ 
+# ── 2. Invalidate all sessions for a user (force logout) ─────────────────────
+def invalidate_user_sessions(user_id: int) -> None:
+    """
+    Delete / expire all session tokens for the given user so they can't
+    silently stay logged in after a screenshot.
+    If you use Streamlit's built-in session state only (no server-side tokens),
+    this is a no-op — the client-side _force_logout() already clears state.
+    """
+    # Example:
+    # db.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+    # db.commit()
+    pass
+ 
+ 
+# ── 3. Save a screenshot alert (persists beyond confession deletion) ──────────
+def save_screenshot_alert(
+    confession_code: str,
+    screenshotter_id: int,
+    screenshotter_username: str,
+    other_username: str,
+) -> bool:
+    """
+    Inserts a row into screenshot_alerts.
+    The `other_username` is the victim — the person who will see the alert.
+ 
+    Suggested table schema:
+        CREATE TABLE screenshot_alerts (
+            id                      SERIAL PRIMARY KEY,
+            confession_code         TEXT,
+            screenshotter_id        INTEGER,
+            screenshotter_username  TEXT NOT NULL,
+            other_username          TEXT NOT NULL,   -- victim's username
+            dismissed               BOOLEAN DEFAULT FALSE,
+            created_at              TIMESTAMPTZ DEFAULT NOW()
+        );
+    """
+    raise NotImplementedError("Implement this in your database.py")
+ 
+ 
+# ── 4. Load screenshot alerts for a victim user ───────────────────────────────
+def load_screenshot_alerts(user_id: int) -> list:
+    """
+    Return all non-dismissed screenshot alert rows where this user is the victim.
+    Match on username (or add a victim_id column if you prefer).
+ 
+    Returns list of dicts:
+      [{ "id": 1, "screenshotter_username": "alice",
+         "created_at": datetime, "dismissed": False }, ...]
+    """
+    raise NotImplementedError("Implement this in your database.py")
+ 
+ 
+# ── 5. Dismiss a screenshot alert ─────────────────────────────────────────────
+def dismiss_screenshot_alert(alert_id: int) -> bool:
+    """
+    Mark the alert as dismissed so it no longer shows in the banner.
+    """
+    # db.execute("UPDATE screenshot_alerts SET dismissed=TRUE WHERE id=%s", (alert_id,))
+    raise NotImplementedError("Implement this in your database.py")
+ 
