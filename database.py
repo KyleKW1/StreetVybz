@@ -103,6 +103,24 @@ def ensure_tables():
             INDEX idx_quiz_type (user_id, quiz_type)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
+      """
+      CREATE TABLE IF NOT EXISTS confessions (
+          id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          code                VARCHAR(16) NOT NULL UNIQUE,
+          sender_id           INT NOT NULL,
+          recipient_id        INT NOT NULL,
+          sender_questions    JSON NOT NULL,
+          recipient_answers   JSON,
+          recipient_questions JSON,
+          sender_answers      JSON,
+          status              VARCHAR(16) NOT NULL DEFAULT 'sent',
+          created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_conf_sender    (sender_id),
+          INDEX idx_conf_recipient (recipient_id),
+          INDEX idx_conf_code      (code)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      """,
     ]
 
     try:
