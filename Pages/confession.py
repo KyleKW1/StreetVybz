@@ -11,12 +11,18 @@ Question validation:
   - Must be at least 8 characters
   - Must end with '?' OR start with a recognised question word
   - No duplicate questions within the same submission
+
+Security features:
+  - Auto-delete revealed exchanges after 60 seconds
+  - Screenshot detection logs out the user and notifies the other party
+    (Screenshot notification is saved even after the chat is deleted)
 """
 
 import streamlit as st
 import secrets
 import string
 import re
+import time
 
 
 # ─── CSS ─────────────────────────────────────────────────────────────────────
@@ -87,6 +93,116 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 """)
 
 
+# ─── SCREENSHOT DETECTION + AUTO-DELETE JS ───────────────────────────────────
+
+def inject_screenshot_guard(confession_code: str, other_username: str, phase: str):
+    """
+    Injects JS that:
+    1. Detects screenshot attempt (visibilitychange / blur on mobile, keydown for Print Screen on desktop).
+    2. Calls a Streamlit query-param trick to signal Python on next rerun.
+    3. Shows a countdown timer when status == 'revealed', auto-triggers rerun after 60s.
+    """
+    st.html(f"""
+<script>
+(function() {{
+  // ── Screenshot detection ──────────────────────────────────────────────────
+  var _phase = "{phase}";
+  var _code  = "{confession_code}";
+  var _other = "{other_username}";
+  var _reported = false;
+
+  function reportScreenshot() {{
+    if (_reported) return;
+    _reported = true;
+    // Set a query param that Streamlit can read on next rerun
+    var url = new URL(window.location.href);
+    url.searchParams.set("screenshot_code",  _code);
+    url.searchParams.set("screenshot_other", _other);
+    url.searchParams.set("screenshot_phase", _phase);
+    // Replace history silently then trigger a streamlit rerun via postMessage
+    window.history.replaceState(null, "", url.toString());
+    // Force streamlit to re-run by submitting a hidden form element ping
+    window.location.href = url.toString();
+  }}
+
+  // Desktop: Print Screen key
+  document.addEventListener("keyup", function(e) {{
+    if (e.key === "PrintScreen" || e.keyCode === 44) {{
+      reportScreenshot();
+    }}
+  }});
+
+  // Mobile / all: page visibility loss (switching apps to screenshot)
+  document.addEventListener("visibilitychange", function() {{
+    if (document.visibilityState === "hidden") {{
+      // Only flag during active send/receive phases, not after reveal
+      if (_phase !== "revealed") {{
+        reportScreenshot();
+      }}
+    }}
+  }});
+
+  // Some Android browsers fire blur on screenshot toolbar appearance
+  window.addEventListener("blur", function() {{
+    if (_phase !== "revealed") {{
+      reportScreenshot();
+    }}
+  }});
+
+  // ── 60-second countdown + auto-delete trigger (revealed only) ────────────
+  if (_phase === "revealed") {{
+    var secondsLeft = 60;
+
+    var banner = document.getElementById("vv-countdown-banner");
+    if (!banner) {{
+      banner = document.createElement("div");
+      banner.id = "vv-countdown-banner";
+      banner.style.cssText = [
+        "position:fixed", "bottom:0", "left:0", "right:0",
+        "background:#0a0a0b", "border-top:2px solid #ff2d78",
+        "padding:12px 24px", "display:flex", "align-items:center",
+        "justify-content:space-between", "z-index:9999",
+        "font-family:'Space Mono',monospace"
+      ].join(";");
+      banner.innerHTML = `
+        <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#5a5a72;">
+          THIS EXCHANGE SELF-DESTRUCTS IN
+        </div>
+        <div id="vv-timer" style="font-size:22px;color:#ff2d78;font-weight:700;letter-spacing:3px;">
+          0:60
+        </div>
+        <div style="font-size:10px;letter-spacing:1px;color:#5a5a72;text-transform:uppercase;">
+          Screenshot = logged out
+        </div>
+      `;
+      document.body.appendChild(banner);
+    }}
+
+    var timerEl = document.getElementById("vv-timer");
+
+    var interval = setInterval(function() {{
+      secondsLeft--;
+      if (timerEl) {{
+        var m = Math.floor(secondsLeft / 60);
+        var s = secondsLeft % 60;
+        timerEl.textContent = m + ":" + (s < 10 ? "0" + s : s);
+        if (secondsLeft <= 10) timerEl.style.color = "#c6ff00";
+        if (secondsLeft <= 5)  timerEl.style.color = "#ffffff";
+      }}
+      if (secondsLeft <= 0) {{
+        clearInterval(interval);
+        // Signal delete via query param then reload
+        var url = new URL(window.location.href);
+        url.searchParams.set("delete_code", _code);
+        window.location.href = url.toString();
+      }}
+    }}, 1000);
+  }}
+}})();
+</script>
+""")
+
+
 # ─── QUESTION VALIDATION ─────────────────────────────────────────────────────
 
 QUESTION_WORDS = {
@@ -98,14 +214,6 @@ QUESTION_WORDS = {
 
 
 def _validate_questions(questions: list) -> list:
-    """
-    Returns a list of error strings. Empty list = all valid.
-    Rules per question:
-      - Not blank
-      - At least 8 non-whitespace characters
-      - Ends with '?' OR first word is a recognised question word
-      - No duplicate questions in the same submission
-    """
     errors = []
     seen   = {}
 
@@ -132,7 +240,6 @@ def _validate_questions(questions: list) -> list:
             )
             continue
 
-        # Duplicate check — strip punctuation, lowercase, compare
         normalised = re.sub(r'[^\w\s]', '', q.lower()).strip()
         if normalised in seen:
             errors.append(
@@ -172,7 +279,6 @@ def _db_load_outbox(user_id):
 
 
 def _db_recipient_submit_questions(code, recipient_questions):
-    """Step 1 for recipient: submit their questions blind. sent -> questioning."""
     try:
         import database as db
         return db.confession_recipient_submit_questions(code, recipient_questions)
@@ -181,7 +287,6 @@ def _db_recipient_submit_questions(code, recipient_questions):
 
 
 def _db_recipient_answer(code, recipient_answers):
-    """Step 2 for recipient: answer sender's now-visible questions. questioning -> responded."""
     try:
         import database as db
         return db.confession_recipient_answer(code, recipient_answers)
@@ -190,7 +295,6 @@ def _db_recipient_answer(code, recipient_answers):
 
 
 def _db_sender_answer(code, sender_answers):
-    """Sender answers recipient's questions. responded -> revealed."""
     try:
         import database as db
         return db.confession_sender_answer(code, sender_answers)
@@ -204,6 +308,55 @@ def _db_get_user_by_username(username):
         return db.get_user_by_username(username)
     except Exception:
         return None
+
+
+def _db_delete_confession(code):
+    """Hard-delete a confession exchange by code."""
+    try:
+        import database as db
+        return db.delete_confession(code)
+    except Exception:
+        return False
+
+
+def _db_save_screenshot_alert(code, screenshotter_id, screenshotter_username, other_username):
+    """
+    Save a persistent screenshot alert.
+    This record survives the deletion of the confession itself.
+    """
+    try:
+        import database as db
+        return db.save_screenshot_alert(
+            code, screenshotter_id, screenshotter_username, other_username
+        )
+    except Exception:
+        return False
+
+
+def _db_load_screenshot_alerts(user_id):
+    """Load screenshot alerts where this user is the victim (other party)."""
+    try:
+        import database as db
+        return db.load_screenshot_alerts(user_id)
+    except Exception:
+        return []
+
+
+def _db_dismiss_screenshot_alert(alert_id):
+    try:
+        import database as db
+        return db.dismiss_screenshot_alert(alert_id)
+    except Exception:
+        return False
+
+
+def _db_logout_user(user_id):
+    """Invalidate the user's session server-side (if supported)."""
+    try:
+        import database as db
+        db.invalidate_user_sessions(user_id)
+    except Exception:
+        pass
 
 
 # ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -225,6 +378,109 @@ def _current_uid():
 def _current_username():
     u = _current_user()
     return u.get("username", "You")
+
+
+def _force_logout():
+    """Clear session state and trigger a rerun to show the login screen."""
+    uid = _current_uid()
+    if uid:
+        _db_logout_user(uid)
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
+
+
+# ─── QUERY-PARAM SIGNAL HANDLERS ─────────────────────────────────────────────
+
+def _handle_query_params():
+    """
+    Called once at the top of confessions_page().
+    Reads any signals posted by the JS layer via URL query params.
+
+    Signals handled:
+      ?delete_code=XXXX          → delete the confession and rerun cleanly
+      ?screenshot_code=XXXX
+        &screenshot_other=NAME
+        &screenshot_phase=PHASE  → save alert, log out user, rerun
+    """
+    params = st.query_params
+
+    # ── Auto-delete signal ────────────────────────────────────────────────────
+    delete_code = params.get("delete_code")
+    if delete_code:
+        _db_delete_confession(delete_code)
+        # Clear the param so we don't loop
+        st.query_params.clear()
+        st.rerun()
+
+    # ── Screenshot signal ─────────────────────────────────────────────────────
+    ss_code  = params.get("screenshot_code")
+    ss_other = params.get("screenshot_other")
+    ss_phase = params.get("screenshot_phase", "")
+
+    if ss_code and ss_other:
+        uid      = _current_uid()
+        username = _current_username()
+
+        if uid:
+            # 1. Save a persistent alert for the other person (survives deletion)
+            _db_save_screenshot_alert(ss_code, uid, username, ss_other)
+
+            # 2. Clear query params before logout so we don't loop
+            st.query_params.clear()
+
+            # 3. Show a brief warning before forcing logout
+            st.error(
+                f"⚠️  Screenshot detected. You've been logged out. "
+                f"{ss_other} has been notified."
+            )
+            time.sleep(2)
+
+            # 4. Force logout
+            _force_logout()
+
+
+# ─── SCREENSHOT ALERTS BANNER ─────────────────────────────────────────────────
+
+def _render_screenshot_alerts():
+    """
+    Shown at the top of the confessions page.
+    Displays any saved alerts telling this user that someone screenshot their exchange.
+    These persist even after the confession is deleted.
+    """
+    uid    = _current_uid()
+    alerts = _db_load_screenshot_alerts(uid)
+    if not alerts:
+        return
+
+    for alert in alerts:
+        screenshotter = alert.get("screenshotter_username", "Someone")
+        ts            = str(alert.get("created_at", ""))[:16]
+        alert_id      = alert.get("id")
+
+        st.html(f"""
+<div style="background:#1a0a0e; border:1px solid var(--magenta);
+            border-left:4px solid var(--magenta); border-radius:4px;
+            padding:14px 18px; margin-bottom:10px; display:flex;
+            align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+  <div>
+    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+                text-transform:uppercase; color:var(--magenta); margin-bottom:4px;">
+      ⚠  Screenshot Alert
+    </div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--text); line-height:1.6;">
+      <strong style="color:var(--magenta);">{screenshotter}</strong>
+      took a screenshot of your confession exchange.
+      <span style="color:var(--muted); font-size:11px; margin-left:8px;">{ts}</span>
+    </div>
+  </div>
+</div>
+""")
+        col_dismiss, _ = st.columns([1, 4])
+        with col_dismiss:
+            if st.button("Dismiss", key=f"dismiss_alert_{alert_id}"):
+                _db_dismiss_screenshot_alert(alert_id)
+                st.rerun()
 
 
 # ─── SHARED UI HELPERS ───────────────────────────────────────────────────────
@@ -251,8 +507,8 @@ def _status_badge(status, sender, recipient, is_sender):
             False: ("var(--amber)",   "WAITING",    f"Waiting for {sender} to answer your questions"),
         },
         "revealed": {
-            True:  ("var(--lime)",    "REVEALED",   "Exchange unlocked for both of you"),
-            False: ("var(--lime)",    "REVEALED",   "Exchange unlocked for both of you"),
+            True:  ("var(--lime)",    "REVEALED",   "Exchange unlocked — deletes in 60 seconds"),
+            False: ("var(--lime)",    "REVEALED",   "Exchange unlocked — deletes in 60 seconds"),
         },
     }
     defaults = ("var(--muted)", status.upper(), "")
@@ -269,7 +525,6 @@ def _status_badge(status, sender, recipient, is_sender):
 
 
 def _question_fields(prefix, count, sender_name=None):
-    """Render `count` question text areas; return list of raw strings."""
     ph = (
         f"Ask {sender_name} something real…"
         if sender_name else
@@ -315,6 +570,9 @@ def _render_compose():
     inject_css()
     _section_label("New Confession Exchange")
 
+    # Screenshot guard active during compose (sending phase)
+    inject_screenshot_guard("compose", "unknown", "sending")
+
     if "conf_form_gen" not in st.session_state:
         st.session_state.conf_form_gen = 0
     if "conf_sent_to" not in st.session_state:
@@ -339,6 +597,7 @@ def _render_compose():
     <br><br>
     <span style="font-family:'Space Mono',monospace; font-size:10px; color:var(--magenta);">
       Nobody sees anything until every step is done. No shortcuts.
+      Screenshot = instant logout + the other person is notified.
     </span>
   </div>
 </div>
@@ -443,6 +702,10 @@ def _render_inbox_item(item):
     num_q       = len(item.get("sender_questions", []))
     ts          = str(item.get("created_at", ""))[:16]
 
+    # Inject screenshot guard for active (non-revealed) phases
+    if status != "revealed":
+        inject_screenshot_guard(code, sender_name, status)
+
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:3px solid var(--magenta); border-radius:4px;
@@ -460,7 +723,7 @@ def _render_inbox_item(item):
 
     _status_badge(status, sender_name, _current_username(), is_sender=False)
 
-    # ── STEP 1: Write your questions BLIND before seeing theirs ──────────────
+    # ── STEP 1 ───────────────────────────────────────────────────────────────
     if status == "sent":
         with st.expander(
             f"Step 1 / 2 — Write your {num_q} question{'s' if num_q != 1 else ''} for {sender_name}",
@@ -479,6 +742,7 @@ def _render_inbox_item(item):
     <br><br>
     <span style="font-family:'Space Mono',monospace; font-size:10px; color:var(--magenta);">
       Must end with ? or start with a question word. No duplicates.
+      Screenshot = instant logout + {sender_name} is notified.
     </span>
   </div>
 </div>
@@ -507,7 +771,7 @@ def _render_inbox_item(item):
                     else:
                         st.error("Something went wrong. Try again.")
 
-    # ── STEP 2: Questions committed — now answer sender's ────────────────────
+    # ── STEP 2 ───────────────────────────────────────────────────────────────
     elif status == "questioning":
         sender_questions = item.get("sender_questions", [])
 
@@ -523,7 +787,7 @@ def _render_inbox_item(item):
   </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
     Answer <strong style="color:var(--text);">{sender_name}'s questions</strong> honestly.
-    When you submit, they'll answer yours — and the exchange reveals for both of you simultaneously.
+    When you submit, they'll answer yours — and the exchange reveals for both simultaneously.
   </div>
 </div>
 """)
@@ -556,7 +820,7 @@ def _render_inbox_item(item):
             ):
                 blank = [i+1 for i, a in enumerate(recipient_answers) if not a.strip()]
                 if blank:
-                    nums = ', '.join(str(b) for b in blank)
+                    nums   = ', '.join(str(b) for b in blank)
                     plural = 'are' if len(blank) > 1 else 'is'
                     st.error(f"Answer{'s' if len(blank) > 1 else ''} {nums} {plural} empty.")
                 else:
@@ -584,6 +848,8 @@ def _render_inbox_item(item):
 """)
 
     elif status == "revealed":
+        # Inject countdown + screenshot guard for revealed phase
+        inject_screenshot_guard(code, sender_name, "revealed")
         _render_revealed(item, is_sender=False)
 
     st.html("<div style='height:12px'></div>")
@@ -620,6 +886,10 @@ def _render_outbox_item(item):
     status         = item["status"]
     num_q          = len(item.get("sender_questions", []))
     ts             = str(item.get("created_at", ""))[:16]
+
+    # Screenshot guard for active phases
+    if status != "revealed":
+        inject_screenshot_guard(code, recipient_name, status)
 
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
@@ -674,6 +944,8 @@ def _render_outbox_item(item):
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
     <strong style="color:var(--text);">{recipient_name}</strong> answered your questions.
     Answer theirs — then both sides reveal at the exact same time.
+    The exchange <strong style="color:var(--magenta);">auto-deletes after 60 seconds</strong>.
+    Screenshot = instant logout + {recipient_name} is notified.
   </div>
 </div>
 """)
@@ -711,12 +983,14 @@ def _render_outbox_item(item):
                     st.error(f"Answer{'s' if len(blank) > 1 else ''} {nums} {plural} empty.")
                 else:
                     if _db_sender_answer(code, sender_answers):
-                        st.success("Exchange revealed. Check the Revealed tab.")
+                        st.success("Exchange revealed. It will auto-delete in 60 seconds.")
                         st.rerun()
                     else:
                         st.error("Something went wrong. Try again.")
 
     elif status == "revealed":
+        # Countdown + screenshot guard for the revealed view
+        inject_screenshot_guard(code, recipient_name, "revealed")
         _render_revealed(item, is_sender=True)
 
     st.html("<div style='height:12px'></div>")
@@ -734,8 +1008,9 @@ def _render_revealed(item, is_sender: bool):
             padding:16px 20px; margin-bottom:16px; text-align:center;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--lime);
               letter-spacing:2px; margin-bottom:4px;">EXCHANGE REVEALED</div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);">
-    Every step done. Here's everything.
+  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--magenta);
+              font-family:'Space Mono',monospace; font-size:10px; letter-spacing:1px;">
+    ⏱  Auto-deletes in 60 seconds &nbsp;·&nbsp; 📵  Screenshot = instant logout
   </div>
 </div>
 """)
@@ -760,6 +1035,9 @@ def _render_revealed(item, is_sender: bool):
 def confessions_page():
     inject_css()
 
+    # Handle JS signals (delete / screenshot) before rendering anything
+    _handle_query_params()
+
     st.html("""
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
@@ -776,6 +1054,9 @@ def confessions_page():
     if not uid:
         st.error("Log in to use Confessions.")
         return
+
+    # Screenshot alerts banner (persistent — survives confession deletion)
+    _render_screenshot_alerts()
 
     if "conf_tab" not in st.session_state:
         st.session_state.conf_tab = "compose"
@@ -855,5 +1136,7 @@ def confessions_page():
                 is_s  = item.get("sender_id") == uid
                 other = item.get("recipient_username") if is_s else item.get("sender_username")
                 ts    = str(item.get("created_at", ""))[:16]
+                # Inject countdown + screenshot guard for each revealed item
+                inject_screenshot_guard(item["code"], other, "revealed")
                 with st.expander(f"Exchange with {other} · {ts}", expanded=False):
                     _render_revealed(item, is_sender=is_s)
