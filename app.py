@@ -1,7 +1,7 @@
 import streamlit as st
 from auth import logout
 from styles import apply_custom_styles
-from Pages.auth_page import login_page, register_page, confessions_page
+from Pages.auth_page import login_page, register_page
 from password_reset import forgot_password_page, reset_password_page, handle_reset_token_from_url
 
 
