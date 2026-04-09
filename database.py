@@ -453,54 +453,48 @@ def load_quiz_history(user_id: int, quiz_type: str | None = None) -> list:
     finally:
         conn.close()
 
-# ─── CONFESSIONS ─────────────────────────────────────────────────────────────
-# Add this to database.py → ensure_tables() DDL list:
+# ─────────────────────────────────────────────────────────────────────────────
+# Paste all of this into database.py
+# Also add the DDL string below to the ddl_statements list in ensure_tables()
+# ─────────────────────────────────────────────────────────────────────────────
 
-CONFESSIONS_DDL = """
+# ── DDL (add to ensure_tables ddl_statements list) ───────────────────────────
+"""
 CREATE TABLE IF NOT EXISTS confessions (
     id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    code                VARCHAR(16) NOT NULL UNIQUE,          -- shareable session code
+    code                VARCHAR(16)  NOT NULL UNIQUE,
+    sender_id           INT          NOT NULL,
+    recipient_id        INT          NOT NULL,
 
-    sender_id           INT NOT NULL,
-    recipient_id        INT NOT NULL,
+    sender_questions    JSON         NOT NULL,          -- what sender asks recipient
 
-    -- What sender asks recipient
-    sender_questions    JSON NOT NULL,
-    -- Recipient's answers to sender's questions  (NULL until responded)
-    recipient_answers   JSON,
-    -- What recipient asks sender back             (NULL until responded)
-    recipient_questions JSON,
-    -- Sender's answers to recipient's questions   (NULL until revealed)
-    sender_answers      JSON,
+    recipient_questions JSON         DEFAULT NULL,      -- what recipient asks sender (submitted blind)
+    recipient_answers   JSON         DEFAULT NULL,      -- recipient's answers to sender_questions
+    sender_answers      JSON         DEFAULT NULL,      -- sender's answers to recipient_questions
 
-    -- sent → responded → revealed
-    status              VARCHAR(16) NOT NULL DEFAULT 'sent',
+    -- sent        : waiting for recipient to write their questions (blind)
+    -- questioning : recipient wrote questions; now answering sender's
+    -- responded   : recipient answered sender's questions; waiting for sender
+    -- revealed    : sender answered; full exchange visible to both
+    status              VARCHAR(16)  NOT NULL DEFAULT 'sent',
 
-    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
     INDEX idx_conf_sender    (sender_id),
     INDEX idx_conf_recipient (recipient_id),
     INDEX idx_conf_code      (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-"""
-
-# ─── ADD THIS DDL TO ensure_tables() IN database.py ─────────────────────────
-# Just append CONFESSIONS_DDL to the ddl_statements list inside ensure_tables().
+""",
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PASTE THE FOLLOWING FUNCTIONS INTO database.py
-# ─────────────────────────────────────────────────────────────────────────────
+# ── FUNCTIONS (paste into database.py) ───────────────────────────────────────
 
-import json
+import json   # already imported at top of database.py — just shown for clarity
 
 
 def save_confession(sender_id: int, recipient_id: int, code: str, questions: list) -> bool:
-    """
-    Create a new confession exchange session.
-    status starts as 'sent'.
-    """
+    """Create a new confession exchange. status='sent'."""
     conn = create_connection()
     if not conn:
         return False
@@ -515,24 +509,20 @@ def save_confession(sender_id: int, recipient_id: int, code: str, questions: lis
         cur.close()
         return True
     except Exception as e:
-        import streamlit as st
-        st.error(f"Error saving confession: {e}")
+        import streamlit as st; st.error(f"Error saving confession: {e}")
         return False
     finally:
         conn.close()
 
 
-def get_confession_by_code(code: str) -> dict | None:
-    """Fetch a single confession with sender/recipient usernames joined."""
+def get_confession_by_code(code: str):
     conn = create_connection()
     if not conn:
         return None
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """SELECT c.*,
-                      s.username AS sender_username,
-                      r.username AS recipient_username
+            """SELECT c.*, s.username AS sender_username, r.username AS recipient_username
                FROM confessions c
                JOIN users s ON s.id = c.sender_id
                JOIN users r ON r.id = c.recipient_id
@@ -556,9 +546,7 @@ def load_confessions_inbox(user_id: int) -> list:
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """SELECT c.*,
-                      s.username AS sender_username,
-                      r.username AS recipient_username
+            """SELECT c.*, s.username AS sender_username, r.username AS recipient_username
                FROM confessions c
                JOIN users s ON s.id = c.sender_id
                JOIN users r ON r.id = c.recipient_id
@@ -583,9 +571,7 @@ def load_confessions_outbox(user_id: int) -> list:
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """SELECT c.*,
-                      s.username AS sender_username,
-                      r.username AS recipient_username
+            """SELECT c.*, s.username AS sender_username, r.username AS recipient_username
                FROM confessions c
                JOIN users s ON s.id = c.sender_id
                JOIN users r ON r.id = c.recipient_id
@@ -602,15 +588,10 @@ def load_confessions_outbox(user_id: int) -> list:
         conn.close()
 
 
-def confession_recipient_respond(
-    code: str,
-    recipient_answers: list,
-    recipient_questions: list,
-) -> bool:
+def confession_recipient_submit_questions(code: str, recipient_questions: list) -> bool:
     """
-    Recipient submits their answers to sender's questions
-    AND their own questions for the sender.
-    status: 'sent' → 'responded'
+    STEP 1 (recipient): submit their questions blind, without having seen sender's.
+    Transition: sent → questioning
     """
     conn = create_connection()
     if not conn:
@@ -619,23 +600,45 @@ def confession_recipient_respond(
         cur = conn.cursor()
         cur.execute(
             """UPDATE confessions
-               SET recipient_answers   = %s,
-                   recipient_questions = %s,
-                   status              = 'responded'
+               SET recipient_questions = %s,
+                   status              = 'questioning'
                WHERE code = %s AND status = 'sent'""",
-            (
-                json.dumps(recipient_answers),
-                json.dumps(recipient_questions),
-                code,
-            )
+            (json.dumps(recipient_questions), code)
         )
         conn.commit()
         changed = cur.rowcount > 0
         cur.close()
         return changed
     except Exception as e:
-        import streamlit as st
-        st.error(f"Error updating confession: {e}")
+        import streamlit as st; st.error(f"Error submitting questions: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def confession_recipient_answer(code: str, recipient_answers: list) -> bool:
+    """
+    STEP 2 (recipient): answer the sender's now-visible questions.
+    Transition: questioning → responded
+    """
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE confessions
+               SET recipient_answers = %s,
+                   status            = 'responded'
+               WHERE code = %s AND status = 'questioning'""",
+            (json.dumps(recipient_answers), code)
+        )
+        conn.commit()
+        changed = cur.rowcount > 0
+        cur.close()
+        return changed
+    except Exception as e:
+        import streamlit as st; st.error(f"Error saving answers: {e}")
         return False
     finally:
         conn.close()
@@ -643,9 +646,8 @@ def confession_recipient_respond(
 
 def confession_sender_answer(code: str, sender_answers: list) -> bool:
     """
-    Sender submits their answers to recipient's questions.
-    status: 'responded' → 'revealed'
-    This is the moment both sides unlock simultaneously.
+    FINAL STEP (sender): answer recipient's questions.
+    Transition: responded → revealed  (both sides unlock simultaneously)
     """
     conn = create_connection()
     if not conn:
@@ -664,18 +666,17 @@ def confession_sender_answer(code: str, sender_answers: list) -> bool:
         cur.close()
         return changed
     except Exception as e:
-        import streamlit as st
-        st.error(f"Error revealing confession: {e}")
+        import streamlit as st; st.error(f"Error revealing confession: {e}")
         return False
     finally:
         conn.close()
 
 
-def _parse_confession_row(row: dict | None) -> dict | None:
-    """Parse JSON columns in a confession row."""
+def _parse_confession_row(row):
+    """Parse all JSON columns in a confession DB row."""
     if not row:
         return None
-    for col in ("sender_questions", "recipient_answers", "recipient_questions", "sender_answers"):
+    for col in ("sender_questions", "recipient_questions", "recipient_answers", "sender_answers"):
         val = row.get(col)
         if val and isinstance(val, str):
             try:
