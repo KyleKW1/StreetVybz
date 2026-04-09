@@ -714,51 +714,126 @@ def invalidate_user_sessions(user_id: int) -> None:
     # db.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
     # db.commit()
     pass
- 
- 
-# ── 3. Save a screenshot alert (persists beyond confession deletion) ──────────
+
+"""
+database_additions.py
+─────────────────────
+Add these functions to your existing database.py.
+
+They support:
+  1. Hard-deleting a confession after the 60-second revealed timer expires
+  2. Saving / loading / dismissing screenshot reports (separate table,
+     survives confession deletion)
+
+Required new DB table:
+
+  CREATE TABLE screenshot_alerts (
+      id                        SERIAL PRIMARY KEY,
+      confession_code           TEXT,
+      reporter_id               INTEGER,
+      reporter_username         TEXT NOT NULL,   -- person who pressed Report
+      accused_username          TEXT NOT NULL,   -- person allegedly screenshotting
+      alert_recipient_username  TEXT NOT NULL,   -- person who SEES the alert
+      dismissed                 BOOLEAN DEFAULT FALSE,
+      created_at                TIMESTAMPTZ DEFAULT NOW()
+  );
+"""
+
+
+# ── 1. Hard-delete a confession ───────────────────────────────────────────────
+def delete_confession(code: str) -> bool:
+    """
+    Delete the confession row and any child rows (answers, questions) by code.
+    Screenshot alert rows live in a separate table and are NOT deleted here —
+    they must survive so the victim continues to see the notification.
+
+    Example (adapt to your ORM / raw SQL):
+        cur.execute("DELETE FROM confessions WHERE code = %s", (code,))
+        conn.commit()
+        return True
+    """
+    raise NotImplementedError("Implement in database.py")
+
+
+# ── 2. Save a screenshot alert ────────────────────────────────────────────────
 def save_screenshot_alert(
     confession_code: str,
-    screenshotter_id: int,
-    screenshotter_username: str,
-    other_username: str,
+    reporter_id: int,
+    reporter_username: str,
+    accused_username: str,
+    alert_recipient_username: str,
 ) -> bool:
     """
-    Inserts a row into screenshot_alerts.
-    The `other_username` is the victim — the person who will see the alert.
- 
-    Suggested table schema:
-        CREATE TABLE screenshot_alerts (
-            id                      SERIAL PRIMARY KEY,
-            confession_code         TEXT,
-            screenshotter_id        INTEGER,
-            screenshotter_username  TEXT NOT NULL,
-            other_username          TEXT NOT NULL,   -- victim's username
-            dismissed               BOOLEAN DEFAULT FALSE,
-            created_at              TIMESTAMPTZ DEFAULT NOW()
-        );
+    Insert a row into screenshot_alerts.
+
+    reporter_username        — person who pressed the Report button
+    accused_username         — person being reported (allegedly took the screenshot)
+    alert_recipient_username — person who will see the alert banner
+                               (usually the accused's exchange partner, i.e. the reporter)
+
+    Returns True on success.
+
+    Example:
+        cur.execute(
+            \"\"\"INSERT INTO screenshot_alerts
+               (confession_code, reporter_id, reporter_username,
+                accused_username, alert_recipient_username)
+               VALUES (%s, %s, %s, %s, %s)\"\"\",
+            (confession_code, reporter_id, reporter_username,
+             accused_username, alert_recipient_username)
+        )
+        conn.commit()
+        return True
     """
-    raise NotImplementedError("Implement this in your database.py")
- 
- 
-# ── 4. Load screenshot alerts for a victim user ───────────────────────────────
+    raise NotImplementedError("Implement in database.py")
+
+
+# ── 3. Load screenshot alerts for a user ─────────────────────────────────────
 def load_screenshot_alerts(user_id: int) -> list:
     """
-    Return all non-dismissed screenshot alert rows where this user is the victim.
-    Match on username (or add a victim_id column if you prefer).
- 
-    Returns list of dicts:
-      [{ "id": 1, "screenshotter_username": "alice",
-         "created_at": datetime, "dismissed": False }, ...]
+    Return all non-dismissed screenshot_alerts rows where
+    alert_recipient_username matches this user's username.
+
+    (Match on username, or add an alert_recipient_id column if you prefer.)
+
+    Returns list of dicts, e.g.:
+      [
+        {
+          "id": 1,
+          "reporter_username": "alice",
+          "accused_username":  "bob",
+          "created_at":        datetime(...),
+          "dismissed":         False,
+        },
+        ...
+      ]
+
+    Example:
+        username = get_username_by_id(user_id)
+        rows = cur.execute(
+            \"\"\"SELECT id, reporter_username, accused_username, created_at
+               FROM screenshot_alerts
+               WHERE alert_recipient_username = %s
+                 AND dismissed = FALSE
+               ORDER BY created_at DESC\"\"\",
+            (username,)
+        ).fetchall()
+        return [dict(r) for r in rows]
     """
-    raise NotImplementedError("Implement this in your database.py")
- 
- 
-# ── 5. Dismiss a screenshot alert ─────────────────────────────────────────────
+    raise NotImplementedError("Implement in database.py")
+
+
+# ── 4. Dismiss a screenshot alert ─────────────────────────────────────────────
 def dismiss_screenshot_alert(alert_id: int) -> bool:
     """
-    Mark the alert as dismissed so it no longer shows in the banner.
+    Mark the alert as dismissed so it stops appearing in the banner.
+
+    Example:
+        cur.execute(
+            "UPDATE screenshot_alerts SET dismissed=TRUE WHERE id=%s",
+            (alert_id,)
+        )
+        conn.commit()
+        return True
     """
-    # db.execute("UPDATE screenshot_alerts SET dismissed=TRUE WHERE id=%s", (alert_id,))
-    raise NotImplementedError("Implement this in your database.py")
- 
+    raise NotImplementedError("Implement in database.py")
