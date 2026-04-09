@@ -6,8 +6,10 @@ If any individual query fails it returns a safe default rather than crashing.
 Tables managed here:
   users            — existing
   password_resets  — existing
-  vice_log         — NEW: per-user vice session entries
-  quiz_results     — NEW: Read Between The Lines / What Would You Do results
+  vice_log         — per-user vice session entries
+  quiz_results     — Read Between The Lines / What Would You Do results
+  confessions      — blind mutual confession exchange
+  screenshot_alerts — persists even after confession deletion
 """
 
 import json
@@ -51,76 +53,75 @@ def create_connection():
 # ─── SCHEMA BOOTSTRAP ─────────────────────────────────────────────────────────
 
 def ensure_tables():
-    """
-    Create the new tables if they don't already exist.
-    Call this once at app startup (in main() after authentication succeeds).
-    """
     conn = create_connection()
     if not conn:
         return
 
     ddl_statements = [
-        # ── vice_log ──────────────────────────────────────────────────────────
         """
         CREATE TABLE IF NOT EXISTS vice_log (
             id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             user_id     INT NOT NULL,
-            vice        VARCHAR(32)  NOT NULL,          -- weed / alcohol / sex / other
-            logged_at   DATETIME     NOT NULL,           -- when the session happened
+            vice        VARCHAR(32)  NOT NULL,
+            logged_at   DATETIME     NOT NULL,
             created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            details     JSON,                            -- vice-specific fields dict
+            details     JSON,
             INDEX idx_vice_log_user  (user_id),
             INDEX idx_vice_log_time  (user_id, logged_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
-
-        # ── quiz_results ──────────────────────────────────────────────────────
         """
         CREATE TABLE IF NOT EXISTS quiz_results (
             id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             user_id         INT NOT NULL,
-            quiz_type       VARCHAR(32)  NOT NULL,       -- 'read_between_lines' | 'what_would_you_do'
+            quiz_type       VARCHAR(32)  NOT NULL,
             completed_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-            -- Read Between The Lines (desire profile)
             profile_name    VARCHAR(128),
             profile_meta    VARCHAR(255),
-            dim_scores      JSON,                        -- {control:%, sensory:%, ...}
-            recommendations JSON,                        -- list of rec strings
+            dim_scores      JSON,
+            recommendations JSON,
             total_pct       TINYINT UNSIGNED,
-
-            -- What Would You Do (openness index)
             result_name     VARCHAR(128),
             result_meta     VARCHAR(255),
             openness_pct    TINYINT UNSIGNED,
             total_pts       SMALLINT UNSIGNED,
-
-            -- Raw answers for deep analysis
-            questions       LONGTEXT,                    -- JSON array of question objects
-            answers         JSON,                        -- list of answer indices
-
+            questions       LONGTEXT,
+            answers         JSON,
             INDEX idx_quiz_user (user_id),
             INDEX idx_quiz_type (user_id, quiz_type)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
-      """
-      CREATE TABLE IF NOT EXISTS confessions (
-          id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-          code                VARCHAR(16) NOT NULL UNIQUE,
-          sender_id           INT NOT NULL,
-          recipient_id        INT NOT NULL,
-          sender_questions    JSON NOT NULL,
-          recipient_answers   JSON,
-          recipient_questions JSON,
-          sender_answers      JSON,
-          status              VARCHAR(16) NOT NULL DEFAULT 'sent',
-          created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          INDEX idx_conf_sender    (sender_id),
-          INDEX idx_conf_recipient (recipient_id),
-          INDEX idx_conf_code      (code)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-      """,
+        """
+        CREATE TABLE IF NOT EXISTS confessions (
+            id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            code                VARCHAR(16) NOT NULL UNIQUE,
+            sender_id           INT NOT NULL,
+            recipient_id        INT NOT NULL,
+            sender_questions    JSON NOT NULL,
+            recipient_answers   JSON,
+            recipient_questions JSON,
+            sender_answers      JSON,
+            status              VARCHAR(16) NOT NULL DEFAULT 'sent',
+            created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_conf_sender    (sender_id),
+            INDEX idx_conf_recipient (recipient_id),
+            INDEX idx_conf_code      (code)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS screenshot_alerts (
+            id                      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            confession_code         VARCHAR(16),
+            screenshotter_id        INT NOT NULL,
+            screenshotter_username  VARCHAR(128) NOT NULL,
+            other_username          VARCHAR(128) NOT NULL,
+            dismissed               TINYINT(1)   NOT NULL DEFAULT 0,
+            created_at              DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_sa_other (other_username),
+            INDEX idx_sa_dismissed (other_username, dismissed)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
     ]
 
     try:
@@ -135,7 +136,7 @@ def ensure_tables():
         conn.close()
 
 
-# ─── USERS (existing) ─────────────────────────────────────────────────────────
+# ─── USERS ────────────────────────────────────────────────────────────────────
 
 def get_user_by_username(username: str):
     conn = create_connection()
@@ -232,11 +233,7 @@ def update_user_password(user_id: int, new_password_hash: str) -> bool:
 
 # ─── VICE LOG ─────────────────────────────────────────────────────────────────
 
-def save_vice_entry(user_id: int, vice: str, logged_at, details: dict) -> int | None:
-    """
-    Insert a new vice log entry.
-    Returns the new row id, or None on failure.
-    """
+def save_vice_entry(user_id: int, vice: str, logged_at, details: dict):
     conn = create_connection()
     if not conn:
         return None
@@ -259,11 +256,6 @@ def save_vice_entry(user_id: int, vice: str, logged_at, details: dict) -> int | 
 
 
 def load_vice_log(user_id: int) -> list:
-    """
-    Load all vice log entries for a user, newest first.
-    Returns a list of dicts compatible with the session_state vice_log format:
-      [{"id", "vice", "timestamp", "data"}, ...]
-    """
     conn = create_connection()
     if not conn:
         return []
@@ -302,7 +294,6 @@ def load_vice_log(user_id: int) -> list:
 
 
 def delete_vice_log(user_id: int) -> bool:
-    """Delete all vice log entries for a user (used by 'Clear all history')."""
     conn = create_connection()
     if not conn:
         return False
@@ -322,16 +313,9 @@ def delete_vice_log(user_id: int) -> bool:
 # ─── QUIZ RESULTS ─────────────────────────────────────────────────────────────
 
 def save_read_between_lines_result(
-    user_id:         int,
-    profile_name:    str,
-    profile_meta:    str,
-    dim_scores:      dict,       # {dim_key: pct, ...}
-    recommendations: list,       # [str, ...]
-    total_pct:       int,
-    questions:       list,       # full question objects
-    answers:         list,       # answer indices
+    user_id, profile_name, profile_meta, dim_scores,
+    recommendations, total_pct, questions, answers,
 ) -> bool:
-    """Save a completed 'Read Between The Lines' quiz result."""
     conn = create_connection()
     if not conn:
         return False
@@ -343,14 +327,10 @@ def save_read_between_lines_result(
                 dim_scores, recommendations, total_pct, questions, answers)
                VALUES (%s, 'read_between_lines', %s, %s, %s, %s, %s, %s, %s)""",
             (
-                user_id,
-                profile_name,
-                profile_meta,
-                json.dumps(dim_scores),
-                json.dumps(recommendations),
+                user_id, profile_name, profile_meta,
+                json.dumps(dim_scores), json.dumps(recommendations),
                 total_pct,
-                json.dumps(questions, default=str),
-                json.dumps(answers),
+                json.dumps(questions, default=str), json.dumps(answers),
             )
         )
         conn.commit()
@@ -364,15 +344,9 @@ def save_read_between_lines_result(
 
 
 def save_what_would_you_do_result(
-    user_id:      int,
-    result_name:  str,
-    result_meta:  str,
-    openness_pct: int,
-    total_pts:    int,
-    questions:    list,
-    answers:      list,
+    user_id, result_name, result_meta,
+    openness_pct, total_pts, questions, answers,
 ) -> bool:
-    """Save a completed 'What Would You Do?' quiz result."""
     conn = create_connection()
     if not conn:
         return False
@@ -384,13 +358,9 @@ def save_what_would_you_do_result(
                 openness_pct, total_pts, questions, answers)
                VALUES (%s, 'what_would_you_do', %s, %s, %s, %s, %s, %s)""",
             (
-                user_id,
-                result_name,
-                result_meta,
-                openness_pct,
-                total_pts,
-                json.dumps(questions, default=str),
-                json.dumps(answers),
+                user_id, result_name, result_meta,
+                openness_pct, total_pts,
+                json.dumps(questions, default=str), json.dumps(answers),
             )
         )
         conn.commit()
@@ -403,11 +373,7 @@ def save_what_would_you_do_result(
         conn.close()
 
 
-def load_quiz_history(user_id: int, quiz_type: str | None = None) -> list:
-    """
-    Load past quiz results for a user.
-    quiz_type: 'read_between_lines' | 'what_would_you_do' | None (all)
-    """
+def load_quiz_history(user_id: int, quiz_type=None) -> list:
     conn = create_connection()
     if not conn:
         return []
@@ -422,15 +388,11 @@ def load_quiz_history(user_id: int, quiz_type: str | None = None) -> list:
             )
         else:
             cur.execute(
-                """SELECT * FROM quiz_results
-                   WHERE user_id = %s
-                   ORDER BY completed_at DESC""",
+                """SELECT * FROM quiz_results WHERE user_id = %s ORDER BY completed_at DESC""",
                 (user_id,)
             )
         rows = cur.fetchall()
         cur.close()
-
-        # Parse JSON columns
         json_cols = ("dim_scores", "recommendations", "answers")
         for row in rows:
             for col in json_cols:
@@ -439,13 +401,11 @@ def load_quiz_history(user_id: int, quiz_type: str | None = None) -> list:
                         row[col] = json.loads(row[col])
                     except Exception:
                         pass
-            # questions can be very large — parse only if needed
             if row.get("questions") and isinstance(row["questions"], str):
                 try:
                     row["questions"] = json.loads(row["questions"])
                 except Exception:
                     row["questions"] = []
-
         return rows
     except Exception as e:
         st.error(f"Error loading quiz history: {e}")
@@ -453,48 +413,10 @@ def load_quiz_history(user_id: int, quiz_type: str | None = None) -> list:
     finally:
         conn.close()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Paste all of this into database.py
-# Also add the DDL string below to the ddl_statements list in ensure_tables()
-# ─────────────────────────────────────────────────────────────────────────────
 
-# ── DDL (add to ensure_tables ddl_statements list) ───────────────────────────
-"""
-CREATE TABLE IF NOT EXISTS confessions (
-    id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    code                VARCHAR(16)  NOT NULL UNIQUE,
-    sender_id           INT          NOT NULL,
-    recipient_id        INT          NOT NULL,
-
-    sender_questions    JSON         NOT NULL,          -- what sender asks recipient
-
-    recipient_questions JSON         DEFAULT NULL,      -- what recipient asks sender (submitted blind)
-    recipient_answers   JSON         DEFAULT NULL,      -- recipient's answers to sender_questions
-    sender_answers      JSON         DEFAULT NULL,      -- sender's answers to recipient_questions
-
-    -- sent        : waiting for recipient to write their questions (blind)
-    -- questioning : recipient wrote questions; now answering sender's
-    -- responded   : recipient answered sender's questions; waiting for sender
-    -- revealed    : sender answered; full exchange visible to both
-    status              VARCHAR(16)  NOT NULL DEFAULT 'sent',
-
-    created_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-    INDEX idx_conf_sender    (sender_id),
-    INDEX idx_conf_recipient (recipient_id),
-    INDEX idx_conf_code      (code)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-""",
-
-
-# ── FUNCTIONS (paste into database.py) ───────────────────────────────────────
-
-import json   # already imported at top of database.py — just shown for clarity
-
+# ─── CONFESSIONS ──────────────────────────────────────────────────────────────
 
 def save_confession(sender_id: int, recipient_id: int, code: str, questions: list) -> bool:
-    """Create a new confession exchange. status='sent'."""
     conn = create_connection()
     if not conn:
         return False
@@ -509,7 +431,7 @@ def save_confession(sender_id: int, recipient_id: int, code: str, questions: lis
         cur.close()
         return True
     except Exception as e:
-        import streamlit as st; st.error(f"Error saving confession: {e}")
+        st.error(f"Error saving confession: {e}")
         return False
     finally:
         conn.close()
@@ -539,7 +461,6 @@ def get_confession_by_code(code: str):
 
 
 def load_confessions_inbox(user_id: int) -> list:
-    """Confessions where this user is the RECIPIENT, newest first."""
     conn = create_connection()
     if not conn:
         return []
@@ -556,7 +477,7 @@ def load_confessions_inbox(user_id: int) -> list:
         )
         rows = cur.fetchall()
         cur.close()
-        return [_parse_confession_row(r) for r in rows]
+        return [_parse_confession_row(r) for r in rows if r]
     except Exception:
         return []
     finally:
@@ -564,7 +485,6 @@ def load_confessions_inbox(user_id: int) -> list:
 
 
 def load_confessions_outbox(user_id: int) -> list:
-    """Confessions where this user is the SENDER, newest first."""
     conn = create_connection()
     if not conn:
         return []
@@ -581,7 +501,7 @@ def load_confessions_outbox(user_id: int) -> list:
         )
         rows = cur.fetchall()
         cur.close()
-        return [_parse_confession_row(r) for r in rows]
+        return [_parse_confession_row(r) for r in rows if r]
     except Exception:
         return []
     finally:
@@ -589,10 +509,6 @@ def load_confessions_outbox(user_id: int) -> list:
 
 
 def confession_recipient_submit_questions(code: str, recipient_questions: list) -> bool:
-    """
-    STEP 1 (recipient): submit their questions blind, without having seen sender's.
-    Transition: sent → questioning
-    """
     conn = create_connection()
     if not conn:
         return False
@@ -600,8 +516,7 @@ def confession_recipient_submit_questions(code: str, recipient_questions: list) 
         cur = conn.cursor()
         cur.execute(
             """UPDATE confessions
-               SET recipient_questions = %s,
-                   status              = 'questioning'
+               SET recipient_questions = %s, status = 'questioning'
                WHERE code = %s AND status = 'sent'""",
             (json.dumps(recipient_questions), code)
         )
@@ -610,17 +525,13 @@ def confession_recipient_submit_questions(code: str, recipient_questions: list) 
         cur.close()
         return changed
     except Exception as e:
-        import streamlit as st; st.error(f"Error submitting questions: {e}")
+        st.error(f"Error submitting questions: {e}")
         return False
     finally:
         conn.close()
 
 
 def confession_recipient_answer(code: str, recipient_answers: list) -> bool:
-    """
-    STEP 2 (recipient): answer the sender's now-visible questions.
-    Transition: questioning → responded
-    """
     conn = create_connection()
     if not conn:
         return False
@@ -628,8 +539,7 @@ def confession_recipient_answer(code: str, recipient_answers: list) -> bool:
         cur = conn.cursor()
         cur.execute(
             """UPDATE confessions
-               SET recipient_answers = %s,
-                   status            = 'responded'
+               SET recipient_answers = %s, status = 'responded'
                WHERE code = %s AND status = 'questioning'""",
             (json.dumps(recipient_answers), code)
         )
@@ -638,17 +548,13 @@ def confession_recipient_answer(code: str, recipient_answers: list) -> bool:
         cur.close()
         return changed
     except Exception as e:
-        import streamlit as st; st.error(f"Error saving answers: {e}")
+        st.error(f"Error saving answers: {e}")
         return False
     finally:
         conn.close()
 
 
 def confession_sender_answer(code: str, sender_answers: list) -> bool:
-    """
-    FINAL STEP (sender): answer recipient's questions.
-    Transition: responded → revealed  (both sides unlock simultaneously)
-    """
     conn = create_connection()
     if not conn:
         return False
@@ -656,8 +562,7 @@ def confession_sender_answer(code: str, sender_answers: list) -> bool:
         cur = conn.cursor()
         cur.execute(
             """UPDATE confessions
-               SET sender_answers = %s,
-                   status         = 'revealed'
+               SET sender_answers = %s, status = 'revealed'
                WHERE code = %s AND status = 'responded'""",
             (json.dumps(sender_answers), code)
         )
@@ -666,14 +571,32 @@ def confession_sender_answer(code: str, sender_answers: list) -> bool:
         cur.close()
         return changed
     except Exception as e:
-        import streamlit as st; st.error(f"Error revealing confession: {e}")
+        st.error(f"Error revealing confession: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def delete_confession(code: str) -> bool:
+    """Hard-delete a confession exchange by code."""
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM confessions WHERE code = %s", (code,))
+        conn.commit()
+        deleted = cur.rowcount > 0
+        cur.close()
+        return deleted
+    except Exception as e:
+        st.error(f"Error deleting confession: {e}")
         return False
     finally:
         conn.close()
 
 
 def _parse_confession_row(row):
-    """Parse all JSON columns in a confession DB row."""
     if not row:
         return None
     for col in ("sender_questions", "recipient_questions", "recipient_answers", "sender_answers"):
@@ -688,152 +611,99 @@ def _parse_confession_row(row):
     return row
 
 
+# ─── SCREENSHOT ALERTS ────────────────────────────────────────────────────────
 
-# ── 1. Delete a confession by code ────────────────────────────────────────────
-def delete_confession(code: str) -> bool:
-    """
-    Hard-delete the confession row (and any related answers/questions) by code.
-    Screenshot alert rows are in a SEPARATE table and are NOT deleted here —
-    they survive so the victim can still see the notification.
-    """
-    # Example (adapt to your ORM / raw SQL):
-    # db.execute("DELETE FROM confessions WHERE code = %s", (code,))
-    # db.commit()
-    raise NotImplementedError("Implement this in your database.py")
- 
- 
-# ── 2. Invalidate all sessions for a user (force logout) ─────────────────────
-def invalidate_user_sessions(user_id: int) -> None:
-    """
-    Delete / expire all session tokens for the given user so they can't
-    silently stay logged in after a screenshot.
-    If you use Streamlit's built-in session state only (no server-side tokens),
-    this is a no-op — the client-side _force_logout() already clears state.
-    """
-    # Example:
-    # db.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
-    # db.commit()
-    pass
-
-"""
-database_additions.py
-─────────────────────
-Add these functions to your existing database.py.
-
-They support:
-  1. Hard-deleting a confession after the 60-second revealed timer expires
-  2. Saving / loading / dismissing screenshot reports (separate table,
-     survives confession deletion)
-
-Required new DB table:
-
-  CREATE TABLE screenshot_alerts (
-      id                        SERIAL PRIMARY KEY,
-      confession_code           TEXT,
-      reporter_id               INTEGER,
-      reporter_username         TEXT NOT NULL,   -- person who pressed Report
-      accused_username          TEXT NOT NULL,   -- person allegedly screenshotting
-      alert_recipient_username  TEXT NOT NULL,   -- person who SEES the alert
-      dismissed                 BOOLEAN DEFAULT FALSE,
-      created_at                TIMESTAMPTZ DEFAULT NOW()
-  );
-"""
-
-
-# ── 1. Hard-delete a confession ───────────────────────────────────────────────
-def delete_confession(code: str) -> bool:
-    """
-    Delete the confession row and any child rows (answers, questions) by code.
-    Screenshot alert rows live in a separate table and are NOT deleted here —
-    they must survive so the victim continues to see the notification.
-
-    Example (adapt to your ORM / raw SQL):
-        cur.execute("DELETE FROM confessions WHERE code = %s", (code,))
-        conn.commit()
-        return True
-    """
-    raise NotImplementedError("Implement in database.py")
-
-
-# ── 2. Save a screenshot alert ────────────────────────────────────────────────
 def save_screenshot_alert(
     confession_code: str,
-    reporter_id: int,
-    reporter_username: str,
-    accused_username: str,
-    alert_recipient_username: str,
+    screenshotter_id: int,
+    screenshotter_username: str,
+    other_username: str,
 ) -> bool:
     """
-    Insert a row into screenshot_alerts.
-
-    reporter_username        — person who pressed the Report button
-    accused_username         — person being reported (allegedly took the screenshot)
-    alert_recipient_username — person who will see the alert banner
-                               (usually the accused's exchange partner, i.e. the reporter)
-
-    Returns True on success.
-
-    Example:
+    Save a persistent screenshot alert.
+    other_username = the victim (the person who will see the alert).
+    Survives deletion of the confession itself.
+    """
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
         cur.execute(
-            \"\"\"INSERT INTO screenshot_alerts
-               (confession_code, reporter_id, reporter_username,
-                accused_username, alert_recipient_username)
-               VALUES (%s, %s, %s, %s, %s)\"\"\",
-            (confession_code, reporter_id, reporter_username,
-             accused_username, alert_recipient_username)
+            """INSERT INTO screenshot_alerts
+               (confession_code, screenshotter_id, screenshotter_username, other_username)
+               VALUES (%s, %s, %s, %s)""",
+            (confession_code, screenshotter_id, screenshotter_username, other_username)
         )
         conn.commit()
+        cur.close()
         return True
-    """
-    raise NotImplementedError("Implement in database.py")
+    except Exception as e:
+        st.error(f"Error saving screenshot alert: {e}")
+        return False
+    finally:
+        conn.close()
 
 
-# ── 3. Load screenshot alerts for a user ─────────────────────────────────────
 def load_screenshot_alerts(user_id: int) -> list:
     """
-    Return all non-dismissed screenshot_alerts rows where
-    alert_recipient_username matches this user's username.
-
-    (Match on username, or add an alert_recipient_id column if you prefer.)
-
-    Returns list of dicts, e.g.:
-      [
-        {
-          "id": 1,
-          "reporter_username": "alice",
-          "accused_username":  "bob",
-          "created_at":        datetime(...),
-          "dismissed":         False,
-        },
-        ...
-      ]
-
-    Example:
-        username = get_username_by_id(user_id)
-        rows = cur.execute(
-            \"\"\"SELECT id, reporter_username, accused_username, created_at
-               FROM screenshot_alerts
-               WHERE alert_recipient_username = %s
-                 AND dismissed = FALSE
-               ORDER BY created_at DESC\"\"\",
-            (username,)
-        ).fetchall()
-        return [dict(r) for r in rows]
+    Load non-dismissed alerts where this user is the victim.
+    Matches by looking up the user's username first.
     """
-    raise NotImplementedError("Implement in database.py")
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        # Get the username for this user_id
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            return []
+        username = row["username"]
 
-
-# ── 4. Dismiss a screenshot alert ─────────────────────────────────────────────
-def dismiss_screenshot_alert(alert_id: int) -> bool:
-    """
-    Mark the alert as dismissed so it stops appearing in the banner.
-
-    Example:
         cur.execute(
-            "UPDATE screenshot_alerts SET dismissed=TRUE WHERE id=%s",
+            """SELECT id, confession_code, screenshotter_username, created_at
+               FROM screenshot_alerts
+               WHERE other_username = %s AND dismissed = 0
+               ORDER BY created_at DESC""",
+            (username,)
+        )
+        alerts = cur.fetchall()
+        cur.close()
+        return alerts
+    except Exception as e:
+        st.error(f"Error loading screenshot alerts: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def dismiss_screenshot_alert(alert_id: int) -> bool:
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE screenshot_alerts SET dismissed = 1 WHERE id = %s",
             (alert_id,)
         )
         conn.commit()
+        cur.close()
         return True
+    except Exception as e:
+        st.error(f"Error dismissing alert: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def invalidate_user_sessions(user_id: int) -> None:
     """
-    raise NotImplementedError("Implement in database.py")
+    No-op for Streamlit's session-state-only auth.
+    The client-side _force_logout() in confession.py clears state directly.
+    If you add server-side session tokens later, implement here.
+    """
+    pass
