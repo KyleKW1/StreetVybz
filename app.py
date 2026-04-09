@@ -77,7 +77,7 @@ def render_sidebar():
             st.session_state.selected_feature = 'hotspots'
             st.rerun()
 
-        if st.button("💬  Confessions", use_container_width=True):
+        if st.button(" Confessions", use_container_width=True):
             st.session_state.selected_feature = 'confessions'
             st.rerun()
 
@@ -156,7 +156,7 @@ def main():
             
         elif feature == 'confessions':
             from Pages.confessions import confessions_page
-            confessions_page()
+            confession()
             
       
  
