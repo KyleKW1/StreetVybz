@@ -528,7 +528,6 @@ def _reaction_stamps(confession_code: str):
         with cols[i]:
             already = emoji in reacted
             label = f"{emoji}  {count}" if count else emoji
-            border_color = "var(--magenta)" if already else "var(--border)"
             if st.button(label, key=f"react_{confession_code}_{emoji}",
                          help="React" if not already else "Already reacted"):
                 if not already:
@@ -541,8 +540,7 @@ def _reaction_stamps(confession_code: str):
 def _send_invite_email(sender_username: str, recipient_email: str, confession_code: str) -> bool:
     """
     Send an email invite with a deep-link to the confession exchange.
-    Requires: save_pending_invite(code, sender_id, email) in DB
-              send_transactional_email(to, subject, html) in email module.
+    Requires send_transactional_email(to, subject, html) in email_service module.
     Returns True on success.
     """
     base_url = st.secrets.get("APP_URL", "https://yourvicevault.app")
@@ -564,12 +562,6 @@ def _send_invite_email(sender_username: str, recipient_email: str, confession_co
   <div style="margin-top:24px;font-size:11px;color:#5a5a72;">This link is one-time use. Don't share it.</div>
 </div>
 """
-    try:
-        import database as db
-        db.save_pending_invite(confession_code, _uid(), recipient_email)
-    except Exception:
-        pass
-
     try:
         import email_service
         return email_service.send_transactional_email(
@@ -649,8 +641,15 @@ def _render_compose():
             email = (recipient_email or "").strip()
             if not email or "@" not in email:
                 st.error("Enter a valid email address."); return
-            # Save as pending invite confession (recipient_id=None until they sign up)
-            if _db("save_confession_invite", uid, email, code, questions):
+
+            try:
+                import database as db
+                result = db.save_confession_invite(uid, email, code, questions)
+            except Exception as e:
+                st.error(f"Database error: {e}")
+                return
+
+            if result:
                 sent = _send_invite_email(_username(), email, code)
                 if sent:
                     st.session_state.conf_form_gen += 1
@@ -658,9 +657,9 @@ def _render_compose():
                     st.rerun()
                 else:
                     st.warning("Confession saved but email failed to send. Share the invite link manually.")
-                    st.code(f"{st.secrets.get('APP_URL','https://yourvicevault.app')}/?invite={code}")
+                    st.code(f"{st.secrets.get('APP_URL', 'https://yourvicevault.app')}/?invite={code}")
             else:
-                st.error("Something went wrong.")
+                st.error("Something went wrong saving the confession.")
         else:
             # Username path (original flow)
             rname = (recipient_username or "").strip()
@@ -714,7 +713,6 @@ def _render_inbox_item(item):
     _status_badge(status, sender_name, _username(), is_sender=False)
 
     if status == "sent":
-        # Emotional label: "Your move. They're waiting."
         with st.expander(f"Your move — write your {num_q} question{'s' if num_q != 1 else ''} for {sender_name}", expanded=True):
             st.html(f"""
 <div style="padding:10px 14px;background:var(--surface);border-radius:4px;margin-bottom:14px;
@@ -734,7 +732,6 @@ def _render_inbox_item(item):
 
     elif status == "questioning":
         sender_questions = item.get("sender_questions", [])
-        # Emotional label: "They blinked first. Now answer."
         with st.expander(f"They showed their hand — answer {sender_name}'s questions", expanded=True):
             st.html(f"""
 <div style="padding:10px 14px;background:var(--surface);border-radius:4px;margin-bottom:14px;
@@ -782,7 +779,7 @@ def _render_outbox():
 
 def _render_outbox_item(item):
     code           = item["code"]
-    recipient_name = item.get("recipient_username", "them")
+    recipient_name = item.get("recipient_username") or item.get("recipient_email", "them")
     status         = item["status"]
     num_q          = len(item.get("sender_questions", []))
     ts             = str(item.get("created_at", ""))[:16]
@@ -811,7 +808,6 @@ def _render_outbox_item(item):
 
     elif status == "responded":
         recipient_questions = item.get("recipient_questions", [])
-        # Emotional label: "They answered. Your move."
         with st.expander(f"They answered. Seal the deal — answer {recipient_name}'s questions", expanded=True):
             st.html(f"""
 <div style="padding:14px 16px;background:var(--surface);border-radius:4px;margin-bottom:16px;
@@ -845,7 +841,7 @@ def _render_outbox_item(item):
 
 def _render_revealed(item, is_sender: bool):
     sender_name    = item.get("sender_username", "Sender")
-    recipient_name = item.get("recipient_username", "Recipient")
+    recipient_name = item.get("recipient_username") or item.get("recipient_email", "Recipient")
 
     st.html("""
 <div style="background:var(--card);border:1px solid var(--border);border-top:2px solid var(--lime);
@@ -959,7 +955,7 @@ def confessions_page():
                     unique.append(item)
             for item in unique:
                 is_s  = item.get("sender_id") == uid
-                other = item.get("recipient_username") if is_s else item.get("sender_username")
+                other = item.get("recipient_username") or item.get("recipient_email") if is_s else item.get("sender_username")
                 ts    = str(item.get("created_at", ""))[:16]
                 inject_countdown_banner(item["code"], _revealed_at_iso(item))
                 with st.expander(f"Exchange with {other} · {ts}", expanded=False):
