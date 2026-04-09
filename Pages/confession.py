@@ -12,6 +12,15 @@ refreshes manually the cleanup still runs.
 Screenshot detection: Desktop PrintScreen key only.
 iOS/Android screenshots CANNOT be detected from a browser — no API exists for
 this. visibilitychange and blur fire constantly on mobile from normal usage.
+
+NEW (v2):
+- Glitch CSS animation on CONFESSIONS header
+- Pulsing screen-edge countdown glow (magenta → amber → lime → white)
+- Staggered card flip reveal animation
+- Emoji reaction stamps (😳 👀 💀 🫣) during the revealed window
+- Emotional step labels
+- Email invite on compose — deep-link for non-users
+- Typing indicator pulse when waiting
 """
 
 import streamlit as st
@@ -80,25 +89,138 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 }
 .stSelectbox > div > div { background:var(--card) !important; border:1px solid var(--border) !important; color:var(--text) !important; }
 #MainMenu { visibility:hidden; } footer { visibility:hidden; }
+
+/* ── Glitch animation for CONFESSIONS header ── */
+@keyframes glitch-clip {
+  0%   { clip-path:inset(0 0 95% 0); transform:translate(-3px, 0); }
+  10%  { clip-path:inset(30% 0 55% 0); transform:translate(3px, 0); }
+  20%  { clip-path:inset(60% 0 15% 0); transform:translate(-2px, 0); }
+  30%  { clip-path:inset(80% 0 5% 0);  transform:translate(2px, 0); }
+  40%  { clip-path:inset(10% 0 80% 0); transform:translate(-3px, 0); }
+  50%  { clip-path:inset(0 0 0 0);     transform:translate(0, 0); opacity:0; }
+  100% { clip-path:inset(0 0 0 0);     transform:translate(0, 0); opacity:0; }
+}
+.glitch-wrap { position:relative; display:inline-block; }
+.glitch-wrap::before,
+.glitch-wrap::after {
+  content: attr(data-text);
+  position:absolute; top:0; left:0;
+  font-family:'Bebas Neue',sans-serif;
+  font-size:48px; letter-spacing:3px; line-height:0.95;
+  pointer-events:none;
+}
+.glitch-wrap::before {
+  color:var(--cyan);
+  animation: glitch-clip 4s infinite linear;
+  animation-delay: 0.5s;
+}
+.glitch-wrap::after {
+  color:var(--magenta);
+  animation: glitch-clip 4s infinite linear;
+  animation-delay: 1.2s;
+}
+
+/* ── Staggered card entrance ── */
+@keyframes card-enter {
+  from { opacity:0; transform:translateY(18px) scale(0.97); }
+  to   { opacity:1; transform:translateY(0) scale(1); }
+}
+.reveal-card {
+  animation: card-enter 0.45s cubic-bezier(0.19,1,0.22,1) both;
+}
+
+/* ── Reaction stamp button ── */
+.reaction-btn {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 20px !important;
+  padding: 6px 14px !important;
+  font-size: 18px !important;
+  cursor: pointer !important;
+  transition: all 0.15s !important;
+  display: inline-block !important;
+  letter-spacing: 0 !important;
+}
+.reaction-btn:hover {
+  border-color: var(--magenta) !important;
+  transform: scale(1.15) !important;
+  box-shadow: 0 0 12px rgba(255,45,120,0.3) !important;
+}
+
+/* ── Typing indicator ── */
+@keyframes typing-pulse {
+  0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+  40%           { opacity: 1;   transform: scale(1); }
+}
+.typing-dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--magenta);
+  animation: typing-pulse 1.4s infinite ease-in-out;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
 </style>
 """)
 
 
-# ─── COUNTDOWN BANNER ────────────────────────────────────────────────────────
+# ─── COUNTDOWN BANNER (pulsing screen-edge glow) ─────────────────────────────
 
 def inject_countdown_banner(confession_code: str, revealed_at_iso: str):
     """
-    Fixed bottom banner showing time until auto-delete.
-    When timer hits 0 it triggers a page reload — the server-side
-    delete_expired_confessions() then removes the row.
+    Fixed bottom banner + pulsing screen-edge border.
+    Color shifts: magenta (60s) → amber (15s) → lime (5s) → white (3s).
+    At 10s the whole screen border glows. At 3s it flickers.
     Also catches desktop PrintScreen key.
     """
     st.html(f"""
+<style>
+@keyframes border-pulse {{
+  0%, 100% {{ opacity:1; }}
+  50%       {{ opacity:0.4; }}
+}}
+@keyframes border-flicker {{
+  0%,100% {{ opacity:1; }}
+  25%     {{ opacity:0.1; }}
+  50%     {{ opacity:0.8; }}
+  75%     {{ opacity:0.2; }}
+}}
+#vv-screen-glow {{
+  position:fixed; inset:0; pointer-events:none; z-index:9998;
+  border:3px solid var(--magenta);
+  box-shadow: inset 0 0 40px rgba(255,45,120,0.08), 0 0 0 0 transparent;
+  transition: border-color 0.6s, box-shadow 0.6s;
+  animation: border-pulse 2s infinite;
+}}
+#vv-screen-glow.amber {{
+  border-color: var(--amber);
+  box-shadow: inset 0 0 60px rgba(255,179,0,0.12), 0 0 30px rgba(255,179,0,0.18);
+  animation: border-pulse 1.2s infinite;
+}}
+#vv-screen-glow.lime {{
+  border-color: var(--lime);
+  box-shadow: inset 0 0 80px rgba(198,255,0,0.18), 0 0 50px rgba(198,255,0,0.22);
+  animation: border-pulse 0.7s infinite;
+}}
+#vv-screen-glow.white {{
+  border-color: #fff;
+  box-shadow: inset 0 0 100px rgba(255,255,255,0.2), 0 0 80px rgba(255,255,255,0.3);
+  animation: border-flicker 0.3s infinite;
+}}
+</style>
 <script>
 (function() {{
   var code       = {repr(confession_code)};
   var revealedAt = new Date({repr(revealed_at_iso)}).getTime();
   var DELETE_MS  = 60 * 1000;
+
+  // Screen glow element
+  if (!document.getElementById("vv-screen-glow")) {{
+    var glow = document.createElement("div");
+    glow.id = "vv-screen-glow";
+    document.body.appendChild(glow);
+  }}
 
   if (!document.getElementById("vv-countdown-banner")) {{
     var banner = document.createElement("div");
@@ -109,6 +231,8 @@ def inject_countdown_banner(confession_code: str, revealed_at_iso: str):
   }}
 
   var timerEl = document.getElementById("vv-timer");
+  var glowEl  = document.getElementById("vv-screen-glow");
+  var bannerEl = document.getElementById("vv-countdown-banner");
 
   // Desktop PrintScreen detection
   document.addEventListener("keyup", function(e) {{
@@ -125,12 +249,31 @@ def inject_countdown_banner(confession_code: str, revealed_at_iso: str):
       var m = Math.floor(remaining / 60);
       var s = remaining % 60;
       timerEl.textContent = m + ":" + (s < 10 ? "0" + s : s);
-      if (remaining <= 10) timerEl.style.color = "#c6ff00";
-      if (remaining <= 3)  timerEl.style.color = "#ffffff";
     }}
+
+    // Color shifts
+    if (glowEl && bannerEl) {{
+      if (remaining <= 3) {{
+        glowEl.className = "white";
+        timerEl.style.color = "#ffffff";
+        bannerEl.style.borderTopColor = "#ffffff";
+      }} else if (remaining <= 5) {{
+        glowEl.className = "lime";
+        timerEl.style.color = "#c6ff00";
+        bannerEl.style.borderTopColor = "#c6ff00";
+      }} else if (remaining <= 15) {{
+        glowEl.className = "amber";
+        timerEl.style.color = "#ffb300";
+        bannerEl.style.borderTopColor = "#ffb300";
+      }} else {{
+        glowEl.className = "";
+        timerEl.style.color = "#ff2d78";
+        bannerEl.style.borderTopColor = "#ff2d78";
+      }}
+    }}
+
     if (remaining <= 0) {{
       clearInterval(iv);
-      // Just reload — server-side cleanup handles the actual delete
       window.location.reload();
     }}
   }}, 500);
@@ -162,10 +305,8 @@ def inject_printscreen_guard(confession_code: str):
 # ─── HELPERS ─────────────────────────────────────────────────────────────────
 
 def _revealed_at_iso(item: dict) -> str:
-    """Return revealed_at as an ISO string safe for embedding in JS."""
     ra = item.get("revealed_at")
     if ra is None:
-        # Fall back to updated_at, then created_at
         ra = item.get("updated_at") or item.get("created_at")
     if ra is None:
         from datetime import datetime
@@ -246,14 +387,12 @@ def _gen_code(n=8):
 def _handle_query_params():
     params = st.query_params
 
-    # Reload triggered by countdown timer — server cleanup already ran above
     delete_code = params.get("delete_code")
     if delete_code:
         _db("delete_confession", delete_code)
         st.query_params.clear()
         st.rerun()
 
-    # Desktop PrintScreen was pressed
     ss_code = params.get("screenshot_code")
     if ss_code:
         uid      = _uid()
@@ -330,17 +469,32 @@ def _status_badge(status, sender, recipient, is_sender):
 """)
 
 
+def _typing_indicator(name: str):
+    """Show a pulsing 'they're writing...' indicator."""
+    st.html(f"""
+<div style="display:flex;align-items:center;gap:10px;padding:10px 0 14px 0;">
+  <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
+               text-transform:uppercase;color:var(--muted);">{name} is writing</span>
+  <span class="typing-dot"></span>
+  <span class="typing-dot"></span>
+  <span class="typing-dot"></span>
+</div>
+""")
+
+
 def _question_fields(prefix, count, sender_name=None):
     ph = f"Ask {sender_name} something real…" if sender_name else "Ask them something you actually want to know…"
     return [st.text_area(f"Question {i+1}", placeholder=ph, key=f"{prefix}_{i}", height=80) for i in range(count)]
 
 
-def _exchange_card(label, color, questions, answers):
+def _exchange_card(label, color, questions, answers, delay_base=0):
+    """Renders exchange cards with staggered entrance animation."""
     st.html(f'<div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:{color};margin-bottom:8px;">{label}</div>')
     for i, (q, a) in enumerate(zip(questions, answers)):
+        delay = delay_base + i * 0.12
         st.html(f"""
-<div style="background:var(--card);border:1px solid var(--border);border-left:2px solid {color};
-            border-radius:4px;padding:16px 18px;margin-bottom:10px;">
+<div class="reveal-card" style="animation-delay:{delay}s;background:var(--card);border:1px solid var(--border);
+            border-left:2px solid {color};border-radius:4px;padding:16px 18px;margin-bottom:10px;">
   <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);
               letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Q{i+1}</div>
   <div style="font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text);
@@ -354,6 +508,79 @@ def _exchange_card(label, color, questions, answers):
 """)
 
 
+def _reaction_stamps(confession_code: str):
+    """
+    Emoji reaction stamps during the revealed window.
+    Reactions are stored in DB (save_reaction) and shown live.
+    Falls back gracefully if DB doesn't support reactions yet.
+    """
+    EMOJIS = ["😳", "👀", "💀", "🫣"]
+    st.html("""
+<div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
+            text-transform:uppercase;color:var(--muted);margin-bottom:10px;">React</div>
+""")
+    cols = st.columns(len(EMOJIS))
+    existing = _db("load_reactions", confession_code, _uid(), default=[])
+    reacted = {r.get("emoji") for r in (existing or [])}
+
+    for i, emoji in enumerate(EMOJIS):
+        count = _db("count_reactions", confession_code, emoji, default=0) or 0
+        with cols[i]:
+            already = emoji in reacted
+            label = f"{emoji}  {count}" if count else emoji
+            border_color = "var(--magenta)" if already else "var(--border)"
+            if st.button(label, key=f"react_{confession_code}_{emoji}",
+                         help="React" if not already else "Already reacted"):
+                if not already:
+                    _db("save_reaction", confession_code, _uid(), emoji)
+                    st.rerun()
+
+
+# ─── EMAIL INVITE HELPERS ─────────────────────────────────────────────────────
+
+def _send_invite_email(sender_username: str, recipient_email: str, confession_code: str) -> bool:
+    """
+    Send an email invite with a deep-link to the confession exchange.
+    Requires: save_pending_invite(code, sender_id, email) in DB
+              send_transactional_email(to, subject, html) in email module.
+    Returns True on success.
+    """
+    base_url = st.secrets.get("APP_URL", "https://yourvicevault.app")
+    link = f"{base_url}/?invite={confession_code}"
+
+    html_body = f"""
+<div style="background:#0a0a0b;color:#f0f0f5;font-family:'DM Sans',sans-serif;max-width:520px;margin:0 auto;padding:32px;">
+  <div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#5a5a72;margin-bottom:8px;">Vice Vault</div>
+  <div style="font-size:36px;font-weight:900;letter-spacing:2px;color:#fff;margin-bottom:20px;">CONFESSIONS</div>
+  <div style="font-size:15px;color:#9090aa;line-height:1.8;margin-bottom:28px;">
+    <strong style="color:#f0f0f5;">{sender_username}</strong> wants to exchange confessions with you.
+    Blind. Mutual. Auto-deletes after reveal.<br><br>
+    Before you can read their questions, you write your own back.
+    Then you both answer. Everything reveals at once.
+  </div>
+  <a href="{link}" style="display:inline-block;background:#ff2d78;color:#fff;text-decoration:none;
+     font-family:'Space Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;
+     padding:14px 28px;border-radius:3px;">Accept &amp; Write Back →</a>
+  <div style="margin-top:24px;font-size:11px;color:#5a5a72;">This link is one-time use. Don't share it.</div>
+</div>
+"""
+    try:
+        import database as db
+        db.save_pending_invite(confession_code, _uid(), recipient_email)
+    except Exception:
+        pass
+
+    try:
+        import email_service
+        return email_service.send_transactional_email(
+            to=recipient_email,
+            subject=f"{sender_username} sent you a confession on Vice Vault",
+            html=html_body
+        )
+    except Exception:
+        return False
+
+
 # ─── COMPOSE ─────────────────────────────────────────────────────────────────
 
 def _render_compose():
@@ -362,6 +589,7 @@ def _render_compose():
 
     st.session_state.setdefault("conf_form_gen", 0)
     st.session_state.setdefault("conf_sent_to", None)
+    st.session_state.setdefault("conf_invite_mode", False)
     gen = st.session_state.conf_form_gen
 
     if st.session_state.conf_sent_to:
@@ -379,35 +607,76 @@ def _render_compose():
 </div>
 """)
 
-    recipient_username = st.text_input("Send to (username)", placeholder="Their ViceVault username", key=f"conf_recipient_{gen}")
+    # ── Recipient input: username or email invite toggle ──
+    invite_mode = st.toggle("Recipient isn't on ViceVault? Invite by email", key=f"conf_invite_toggle_{gen}",
+                             value=st.session_state.conf_invite_mode)
+    st.session_state.conf_invite_mode = invite_mode
+
+    if invite_mode:
+        recipient_email = st.text_input("Recipient email", placeholder="their@email.com", key=f"conf_email_{gen}")
+        recipient_username = None
+        st.html("""
+<div style="background:#0f1a10;border:1px solid #1e3a20;border-radius:4px;padding:12px 16px;margin-bottom:16px;">
+  <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:#5a7a5a;line-height:1.7;">
+    They'll get a one-time link. If they don't have an account, they sign up first and land straight in the exchange.
+  </div>
+</div>
+""")
+    else:
+        recipient_username = st.text_input("Send to (username)", placeholder="Their ViceVault username", key=f"conf_recipient_{gen}")
+        recipient_email = None
+
     n = int(st.number_input("Number of questions", min_value=1, max_value=10, value=3, step=1, key=f"conf_n_{gen}"))
     st.html("<div style='height:8px'></div>")
     _section_label(f"Your {n} question{'s' if n != 1 else ''}")
     questions = _question_fields(f"conf_q_{gen}", n)
     st.html("<div style='height:12px'></div>")
 
-    if st.button("Send Confession →", type="primary", use_container_width=True, key=f"conf_send_{gen}"):
-        uid   = _uid()
-        rname = (recipient_username or "").strip()
+    btn_label = "Send Invite →" if invite_mode else "Send Confession →"
+    if st.button(btn_label, type="primary", use_container_width=True, key=f"conf_send_{gen}"):
+        uid = _uid()
         if not uid:
             st.error("Not logged in."); return
-        if not rname:
-            st.error("Enter a recipient username."); return
-        if rname.lower() == _username().lower():
-            st.error("You can't send a confession to yourself."); return
+
         errs = _validate_questions(questions)
         if errs:
             [st.error(e) for e in errs]; return
-        recipient = _db("get_user_by_username", rname)
-        if not recipient:
-            st.error(f"No user found: '{rname}'."); return
+
         code = _gen_code()
-        if _db("save_confession", uid, recipient["id"], code, questions):
-            st.session_state.conf_form_gen += 1
-            st.session_state.conf_sent_to = rname
-            st.rerun()
+
+        if invite_mode:
+            # Email invite path
+            email = (recipient_email or "").strip()
+            if not email or "@" not in email:
+                st.error("Enter a valid email address."); return
+            # Save as pending invite confession (recipient_id=None until they sign up)
+            if _db("save_confession_invite", uid, email, code, questions):
+                sent = _send_invite_email(_username(), email, code)
+                if sent:
+                    st.session_state.conf_form_gen += 1
+                    st.session_state.conf_sent_to = email
+                    st.rerun()
+                else:
+                    st.warning("Confession saved but email failed to send. Share the invite link manually.")
+                    st.code(f"{st.secrets.get('APP_URL','https://yourvicevault.app')}/?invite={code}")
+            else:
+                st.error("Something went wrong.")
         else:
-            st.error("Something went wrong.")
+            # Username path (original flow)
+            rname = (recipient_username or "").strip()
+            if not rname:
+                st.error("Enter a recipient username."); return
+            if rname.lower() == _username().lower():
+                st.error("You can't send a confession to yourself."); return
+            recipient = _db("get_user_by_username", rname)
+            if not recipient:
+                st.error(f"No user found: '{rname}'. Use the email invite toggle if they're not on the app."); return
+            if _db("save_confession", uid, recipient["id"], code, questions):
+                st.session_state.conf_form_gen += 1
+                st.session_state.conf_sent_to = rname
+                st.rerun()
+            else:
+                st.error("Something went wrong.")
 
 
 # ─── INBOX ───────────────────────────────────────────────────────────────────
@@ -445,9 +714,16 @@ def _render_inbox_item(item):
     _status_badge(status, sender_name, _username(), is_sender=False)
 
     if status == "sent":
-        with st.expander(f"Step 1/2 — Write your {num_q} question{'s' if num_q != 1 else ''} for {sender_name}", expanded=True):
+        # Emotional label: "Your move. They're waiting."
+        with st.expander(f"Your move — write your {num_q} question{'s' if num_q != 1 else ''} for {sender_name}", expanded=True):
+            st.html(f"""
+<div style="padding:10px 14px;background:var(--surface);border-radius:4px;margin-bottom:14px;
+            font-family:'DM Sans',sans-serif;font-size:13px;color:var(--soft);line-height:1.7;">
+  {sender_name} already sent theirs — sealed and waiting. Write yours back before either of you sees anything.
+</div>
+""")
             rqs = _question_fields(f"inbox_rq_{code}", num_q, sender_name=sender_name)
-            if st.button(f"Lock in & see {sender_name}'s questions →", key=f"inbox_step1_{code}", type="primary", use_container_width=True):
+            if st.button(f"Lock in — now see {sender_name}'s questions →", key=f"inbox_step1_{code}", type="primary", use_container_width=True):
                 errs = _validate_questions(rqs)
                 if errs:
                     [st.error(e) for e in errs]
@@ -458,12 +734,19 @@ def _render_inbox_item(item):
 
     elif status == "questioning":
         sender_questions = item.get("sender_questions", [])
-        with st.expander(f"Step 2/2 — Answer {sender_name}'s questions", expanded=True):
+        # Emotional label: "They blinked first. Now answer."
+        with st.expander(f"They showed their hand — answer {sender_name}'s questions", expanded=True):
+            st.html(f"""
+<div style="padding:10px 14px;background:var(--surface);border-radius:4px;margin-bottom:14px;
+            font-family:'DM Sans',sans-serif;font-size:13px;color:var(--soft);line-height:1.7;">
+  Both sets of questions are locked in. Answer honestly — {sender_name} can't see your questions until they answer yours too.
+</div>
+""")
             recipient_answers = []
             for i, q in enumerate(sender_questions):
                 st.html(f'<div style="font-family:\'DM Sans\',sans-serif;font-size:14px;color:var(--text);padding:10px 14px;background:var(--surface);border-left:2px solid var(--magenta);border-radius:0 3px 3px 0;margin-bottom:6px;line-height:1.6;">{q}</div>')
                 recipient_answers.append(st.text_area("Your answer", placeholder="Be honest…", key=f"inbox_ans_{code}_{i}", height=80, label_visibility="collapsed"))
-            if st.button(f"Submit answers →", key=f"inbox_step2_{code}", type="primary", use_container_width=True):
+            if st.button("Submit answers — trigger the reveal →", key=f"inbox_step2_{code}", type="primary", use_container_width=True):
                 blank = [i+1 for i, a in enumerate(recipient_answers) if not a.strip()]
                 if blank:
                     st.error(f"Answer{'s' if len(blank)>1 else ''} {', '.join(map(str,blank))} {'are' if len(blank)>1 else 'is'} empty.")
@@ -473,11 +756,13 @@ def _render_inbox_item(item):
                     st.error("Something went wrong.")
 
     elif status == "responded":
+        _typing_indicator(sender_name)
         st.html(f'<div style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:16px 18px;margin-bottom:12px;font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--soft);">{sender_name} is answering your questions. Exchange reveals when they submit.</div>')
 
     elif status == "revealed":
         inject_countdown_banner(code, _revealed_at_iso(item))
         _render_revealed(item, is_sender=False)
+        _reaction_stamps(code)
 
     st.html("<div style='height:12px'></div>")
 
@@ -517,20 +802,29 @@ def _render_outbox_item(item):
     _status_badge(status, _username(), recipient_name, is_sender=True)
 
     if status == "sent":
+        _typing_indicator(recipient_name)
         st.html(f'<div style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:16px 18px;margin-bottom:12px;font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--soft);">{recipient_name} must write their own questions before they can see yours.</div>')
 
     elif status == "questioning":
+        _typing_indicator(recipient_name)
         st.html(f'<div style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:16px 18px;margin-bottom:12px;font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--soft);">{recipient_name} locked in their questions and is now answering yours.</div>')
 
     elif status == "responded":
         recipient_questions = item.get("recipient_questions", [])
-        with st.expander(f"Final step — answer {recipient_name}'s questions to reveal everything", expanded=True):
-            st.html(f'<div style="padding:14px 16px;background:var(--surface);border-radius:4px;margin-bottom:16px;font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--soft);">{recipient_name} answered your questions. Answer theirs — both sides reveal simultaneously. Auto-deletes 60 seconds after reveal.</div>')
+        # Emotional label: "They answered. Your move."
+        with st.expander(f"They answered. Seal the deal — answer {recipient_name}'s questions", expanded=True):
+            st.html(f"""
+<div style="padding:14px 16px;background:var(--surface);border-radius:4px;margin-bottom:16px;
+            font-family:'DM Sans',sans-serif;font-size:13px;color:var(--soft);line-height:1.7;">
+  {recipient_name} answered your questions. The moment you submit, both sides reveal simultaneously.
+  <strong style="color:var(--magenta);">Auto-deletes 60 seconds after reveal.</strong>
+</div>
+""")
             sender_answers = []
             for i, q in enumerate(recipient_questions):
                 st.html(f'<div style="font-family:\'DM Sans\',sans-serif;font-size:14px;color:var(--text);padding:10px 14px;background:var(--surface);border-left:2px solid var(--lime);border-radius:0 3px 3px 0;margin-bottom:6px;line-height:1.6;">{q}</div>')
                 sender_answers.append(st.text_area("Your answer", placeholder="Be honest…", key=f"outbox_ans_{code}_{i}", height=80, label_visibility="collapsed"))
-            if st.button("Submit — reveal the exchange →", key=f"outbox_submit_{code}", type="primary", use_container_width=True):
+            if st.button("Submit — reveal everything →", key=f"outbox_submit_{code}", type="primary", use_container_width=True):
                 blank = [i+1 for i, a in enumerate(sender_answers) if not a.strip()]
                 if blank:
                     st.error(f"Answer{'s' if len(blank)>1 else ''} {', '.join(map(str,blank))} {'are' if len(blank)>1 else 'is'} empty.")
@@ -542,6 +836,7 @@ def _render_outbox_item(item):
     elif status == "revealed":
         inject_countdown_banner(code, _revealed_at_iso(item))
         _render_revealed(item, is_sender=True)
+        _reaction_stamps(code)
 
     st.html("<div style='height:12px'></div>")
 
@@ -555,7 +850,8 @@ def _render_revealed(item, is_sender: bool):
     st.html("""
 <div style="background:var(--card);border:1px solid var(--border);border-top:2px solid var(--lime);
             border-radius:4px;padding:16px 20px;margin-bottom:16px;text-align:center;">
-  <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--lime);letter-spacing:2px;margin-bottom:4px;">EXCHANGE REVEALED</div>
+  <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--lime);
+              letter-spacing:2px;margin-bottom:4px;">EXCHANGE REVEALED</div>
   <div style="font-family:'Space Mono',monospace;font-size:10px;color:var(--magenta);">⏱  Auto-deletes in 60 seconds</div>
 </div>
 """)
@@ -566,13 +862,13 @@ def _render_revealed(item, is_sender: bool):
     sa = item.get("sender_answers", [])
 
     if is_sender:
-        _exchange_card(f"Your questions → {recipient_name}'s answers", "#c6ff00", sq, ra)
+        _exchange_card(f"Your questions → {recipient_name}'s answers", "#c6ff00", sq, ra, delay_base=0)
         st.html("<div style='height:12px'></div>")
-        _exchange_card(f"{recipient_name}'s questions → Your answers", "#ff2d78", rq, sa)
+        _exchange_card(f"{recipient_name}'s questions → Your answers", "#ff2d78", rq, sa, delay_base=len(sq) * 0.12)
     else:
-        _exchange_card(f"{sender_name}'s questions → Your answers", "#ff2d78", sq, ra)
+        _exchange_card(f"{sender_name}'s questions → Your answers", "#ff2d78", sq, ra, delay_base=0)
         st.html("<div style='height:12px'></div>")
-        _exchange_card(f"Your questions → {sender_name}'s answers", "#c6ff00", rq, sa)
+        _exchange_card(f"Your questions → {sender_name}'s answers", "#c6ff00", rq, sa, delay_base=len(sq) * 0.12)
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
@@ -590,11 +886,13 @@ def confessions_page():
     # ── 2. Handle JS signals (PrintScreen redirect, countdown reload) ──────────
     _handle_query_params()
 
+    # ── 3. Glitch header ────────────────────────────────────────────────────────
     st.html("""
 <div style="border-bottom:1px solid var(--border);padding-bottom:20px;margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:4px;
               text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Vice Vault</div>
-  <div style="font-family:'Bebas Neue',sans-serif;font-size:48px;color:var(--text);
+  <div class="glitch-wrap" data-text="CONFESSIONS"
+       style="font-family:'Bebas Neue',sans-serif;font-size:48px;color:var(--text);
               letter-spacing:3px;line-height:0.95;">CONFESSIONS</div>
   <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--muted);margin-top:6px;">
     Mutual. Blind. Nobody blinks first — because neither of you can.
@@ -666,3 +964,4 @@ def confessions_page():
                 inject_countdown_banner(item["code"], _revealed_at_iso(item))
                 with st.expander(f"Exchange with {other} · {ts}", expanded=False):
                     _render_revealed(item, is_sender=is_s)
+                    _reaction_stamps(item["code"])
