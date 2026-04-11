@@ -384,6 +384,15 @@ def _render_setup():
         })
         st.session_state.dod_players = players
 
+    # ── Refresh vice summaries every render so stale/empty data gets updated ──
+    for p in players:
+        if p.get("is_host"):
+            p["vice_summary"] = _my_vice_summary()
+        else:
+            uid = p.get("user_id")
+            if uid:
+                p["vice_summary"] = _player_vice_summary(uid)
+
     # Render current players
     for i, p in enumerate(players):
         col_name, col_remove = st.columns([5, 1])
@@ -807,3 +816,5 @@ def do_or_drink_page():
 </div>
 """)
         _render_game_over()
+
+
