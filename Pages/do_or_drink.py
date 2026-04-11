@@ -170,11 +170,6 @@ def _my_full_summary() -> dict:
 # ─── GROUP PROFILE ────────────────────────────────────────────────────────────
 
 def _build_group_profile(players: list) -> dict:
-    """
-    Merge all players who HAVE data into one combined group profile.
-    Used so players without their own data still get dares shaped
-    by the group's collective vibe — not a generic fallback.
-    """
     combined_counts  = {}
     combined_details = {}
     quiz_profiles    = []
@@ -201,7 +196,6 @@ def _build_group_profile(players: list) -> dict:
 # ─── OPENAI CLIENT ────────────────────────────────────────────────────────────
 
 def _get_openai_client():
-    """Returns an OpenAI client or raises RuntimeError with a clear message."""
     try:
         from openai import OpenAI
     except ImportError:
@@ -231,7 +225,6 @@ _VICE_LABELS = {
 # ─── PROMPT HELPERS ───────────────────────────────────────────────────────────
 
 def _profile_text(vice_summary: dict) -> str:
-    """Convert a vice_summary into bullet-point profile text for the prompt."""
     counts  = vice_summary.get("counts", {})
     details = vice_summary.get("sample_details", {})
     quiz    = vice_summary.get("quiz", {})
@@ -241,10 +234,10 @@ def _profile_text(vice_summary: dict) -> str:
         label = _VICE_LABELS.get(vk, vk)
         d     = details.get(vk, {})
         extra = ""
-        if vk == "weed"    and d.get("method"):      extra = f", usually {d['method']}"
-        elif vk == "alcohol" and d.get("drink_type"): extra = f", drinks {d['drink_type']}"
-        elif vk == "sex"    and d.get("partner_type"):extra = f", partner type: {d['partner_type']}"
-        elif vk == "other"  and d.get("substance"):   extra = f" ({d['substance']})"
+        if vk == "weed"    and d.get("method"):       extra = f", usually {d['method']}"
+        elif vk == "alcohol" and d.get("drink_type"):  extra = f", drinks {d['drink_type']}"
+        elif vk == "sex"    and d.get("partner_type"): extra = f", partner type: {d['partner_type']}"
+        elif vk == "other"  and d.get("substance"):    extra = f" ({d['substance']})"
         lines.append(f"- {label} ({cnt} sessions{extra})")
 
     if quiz.get("profile_name"):
@@ -261,38 +254,56 @@ def _profile_text(vice_summary: dict) -> str:
 
 def _mode_line(mode: str) -> str:
     if mode == "regular":
-         return (
-            "Kinky mode — ADULTS ONLY. Be explicit, graphic, and unapologetically horny. "
-            "Reference their actual vices and desires directly. Dares should involve physical acts, "
-            "sexual confessions, body exposure, explicit roleplay, or things they'd be mortified to do in front of the group. "
-            "No euphemisms. No softening. If it doesn't make someone sweat, rewrite it. Caribbean heat — turn it up."
-        )
+        return "Regular mode — social, funny, mildly embarrassing. No explicit content. Caribbean lime vibes."
     if mode == "kinky":
-        return "Kinky mode — adults only, explicit, bold. No sanitising, no euphemisms. Let dem sweat."
-    return "Mixed mode — half social/funny, half adult/explicit. Caribbean energy."
+        return (
+            "Kinky mode — ADULTS ONLY. Every single dare must be seductive, physically charged, or explicitly sexual. "
+            "STRICTLY NO heat:1 cards — every card must be heat:2 or heat:3. "
+            "Dares should involve: slow touching of another player, whispering something sexually explicit in someone's ear, "
+            "a lap sit that lasts 30 seconds, tracing fingers down someone's neck or back, kissing someone's neck or shoulder, "
+            "describing out loud in detail what you'd do to someone in the room if you had them alone, "
+            "demonstrating how you kiss on a willing player, removing an item of clothing, "
+            "giving a slow sensual shoulder or back massage, or doing something that starts innocent and escalates into foreplay. "
+            "The tone is seductive, slow-burning, Caribbean heat — like the party is quietly becoming something else entirely. "
+            "Dares should feel like a progression — each one pulling the room deeper into that energy. "
+            "No euphemisms. No softening. No mild social dares hiding in this mode. "
+            "If reading the dare out loud wouldn't charge the air in the room, throw it out and write something that does."
+        )
+    return (
+        "Mixed mode — roughly half social/funny Caribbean energy, half explicitly seductive and sexual. "
+        "The kinky half must involve real physical contact or explicit confessions — no heat:1 in those cards. "
+        "Alternate the energy so the game builds from fun into something charged."
+    )
 
 
 def _dare_json_schema(mode: str) -> str:
-    heat3 = "explicit/adult" if mode != "regular" else "maximum chaos"
+    if mode == "kinky":
+        heat3_label = "explicit sexual act or forced confession"
+        heat2_label = "seductive physical contact or charged dare"
+        schema_note = "IMPORTANT: For kinky mode, heat:1 is FORBIDDEN. Every card must be heat:2 or heat:3."
+    else:
+        heat3_label = "maximum chaos or explicit"
+        heat2_label = "spicy/awkward"
+        schema_note = ""
     return f"""Return ONLY valid JSON — no markdown, no preamble.
 [
   {{
     "type": "DO" or "TRUTH",
     "dare": "The dare or question.",
-    "drink": "What they drink if they refuse — one short sentence.",
-    "heat": 1
+    "drink": "What they drink if they refuse — one short punishing sentence.",
+    "heat": 2
   }}
 ]
-heat: 1=mild/funny  2=spicy/awkward  3={heat3}"""
+heat: 1=mild/funny  2={heat2_label}  3={heat3_label}
+{schema_note}"""
 
 
 # ─── PROMPTS ──────────────────────────────────────────────────────────────────
 
-def _prompt_personalised(player_name: str, vice_summary: dict, mode: str, n: int = 9) -> str:
-    """Player HAS their own data — fully personalised."""
+def _prompt_personalised(player_name: str, vice_summary: dict, mode: str, n: int = 12) -> str:
     profile = _profile_text(vice_summary)
     return f"""You write dare cards for ViceVault "Do or Drink" — a Caribbean party game (Jamaica/English Caribbean).
-Tone: direct, funny, a little savage, real. Natural Caribbean cadence where it fits — not forced patois.
+Tone: direct, seductive where needed, a little savage, real. Natural Caribbean cadence where it fits — not forced patois.
 
 Player: {player_name}
 Their personal profile (use for subtle personalisation — a nod, not a direct callout):
@@ -301,20 +312,15 @@ Their personal profile (use for subtle personalisation — a nod, not a direct c
 {_mode_line(mode)}
 
 Write exactly {n} dare cards. Each is a DO (action) or TRUTH (question said out loud).
-Include a DRINK alternative if they refuse.
+Include a DRINK alternative if they refuse — make it sting a little.
 
 {_dare_json_schema(mode)}"""
 
 
-def _prompt_group_shaped(player_name: str, group_profile: dict, mode: str, n: int = 9) -> str:
-    """
-    Player has NO personal data but the group does.
-    Dares are written for this player but shaped by the group's collective vibe
-    so the whole game feels coherent — not a random generic batch.
-    """
+def _prompt_group_shaped(player_name: str, group_profile: dict, mode: str, n: int = 12) -> str:
     profile = _profile_text(group_profile)
     return f"""You write dare cards for ViceVault "Do or Drink" — a Caribbean party game (Jamaica/English Caribbean).
-Tone: direct, funny, a little savage, real. Natural Caribbean cadence where it fits — not forced patois.
+Tone: direct, seductive where needed, a little savage, real. Natural Caribbean cadence where it fits — not forced patois.
 
 Player: {player_name}
 This player has no personal data on file. The rest of their group has this combined profile.
@@ -327,23 +333,22 @@ Group profile:
 {_mode_line(mode)}
 
 Write exactly {n} dare cards for {player_name}. Each is a DO (action) or TRUTH (question said out loud).
-Include a DRINK alternative if they refuse.
+Include a DRINK alternative if they refuse — make it sting a little.
 
 {_dare_json_schema(mode)}"""
 
 
-def _prompt_generic(player_name: str, mode: str, n: int = 9) -> str:
-    """Nobody in the game has any data — pure Caribbean party energy."""
+def _prompt_generic(player_name: str, mode: str, n: int = 12) -> str:
     return f"""You write dare cards for ViceVault "Do or Drink" — a Caribbean party game (Jamaica/English Caribbean).
-Tone: direct, funny, a little savage, real. Natural Caribbean cadence where it fits — not forced patois.
+Tone: direct, seductive where needed, a little savage, real. Natural Caribbean cadence where it fits — not forced patois.
 
 Player: {player_name}
-No profile data for anyone in this game. Write sharp, funny, chaotic Caribbean party dares.
+No profile data for anyone in this game. Write sharp, charged, chaotic Caribbean party dares.
 
 {_mode_line(mode)}
 
 Write exactly {n} dare cards. Each is a DO (action) or TRUTH (question said out loud).
-Include a DRINK alternative if they refuse.
+Include a DRINK alternative if they refuse — make it sting a little.
 
 {_dare_json_schema(mode)}"""
 
@@ -357,7 +362,7 @@ def _parse_dares(raw: str) -> list:
     for d in dares:
         if isinstance(d, dict) and d.get("dare") and d.get("drink"):
             d.setdefault("type", "DO")
-            d.setdefault("heat", 1)
+            d.setdefault("heat", 2)
             valid.append(d)
     return valid
 
@@ -370,11 +375,6 @@ def _generate_dares_for_player(
     mode: str,
     client,
 ) -> list:
-    """
-    Pick the right prompt strategy and call OpenAI.
-    Errors are stored in session_state.dod_error so they surface on the
-    setup screen after rerun instead of disappearing silently.
-    """
     has_own = _has_data(vice_summary)
 
     if has_own:
@@ -388,11 +388,11 @@ def _generate_dares_for_player(
         strategy = "generic"
 
     try:
-        resp  = client.chat.completions.create(
-            model    = "gpt-4o-mini",
-            messages = [{"role": "user", "content": prompt}],
-            temperature = 0.9,
-            max_tokens  = 1400,
+        resp = client.chat.completions.create(
+            model       = "gpt-4o-mini",
+            messages    = [{"role": "user", "content": prompt}],
+            temperature = 0.95,
+            max_tokens  = 2800,
         )
         dares = _parse_dares(resp.choices[0].message.content)
         if dares:
@@ -417,17 +417,22 @@ def _fallback_dares(player_name: str, mode: str) -> list:
         {"type": "TRUTH", "dare": "On a scale of 1-10, how messy were you last weekend? The real number, not the polite one.", "drink": "Drink for lying to yourself.", "heat": 1},
     ]
     kinky = [
-        {"type": "TRUTH", "dare": "Tell the group the last time you did something you said you wouldn't — and exactly why.", "drink": "Drink and pretend you're innocent.", "heat": 3},
-        {"type": "DO",    "dare": "Send a voice note to your most recent contact saying 'I've been thinking about you.' Don't explain it.", "drink": "Drink if your heart rate just went up.", "heat": 3},
-        {"type": "TRUTH", "dare": "What's one thing about your sex life you've never told anyone in this room? Say it.", "drink": "Take two drinks and keep living that double life.", "heat": 3},
-        {"type": "DO",    "dare": "Let the person on your right set your Instagram status for 10 minutes. No veto.", "drink": "Drink if you're too scared of your own timeline.", "heat": 2},
+        {"type": "DO",    "dare": "Sit in someone's lap — your choice who — and stay there for the next two turns.", "drink": "Drink twice and sit on the floor alone.", "heat": 2},
+        {"type": "DO",    "dare": "Whisper something you'd actually do to someone in this room into their ear. They can't repeat it.", "drink": "Drink three fingers and live with the curiosity.", "heat": 3},
+        {"type": "DO",    "dare": "Give the person to your right a slow neck massage for 30 seconds. Make it count.", "drink": "Drink and let them know you're scared of your own hands.", "heat": 2},
+        {"type": "TRUTH", "dare": "Describe out loud, in detail, what you'd do to the most attractive person in this room if you had them alone tonight.", "drink": "Drink four fingers and keep that fantasy to yourself then.", "heat": 3},
+        {"type": "DO",    "dare": "Trace one finger slowly from the back of someone's neck down to their shoulder blade. They pick who does it to them.", "drink": "Drink and admit you're too scared to touch anyone.", "heat": 2},
+        {"type": "TRUTH", "dare": "What's the most explicit thing you've ever done with someone you just met? Say it out loud — no skipping details.", "drink": "Drink four fingers and keep lying to yourself that you're innocent.", "heat": 3},
+        {"type": "DO",    "dare": "Show the group how you actually kiss — demonstrate on a willing player. No peck. Do it properly.", "drink": "Drink and let everyone wonder what you're hiding.", "heat": 3},
+        {"type": "DO",    "dare": "Remove one item of clothing. Your choice what. It stays off for the next three turns.", "drink": "Drink three fingers and stay fully dressed like a coward.", "heat": 2},
+        {"type": "TRUTH", "dare": "Who in this room do you think about sexually? Say the name. No deflecting, no jokes.", "drink": "Drink five fingers and let us all guess.", "heat": 3},
+        {"type": "DO",    "dare": "Give someone in the room a compliment — but make it explicitly about their body. Say it slowly.", "drink": "Drink and admit you can't handle a little heat.", "heat": 2},
     ]
     if mode == "regular":
-        return random.sample(regular, min(6, len(regular)))
+        return random.sample(regular, min(12, len(regular)))
     elif mode == "kinky":
-        pool = kinky + regular[:2]
-        return random.sample(pool, min(6, len(pool)))
-    pool = regular[:3] + kinky[:3]
+        return random.sample(kinky, min(12, len(kinky)))
+    pool = regular[:6] + kinky[:6]
     random.shuffle(pool)
     return pool
 
@@ -477,7 +482,6 @@ def _render_setup():
 </div>
 """)
 
-    # Surface any errors from the previous generation attempt
     if st.session_state.dod_error:
         st.error(st.session_state.dod_error)
         st.session_state.dod_error = ""
@@ -504,8 +508,8 @@ def _render_setup():
 
     mode_descs = {
         "regular": "Social dares. Mild embarrassment. Caribbean lime energy. Safe(ish) for family gatherings.",
-        "kinky":   "Adult dares built from your actual vice data and desire profile. Explicit. Not for the faint-hearted.",
-        "both":    "Half social, half adult. The AI decides which way it goes based on your profile.",
+        "kinky":   "Seductive, physical, explicitly adult. Every dare is heat:2 or heat:3. No mild cards. Not for the faint-hearted.",
+        "both":    "Half social, half seductive and explicit. The game builds from funny to charged.",
     }
     st.html(f"""
 <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px;
@@ -534,7 +538,6 @@ def _render_setup():
         })
         st.session_state.dod_players = players
 
-    # Refresh summaries on every render
     for p in players:
         p["vice_summary"] = _player_vice_summary(p["user_id"]) if p.get("user_id") else {}
 
@@ -599,7 +602,6 @@ def _render_setup():
     st.html("<div style='height:20px'></div>")
     n_players = len(players)
 
-    # ── Group data status banner ──────────────────────────────────────────────
     if players:
         any_has  = any(_has_data(p.get("vice_summary", {})) for p in players)
         all_have = all(_has_data(p.get("vice_summary", {})) for p in players)
@@ -639,7 +641,7 @@ def _render_setup():
             border:1px solid var(--border); border-radius:3px; text-align:center;">
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted); line-height:1.9;">
-    AI reads each player's logged sessions and desire profile.<br>
+    12 dares per player · AI reads each player's logged sessions and desire profile.<br>
     Players without data are shaped by the group's combined vibe — the whole game stays personalised.
   </div>
 </div>
@@ -657,7 +659,6 @@ def _render_generating():
     ph_bar   = st.empty()
     ph_msg   = st.empty()
 
-    # Fail loudly before touching anything if the API key is missing
     try:
         client = _get_openai_client()
     except RuntimeError as e:
@@ -666,7 +667,6 @@ def _render_generating():
         st.rerun()
         return
 
-    # Build group profile from players who have data
     any_has_data  = any(_has_data(p.get("vice_summary", {})) for p in players)
     group_profile = _build_group_profile(players) if any_has_data else {}
 
@@ -675,7 +675,7 @@ def _render_generating():
         pct      = int((i / len(players)) * 90)
         has_d    = _has_data(p.get("vice_summary", {}))
         strategy = (
-            "personalising"   if has_d else
+            "personalising"       if has_d else
             "using group profile" if any_has_data else
             "generating generic"
         )
@@ -816,10 +816,10 @@ def _render_game():
     else:
         player     = cur["player"]
         dare       = cur["dare"]
-        heat       = dare.get("heat", 1)
+        heat       = dare.get("heat", 2)
         dtype      = dare.get("type", "DO")
-        heat_color = _HEAT_COLORS.get(heat, "var(--lime)")
-        heat_label = _HEAT_LABELS.get(heat, "mild")
+        heat_color = _HEAT_COLORS.get(heat, "var(--amber)")
+        heat_label = _HEAT_LABELS.get(heat, "spicy")
         type_icon  = _TYPE_ICONS.get(dtype, "⚡")
 
         st.html(f"""
@@ -863,20 +863,19 @@ def _render_game():
                 st.rerun()
         with col_skip:
             if st.button("Skip", use_container_width=True, key="btn_skip"):
+                # Put this card back at a random spot in the remaining deck
+                # then return to PULL A CARD — same player keeps their turn next draw
                 rem = len(st.session_state.dod_deck)
-                insert_at = random.randint(max(1, rem // 2), max(1, rem))
                 try:
                     dare_idx = dares[player].index(dare)
                 except ValueError:
                     dare_idx = 0
-                st.session_state.dod_deck.insert(insert_at, {"player": player, "dare_idx": dare_idx})
-                if st.session_state.dod_deck:
-                    nxt      = st.session_state.dod_deck.pop(0)
-                    np_name  = nxt["player"]
-                    np_dare  = dares[np_name][nxt["dare_idx"]]
-                    st.session_state.dod_cur_card = {"player": np_name, "dare": np_dare}
-                else:
-                    st.session_state.dod_cur_card = None
+                insert_at = random.randint(max(1, rem // 3), max(1, rem))
+                st.session_state.dod_deck.insert(
+                    insert_at, {"player": player, "dare_idx": dare_idx}
+                )
+                # Clear current card — go back to PULL A CARD, don't auto-draw
+                st.session_state.dod_cur_card = None
                 st.rerun()
 
     # Recent history
