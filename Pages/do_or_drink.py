@@ -393,6 +393,25 @@ def _render_setup():
             if uid:
                 p["vice_summary"] = _player_vice_summary(uid)
 
+
+    # ── DEBUG (remove once confirmed working) ──────────────────────────────────
+    with st.expander("🔧 Debug info"):
+        vice_log = st.session_state.get("vice_log", [])
+        st.write(f"**vice_log in session:** {len(vice_log)} entries")
+        if vice_log:
+            st.write("**Sample entry:**", vice_log[0])
+        for p in players:
+            st.write(f"**{p['username']}** (user_id={p.get('user_id')}) → summary:", p.get("vice_summary"))
+            if not p.get("is_host") and p.get("user_id"):
+                try:
+                    import database as db
+                    raw = db.load_vice_log(p["user_id"])
+                    st.write(f"  DB returned {len(raw)} entries")
+                    if raw:
+                        st.write("  First DB entry:", raw[0])
+                except Exception as e:
+                    st.write(f"  DB error: {e}")
+
     # Render current players
     for i, p in enumerate(players):
         col_name, col_remove = st.columns([5, 1])
@@ -816,5 +835,3 @@ def do_or_drink_page():
 </div>
 """)
         _render_game_over()
-
-
