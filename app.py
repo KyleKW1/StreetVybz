@@ -8,25 +8,19 @@ from password_reset import forgot_password_page, reset_password_page, handle_res
 # ─── DB SYNC HELPERS ──────────────────────────────────────────────────────────
 
 def _bootstrap_db():
-    """Create missing tables silently on first authenticated load."""
     try:
         import database as db
         db.ensure_tables()
     except Exception:
-        pass   # offline / no DB — app still works with session_state only
+        pass
 
 
 def _load_vice_log_from_db(user_id: int):
-    """
-    Populate st.session_state.vice_log from the database.
-    Only runs once per login session (guarded by vice_log_loaded flag).
-    """
     if st.session_state.get("vice_log_loaded"):
         return
     try:
         import database as db
         entries = db.load_vice_log(user_id)
-        # DB entries are newest-first; session_state expects oldest-first (appended order)
         st.session_state.vice_log = list(reversed(entries))
     except Exception:
         if "vice_log" not in st.session_state:
@@ -53,43 +47,39 @@ def render_sidebar():
 <div style="height:1px; background:#2a2a35; margin-bottom:12px;"></div>
 """, unsafe_allow_html=True)
 
-        if st.button("◈  Dashboard",              use_container_width=True):
+        if st.button("◈  Dashboard",              use_container_width=True, key="sb_dashboard"):
             st.session_state.selected_feature = 'stats'
             st.rerun()
-        if st.button("＋  Log Session",            use_container_width=True):
+        if st.button("＋  Log Session",            use_container_width=True, key="sb_log"):
             st.session_state.selected_feature = 'log'
             st.rerun()
-        if st.button("≡  History",                 use_container_width=True):
+        if st.button("≡  History",                 use_container_width=True, key="sb_history"):
             st.session_state.selected_feature = 'history'
             st.rerun()
-        if st.button("◉  Analytics",               use_container_width=True):
+        if st.button("◉  Analytics",               use_container_width=True, key="sb_analytics"):
             st.session_state.selected_feature = 'analytics'
             st.rerun()
 
         st.markdown("<div style='height:1px; background:#2a2a35; margin:12px 0;'></div>",
                     unsafe_allow_html=True)
 
-        if st.button("⚡  Read Between The Lines", use_container_width=True):
+        if st.button("⚡  Read Between The Lines", use_container_width=True, key="sb_wwyd"):
             st.session_state.selected_feature = 'wwyd'
             st.rerun()
-
-        if st.button("📍  Kingston Hot Spots",     use_container_width=True):
+        if st.button("📍  Kingston Hot Spots",     use_container_width=True, key="sb_hotspots"):
             st.session_state.selected_feature = 'hotspots'
             st.rerun()
-
-        if st.button("🃏  Do or Drink",            use_container_width=True):
+        if st.button("🃏  Do or Drink",            use_container_width=True, key="sb_dod"):
             st.session_state.selected_feature = 'do_or_drink'
             st.rerun()
-
-        if st.button(" Confessions",              use_container_width=True):
+        if st.button(" Confessions",              use_container_width=True, key="sb_confessions"):
             st.session_state.selected_feature = 'confessions'
             st.rerun()
 
         st.markdown("<div style='height:1px; background:#2a2a35; margin:12px 0;'></div>",
                     unsafe_allow_html=True)
 
-        if st.button("→  Logout",                  use_container_width=True):
-            # Clear sync flag so next login re-fetches
+        if st.button("→  Logout",                  use_container_width=True, key="sb_logout"):
             st.session_state.pop("vice_log_loaded", None)
             logout()
 
@@ -111,9 +101,7 @@ def main():
         if key not in st.session_state:
             st.session_state[key] = default
 
-    # ── MUST be called before any page routing ─────────────────────────────
     handle_reset_token_from_url()
-
     apply_custom_styles()
 
     if not st.session_state.authenticated:
@@ -127,7 +115,6 @@ def main():
         else:
             login_page()
     else:
-        # ── First authenticated run ─────────────────────────────────────────
         user    = st.session_state.get("user", {})
         user_id = user.get("id") if user else None
 
@@ -141,40 +128,27 @@ def main():
         if feature == 'log':
             from Pages.dashboard import log_session_page
             log_session_page()
-
         elif feature == 'history':
             from Pages.dashboard import history_page
             history_page()
-
         elif feature == 'analytics':
             from Pages.analytics import analytics_page
             analytics_page()
-
         elif feature == 'wwyd':
             from Pages.what_would_you_do import what_would_you_do_page
             what_would_you_do_page()
-
         elif feature == 'hotspots':
             from Pages.hotspots import hotspots_page
             hotspots_page()
-
         elif feature == 'confessions':
             from Pages.confession import confessions_page
             confessions_page()
-
         elif feature == 'do_or_drink':
             from Pages.do_or_drink import do_or_drink_page
             do_or_drink_page()
-
-        else:  # 'stats' or default
+        else:
             from Pages.dashboard import stats_page
             stats_page()
-
-
-if __name__ == "__main__":
-    main()
-
-
 
 
 if __name__ == "__main__":
