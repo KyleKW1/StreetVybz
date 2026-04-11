@@ -119,22 +119,6 @@ def _me():
     return u.get("username", "You"), u.get("id")
 
 
-def _my_vice_summary() -> dict:
-    """Summarise the current user's vice log into a compact profile dict."""
-    log = st.session_state.get("vice_log", [])
-    if not log:
-        return {}
-    counts = {}
-    details = {}
-    for e in log:
-        v = e["vice"]
-        counts[v] = counts.get(v, 0) + 1
-        data = e.get("data", {})
-        if v not in details:
-            details[v] = data
-    return {"counts": counts, "sample_details": details}
-
-
 def _player_vice_summary(user_id: int) -> dict:
     """Fetch vice summary from DB for any player."""
     try:
@@ -164,8 +148,9 @@ _VICE_LABELS = {
 }
 
 def _build_dare_prompt(player_name: str, vice_summary: dict, mode: str, n: int = 6) -> str:
-    counts = vice_summary.get("counts", {})
+    counts  = vice_summary.get("counts", {})
     details = vice_summary.get("sample_details", {})
+    quiz    = vice_summary.get("quiz", {})
 
     vice_lines = []
     for vk, cnt in counts.items():
@@ -182,7 +167,20 @@ def _build_dare_prompt(player_name: str, vice_summary: dict, mode: str, n: int =
             extra = f" ({d['substance']})"
         vice_lines.append(f"  - {label}: {cnt} logged sessions{extra}")
 
-    vice_str = "\n".join(vice_lines) if vice_lines else "  - No logged sessions yet (new to the vault)"
+    vice_str = "\n".join(vice_lines) if vice_lines else "  - No logged sessions yet"
+
+    # Desire profile from Read Between The Lines quiz
+    quiz_str = ""
+    if quiz.get("profile_name"):
+        dim_scores = quiz.get("dim_scores", {})
+        top_dims = sorted(dim_scores.items(), key=lambda x: -float(x[1]))[:3]
+        dim_str = ", ".join(f"{d}: {v}%" for d, v in top_dims)
+        quiz_str = f"""
+Desire profile (from their quiz): {quiz['profile_name']} — "{quiz.get('profile_meta','')}"
+Top dimensions: {dim_str}
+"""
+        if quiz.get("top_recs"):
+            quiz_str += f"Their exploration recs: {'; '.join(quiz['top_recs'][:2])}\n"
 
     if mode == "regular":
         mode_instruction = """MODE: Regular — keep it social, funny, mildly embarrassing. 
@@ -201,8 +199,9 @@ Caribbean energy — some make them laugh, some make them blush."""
 This is a Caribbean party app (Jamaica/English Caribbean). The tone is direct, funny, a little savage, and real.
 
 Player profile for {player_name}:
+Vice log:
 {vice_str}
-
+{quiz_str}
 {mode_instruction}
 
 Write exactly {n} dare cards for {player_name}. Each dare must:
@@ -379,7 +378,7 @@ def _render_setup():
         players.append({
             "username":     my_name,
             "user_id":      my_id,
-            "vice_summary": _my_vice_summary(),
+            "vice_summary": _my_full_summary(),
             "is_host":      True,
         })
         st.session_state.dod_players = players
@@ -387,7 +386,7 @@ def _render_setup():
     # ── Refresh vice summaries every render so stale/empty data gets updated ──
     for p in players:
         if p.get("is_host"):
-            p["vice_summary"] = _my_vice_summary()
+            p["vice_summary"] = _my_full_summary()
         else:
             uid = p.get("user_id")
             if uid:
@@ -419,10 +418,14 @@ def _render_setup():
             host_badge = " · HOST" if p.get("is_host") else ""
             vs = p.get("vice_summary", {})
             counts = vs.get("counts", {})
-            vice_str = "  ·  ".join(
+            vice_parts = [
                 f"{_VICE_LABELS.get(vk, vk)}: {cnt}"
                 for vk, cnt in counts.items()
-            ) or "No data yet"
+            ]
+            quiz = vs.get("quiz", {})
+            if quiz.get("profile_name"):
+                vice_parts.append(f"quiz: {quiz['profile_name']}")
+            vice_str = "  ·  ".join(vice_parts) or "No data logged yet"
             st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:2px solid {'var(--lime)' if p.get('is_host') else 'var(--border)'};
@@ -522,13 +525,18 @@ def _render_generating():
     ph_bar.progress(100)
     ph_msg.caption("Shuffling the deck…")
 
-    # Build flat shuffled deck — each player gets each dare once
+    # Round-robin deck: each round has one card per player (shuffled within the round)
+    # This prevents one player being asked 3x before another gets a turn
+    max_dares = max((len(all_dares[p["username"]]) for p in players), default=0)
     deck = []
-    for p in players:
-        username = p["username"]
-        for idx, _ in enumerate(all_dares[username]):
-            deck.append({"player": username, "dare_idx": idx})
-    random.shuffle(deck)
+    for round_idx in range(max_dares):
+        round_cards = []
+        for p in players:
+            username = p["username"]
+            if round_idx < len(all_dares[username]):
+                round_cards.append({"player": username, "dare_idx": round_idx})
+        random.shuffle(round_cards)   # randomise order within each round
+        deck.extend(round_cards)
 
     st.session_state.dod_dares    = all_dares
     st.session_state.dod_deck     = deck
@@ -690,11 +698,22 @@ def _render_game():
                 st.rerun()
         with col_skip:
             if st.button("Skip", use_container_width=True, key="btn_skip"):
-                # Put back in deck at random position
-                pos = random.randint(0, len(st.session_state.dod_deck))
-                skip_ref = {"player": player, "dare_idx": dares[player].index(dare) if dare in dares[player] else 0}
-                st.session_state.dod_deck.insert(pos, skip_ref)
-                st.session_state.dod_cur_card = None
+                # Shuffle this card back into the latter half of the deck
+                remaining_len = len(st.session_state.dod_deck)
+                insert_at = random.randint(max(1, remaining_len // 2), max(1, remaining_len))
+                try:
+                    dare_idx = dares[player].index(dare)
+                except ValueError:
+                    dare_idx = 0
+                st.session_state.dod_deck.insert(insert_at, {"player": player, "dare_idx": dare_idx})
+                # Auto-draw next card so the game keeps flowing
+                if st.session_state.dod_deck:
+                    next_ref = st.session_state.dod_deck.pop(0)
+                    next_player = next_ref["player"]
+                    next_dare = dares[next_player][next_ref["dare_idx"]]
+                    st.session_state.dod_cur_card = {"player": next_player, "dare": next_dare}
+                else:
+                    st.session_state.dod_cur_card = None
                 st.rerun()
 
     # ── Recent history ─────────────────────────────────────────────────────────
