@@ -189,73 +189,69 @@ def _build_dare_prompt(player_name: str, vice_summary: dict, mode: str, n: int =
     details = vice_summary.get("sample_details", {})
     quiz    = vice_summary.get("quiz", {})
 
-    vice_lines = []
+    # Build personality colour from whatever data exists
+    profile_lines = []
+
     for vk, cnt in counts.items():
         label = _VICE_LABELS.get(vk, vk)
-        extra = ""
         d = details.get(vk, {})
+        extra = ""
         if vk == "weed" and d.get("method"):
-            extra = f" (usually {d['method']}, intensity {d.get('intensity','?')}/10)"
+            extra = f", usually {d['method']}"
         elif vk == "alcohol" and d.get("drink_type"):
-            extra = f" (prefers {d['drink_type']}, ~{d.get('drinks','?')} drinks/session)"
+            extra = f", drinks {d['drink_type']}"
         elif vk == "sex" and d.get("partner_type"):
-            extra = f" (partner: {d['partner_type']}, regret level {d.get('regret','?')}/10)"
+            extra = f", partner type: {d['partner_type']}"
         elif vk == "other" and d.get("substance"):
             extra = f" ({d['substance']})"
-        vice_lines.append(f"  - {label}: {cnt} logged sessions{extra}")
+        profile_lines.append(f"- {label} ({cnt} sessions{extra})")
 
-    vice_str = "\n".join(vice_lines) if vice_lines else "  - No logged sessions yet"
-
-    # Desire profile from Read Between The Lines quiz
-    quiz_str = ""
     if quiz.get("profile_name"):
         dim_scores = quiz.get("dim_scores", {})
-        top_dims = sorted(dim_scores.items(), key=lambda x: -float(x[1]))[:3]
+        top_dims = sorted(dim_scores.items(), key=lambda x: -float(x[1]))[:2]
         dim_str = ", ".join(f"{d}: {v}%" for d, v in top_dims)
-        quiz_str = f"""
-Desire profile (from their quiz): {quiz['profile_name']} — "{quiz.get('profile_meta', '')}"
-Top dimensions: {dim_str}
-"""
+        profile_lines.append(f"- Desire profile: {quiz['profile_name']} — {quiz.get('profile_meta', '')} (top dims: {dim_str})")
+
+    has_profile = bool(profile_lines)
+    profile_str = "\n".join(profile_lines) if has_profile else "No data available."
 
     if mode == "regular":
-        mode_instruction = """MODE: Regular — keep it social, funny, mildly embarrassing.
-No explicit sexual content. Think Caribbean lime vibes — roast them gently, make them do something awkward,
-reveal something mild about their habits. Energy: chaotic good."""
+        mode_instruction = "Regular mode — social, funny, mildly embarrassing. No explicit content. Caribbean lime vibes, chaotic good energy."
     elif mode == "kinky":
-        mode_instruction = """MODE: Kinky — adults-only dares and truth questions. Explicit, bold,
-sexual themes are fair game. Use their vice data and desire profile to construct intimate dares.
-Caribbean directness — no sanitising, no euphemisms. Energy: let dem sweat."""
-    else:  # both
-        mode_instruction = """MODE: Mixed — alternate between social/funny dares and bold adult ones.
-Roughly half regular, half kinky. Let the vice data and desire profile guide which direction each dare goes.
-Caribbean energy — some make them laugh, some make them blush."""
+        mode_instruction = "Kinky mode — adults only, explicit, bold. No sanitising, no euphemisms. Let dem sweat."
+    else:
+        mode_instruction = "Mixed mode — roughly half social/funny, half adult/explicit. Caribbean energy — some make them laugh, some make them squirm."
 
-    return f"""You write dare cards for ViceVault's "Do or Drink" game.
-This is a Caribbean party app (Jamaica/English Caribbean). The tone is direct, funny, a little savage, and real.
+    personality_instruction = (
+        "Use their profile to give the dares personality and flavour — let it shape the angle, not the whole dare. "
+        "A subtle nod to their habits is enough. Don't make every dare a direct callout."
+        if has_profile else
+        "No profile data — just write sharp, funny, chaotic dares for a Caribbean party. Keep it entertaining."
+    )
 
-Player profile for {player_name}:
-Vice log:
-{vice_str}
-{quiz_str}
+    return f"""You write dare cards for ViceVault's "Do or Drink" — a Caribbean party game (Jamaica/English Caribbean).
+Tone: direct, funny, a little savage, real. Natural Caribbean cadence where it fits — not forced patois.
+
+Player: {player_name}
+Profile:
+{profile_str}
+
 {mode_instruction}
 
-Write exactly {n} dare cards for {player_name}. Each dare must:
-- Be SPECIFIC to their actual logged behaviour — reference their real habits, counts, or details
-- Where a desire profile exists, use it to shape the angle of the dare (e.g. high control dim = dare about who's in charge)
-- Sound Caribbean / Jamaican English where natural (not forced patois, just that cadence and directness)
-- Be a "DO" (physical/social action) OR a "TRUTH" (honest question they must answer out loud)
-- Have a "DRINK" alternative — what they drink if they refuse
-- Be 1-2 sentences max — punchy, not wordy
+{personality_instruction}
 
-{f"For kinky dares: be explicit, reference their vice/desire data directly. Adults-only, no softening." if mode != "regular" else ""}
+Write exactly {n} dare cards. Each must be:
+- A "DO" (action) or "TRUTH" (honest question said out loud)
+- 1-2 sentences, punchy
+- Include a "DRINK" alternative if they refuse
 
 Return ONLY valid JSON. No markdown. No preamble.
 
 [
   {{
     "type": "DO" or "TRUTH",
-    "dare": "The dare or truth question text.",
-    "drink": "What they drink if they refuse — 1 short sentence.",
+    "dare": "The dare or question.",
+    "drink": "What they drink if they refuse — one short sentence.",
     "heat": 1-3
   }}
 ]
