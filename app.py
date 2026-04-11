@@ -77,7 +77,11 @@ def render_sidebar():
             st.session_state.selected_feature = 'hotspots'
             st.rerun()
 
-        if st.button(" Confessions", use_container_width=True):
+        if st.button("🃏  Do or Drink",            use_container_width=True):
+            st.session_state.selected_feature = 'do_or_drink'
+            st.rerun()
+
+        if st.button(" Confessions",              use_container_width=True):
             st.session_state.selected_feature = 'confessions'
             st.rerun()
 
@@ -118,7 +122,7 @@ def main():
             register_page()
         elif page == 'forgot':
             forgot_password_page()
-        elif page == 'reset_password':          # ← fixed: was 'reset'
+        elif page == 'reset_password':
             reset_password_page()
         else:
             login_page()
@@ -153,15 +157,22 @@ def main():
         elif feature == 'hotspots':
             from Pages.hotspots import hotspots_page
             hotspots_page()
-            
+
         elif feature == 'confessions':
             from Pages.confession import confessions_page
-            confessions_page()            
+            confessions_page()
+
+        elif feature == 'do_or_drink':
+            from Pages.do_or_drink import do_or_drink_page
+            do_or_drink_page()
 
         else:  # 'stats' or default
             from Pages.dashboard import stats_page
             stats_page()
 
+
+if __name__ == "__main__":
+    main()
 
 
 
