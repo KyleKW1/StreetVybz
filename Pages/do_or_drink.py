@@ -261,17 +261,17 @@ heat: 1 = mild/funny, 2 = spicy/awkward, 3 = {'"explicit/adult"' if mode != "reg
 
 
 def _generate_dares_for_player(player_name: str, vice_summary: dict, mode: str) -> list:
-    """Call Anthropic API to generate dares. Falls back to curated defaults."""
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+        from openai import OpenAI
+        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
         prompt = _build_dare_prompt(player_name, vice_summary, mode, n=6)
-        resp = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1200,
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
+            temperature=0.9,
+            max_tokens=1200,
         )
-        raw = resp.content[0].text.strip().replace("```json", "").replace("```", "").strip()
+        raw = resp.choices[0].message.content.strip().replace("```json", "").replace("```", "").strip()
         dares = json.loads(raw)
         valid = []
         for d in dares:
@@ -280,7 +280,8 @@ def _generate_dares_for_player(player_name: str, vice_summary: dict, mode: str) 
                 d.setdefault("heat", 1)
                 valid.append(d)
         return valid if valid else _fallback_dares(player_name, mode)
-    except Exception:
+    except Exception as e:
+        st.warning(f"API error for {player_name}: {e}")
         return _fallback_dares(player_name, mode)
 
 
