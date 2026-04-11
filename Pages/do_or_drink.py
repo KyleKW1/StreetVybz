@@ -261,7 +261,12 @@ def _profile_text(vice_summary: dict) -> str:
 
 def _mode_line(mode: str) -> str:
     if mode == "regular":
-        return "Regular mode — social, funny, mildly embarrassing. No explicit content. Caribbean lime vibes."
+         return (
+            "Kinky mode — ADULTS ONLY. Be explicit, graphic, and unapologetically horny. "
+            "Reference their actual vices and desires directly. Dares should involve physical acts, "
+            "sexual confessions, body exposure, explicit roleplay, or things they'd be mortified to do in front of the group. "
+            "No euphemisms. No softening. If it doesn't make someone sweat, rewrite it. Caribbean heat — turn it up."
+        )
     if mode == "kinky":
         return "Kinky mode — adults only, explicit, bold. No sanitising, no euphemisms. Let dem sweat."
     return "Mixed mode — half social/funny, half adult/explicit. Caribbean energy."
@@ -283,7 +288,7 @@ heat: 1=mild/funny  2=spicy/awkward  3={heat3}"""
 
 # ─── PROMPTS ──────────────────────────────────────────────────────────────────
 
-def _prompt_personalised(player_name: str, vice_summary: dict, mode: str, n: int = 6) -> str:
+def _prompt_personalised(player_name: str, vice_summary: dict, mode: str, n: int = 9) -> str:
     """Player HAS their own data — fully personalised."""
     profile = _profile_text(vice_summary)
     return f"""You write dare cards for ViceVault "Do or Drink" — a Caribbean party game (Jamaica/English Caribbean).
@@ -301,7 +306,7 @@ Include a DRINK alternative if they refuse.
 {_dare_json_schema(mode)}"""
 
 
-def _prompt_group_shaped(player_name: str, group_profile: dict, mode: str, n: int = 6) -> str:
+def _prompt_group_shaped(player_name: str, group_profile: dict, mode: str, n: int = 9) -> str:
     """
     Player has NO personal data but the group does.
     Dares are written for this player but shaped by the group's collective vibe
@@ -327,7 +332,7 @@ Include a DRINK alternative if they refuse.
 {_dare_json_schema(mode)}"""
 
 
-def _prompt_generic(player_name: str, mode: str, n: int = 6) -> str:
+def _prompt_generic(player_name: str, mode: str, n: int = 9) -> str:
     """Nobody in the game has any data — pure Caribbean party energy."""
     return f"""You write dare cards for ViceVault "Do or Drink" — a Caribbean party game (Jamaica/English Caribbean).
 Tone: direct, funny, a little savage, real. Natural Caribbean cadence where it fits — not forced patois.
