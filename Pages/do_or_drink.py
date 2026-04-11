@@ -1,6 +1,6 @@
 """
 Pages/do_or_drink.py — Do or Drink: ViceVault Edition
-AI generates personalized dares from each player's vice log + confession profile.
+AI generates personalized dares from each player's vice log + desire profile.
 Host picks the vibe: Regular, Kinky, or Both.
 Caribbean English throughout — no generic Western party game energy.
 """
@@ -120,22 +120,58 @@ def _me():
 
 
 def _player_vice_summary(user_id: int) -> dict:
-    """Fetch vice summary from DB for any player."""
+    """Fetch vice log + desire profile from DB for any player."""
     try:
         import database as db
+        import json as _json
+
         entries = db.load_vice_log(user_id)
-        if not entries:
-            return {}
-        counts = {}
-        details = {}
+        counts, details = {}, {}
         for e in entries:
             v = e["vice"]
             counts[v] = counts.get(v, 0) + 1
             if v not in details:
                 details[v] = e.get("data", {})
-        return {"counts": counts, "sample_details": details}
+
+        summary = {"counts": counts, "sample_details": details}
+
+        # Pull desire profile from Read Between The Lines quiz
+        conn = db.create_connection()
+        if conn:
+            try:
+                cur = conn.cursor(dictionary=True)
+                cur.execute(
+                    """SELECT profile_name, profile_meta, dim_scores
+                       FROM quiz_results
+                       WHERE user_id = %s AND quiz_type = 'read_between_lines'
+                       ORDER BY completed_at DESC LIMIT 1""",
+                    (user_id,)
+                )
+                row = cur.fetchone()
+                cur.close()
+                if row:
+                    dim_scores = row.get("dim_scores")
+                    if isinstance(dim_scores, str):
+                        try:
+                            dim_scores = _json.loads(dim_scores)
+                        except Exception:
+                            dim_scores = {}
+                    summary["quiz"] = {
+                        "profile_name": row.get("profile_name", ""),
+                        "profile_meta": row.get("profile_meta", ""),
+                        "dim_scores":   dim_scores or {},
+                    }
+            finally:
+                conn.close()
+
+        return summary
     except Exception:
         return {}
+
+
+def _my_full_summary() -> dict:
+    _, my_id = _me()
+    return _player_vice_summary(my_id) if my_id else {}
 
 
 # ─── AI DARE GENERATOR ────────────────────────────────────────────────────────
@@ -146,6 +182,7 @@ _VICE_LABELS = {
     "sex":     "unprotected sex",
     "other":   "other substances",
 }
+
 
 def _build_dare_prompt(player_name: str, vice_summary: dict, mode: str, n: int = 6) -> str:
     counts  = vice_summary.get("counts", {})
@@ -176,26 +213,24 @@ def _build_dare_prompt(player_name: str, vice_summary: dict, mode: str, n: int =
         top_dims = sorted(dim_scores.items(), key=lambda x: -float(x[1]))[:3]
         dim_str = ", ".join(f"{d}: {v}%" for d, v in top_dims)
         quiz_str = f"""
-Desire profile (from their quiz): {quiz['profile_name']} — "{quiz.get('profile_meta','')}"
+Desire profile (from their quiz): {quiz['profile_name']} — "{quiz.get('profile_meta', '')}"
 Top dimensions: {dim_str}
 """
-        if quiz.get("top_recs"):
-            quiz_str += f"Their exploration recs: {'; '.join(quiz['top_recs'][:2])}\n"
 
     if mode == "regular":
-        mode_instruction = """MODE: Regular — keep it social, funny, mildly embarrassing. 
-No explicit sexual content. Think Caribbean lime vibes — roast them gently, make them do something awkward, 
+        mode_instruction = """MODE: Regular — keep it social, funny, mildly embarrassing.
+No explicit sexual content. Think Caribbean lime vibes — roast them gently, make them do something awkward,
 reveal something mild about their habits. Energy: chaotic good."""
     elif mode == "kinky":
-        mode_instruction = """MODE: Kinky — adults-only dares and truth questions. Explicit, bold, 
-sexual themes are fair game. Use their vice data to construct intimate dares (e.g. if they log unprotected sex a lot, 
-go there). Caribbean directness — no sanitising, no euphemisms. Energy: let dem sweat."""
+        mode_instruction = """MODE: Kinky — adults-only dares and truth questions. Explicit, bold,
+sexual themes are fair game. Use their vice data and desire profile to construct intimate dares.
+Caribbean directness — no sanitising, no euphemisms. Energy: let dem sweat."""
     else:  # both
-        mode_instruction = """MODE: Mixed — alternate between social/funny dares and bold adult ones. 
-Roughly half regular, half kinky. Let the vice data guide which direction each dare goes. 
+        mode_instruction = """MODE: Mixed — alternate between social/funny dares and bold adult ones.
+Roughly half regular, half kinky. Let the vice data and desire profile guide which direction each dare goes.
 Caribbean energy — some make them laugh, some make them blush."""
 
-    return f"""You write dare cards for ViceVault's "Do or Drink" game. 
+    return f"""You write dare cards for ViceVault's "Do or Drink" game.
 This is a Caribbean party app (Jamaica/English Caribbean). The tone is direct, funny, a little savage, and real.
 
 Player profile for {player_name}:
@@ -206,12 +241,13 @@ Vice log:
 
 Write exactly {n} dare cards for {player_name}. Each dare must:
 - Be SPECIFIC to their actual logged behaviour — reference their real habits, counts, or details
+- Where a desire profile exists, use it to shape the angle of the dare (e.g. high control dim = dare about who's in charge)
 - Sound Caribbean / Jamaican English where natural (not forced patois, just that cadence and directness)
 - Be a "DO" (physical/social action) OR a "TRUTH" (honest question they must answer out loud)
 - Have a "DRINK" alternative — what they drink if they refuse
 - Be 1-2 sentences max — punchy, not wordy
 
-{f"For kinky dares: be explicit, reference their sex/vice data directly. Adults-only, no softening." if mode != "regular" else ""}
+{f"For kinky dares: be explicit, reference their vice/desire data directly. Adults-only, no softening." if mode != "regular" else ""}
 
 Return ONLY valid JSON. No markdown. No preamble.
 
@@ -241,7 +277,6 @@ def _generate_dares_for_player(player_name: str, vice_summary: dict, mode: str) 
         )
         raw = resp.content[0].text.strip().replace("```json", "").replace("```", "").strip()
         dares = json.loads(raw)
-        # validate structure
         valid = []
         for d in dares:
             if isinstance(d, dict) and d.get("dare") and d.get("drink"):
@@ -285,13 +320,13 @@ def _init():
     defaults = {
         "dod_phase":        "setup",
         "dod_mode":         "regular",
-        "dod_players":      [],   # list of {username, user_id, vice_summary}
+        "dod_players":      [],
         "dod_player_input": "",
-        "dod_dares":        {},   # {username: [dare, ...]}
-        "dod_deck":         [],   # shuffled list of {player, dare_idx}
-        "dod_cur_card":     None, # {player, dare}
-        "dod_scores":       {},   # {username: {drinks, done}}
-        "dod_history":      [],   # list of resolved cards
+        "dod_dares":        {},
+        "dod_deck":         [],
+        "dod_cur_card":     None,
+        "dod_scores":       {},
+        "dod_history":      [],
         "dod_loading_msg":  "",
         "dod_error":        "",
     }
@@ -330,7 +365,7 @@ def _render_setup():
         st.error(st.session_state.dod_error)
         st.session_state.dod_error = ""
 
-    # ── Game mode ──────────────────────────────────────────────────────────────
+    # ── Game mode ─────────────────────────────────────────────────────────────
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
             text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Choose the vibe</div>
@@ -352,7 +387,7 @@ def _render_setup():
 
     mode_descs = {
         "regular": "Social dares. Mild embarrassment. Caribbean lime energy. Safe(ish) for family gatherings.",
-        "kinky":   "Adult dares built from your actual vice data. Explicit. Not for the faint-hearted.",
+        "kinky":   "Adult dares built from your actual vice data and desire profile. Explicit. Not for the faint-hearted.",
         "both":    "Half social, half adult. The AI decides which way it goes based on your profile.",
     }
     st.html(f"""
@@ -383,33 +418,9 @@ def _render_setup():
         })
         st.session_state.dod_players = players
 
-    # ── Refresh vice summaries every render so stale/empty data gets updated ──
+    # Refresh summaries every render so stale data gets updated
     for p in players:
-        if p.get("is_host"):
-            p["vice_summary"] = _my_full_summary()
-        else:
-            uid = p.get("user_id")
-            if uid:
-                p["vice_summary"] = _player_vice_summary(uid)
-
-
-    # ── DEBUG (remove once confirmed working) ──────────────────────────────────
-    with st.expander("🔧 Debug info"):
-        vice_log = st.session_state.get("vice_log", [])
-        st.write(f"**vice_log in session:** {len(vice_log)} entries")
-        if vice_log:
-            st.write("**Sample entry:**", vice_log[0])
-        for p in players:
-            st.write(f"**{p['username']}** (user_id={p.get('user_id')}) → summary:", p.get("vice_summary"))
-            if not p.get("is_host") and p.get("user_id"):
-                try:
-                    import database as db
-                    raw = db.load_vice_log(p["user_id"])
-                    st.write(f"  DB returned {len(raw)} entries")
-                    if raw:
-                        st.write("  First DB entry:", raw[0])
-                except Exception as e:
-                    st.write(f"  DB error: {e}")
+        p["vice_summary"] = _player_vice_summary(p["user_id"]) if p.get("user_id") else {}
 
     # Render current players
     for i, p in enumerate(players):
@@ -424,7 +435,7 @@ def _render_setup():
             ]
             quiz = vs.get("quiz", {})
             if quiz.get("profile_name"):
-                vice_parts.append(f"quiz: {quiz['profile_name']}")
+                vice_parts.append(f"profile: {quiz['profile_name']}")
             vice_str = "  ·  ".join(vice_parts) or "No data logged yet"
             st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
@@ -464,11 +475,10 @@ def _render_setup():
                 st.error(f"Can't find '{uname}' — they need a ViceVault account.")
             else:
                 uid = user["id"]
-                vs = _player_vice_summary(uid)
                 st.session_state.dod_players.append({
                     "username":     user["username"],
                     "user_id":      uid,
-                    "vice_summary": vs,
+                    "vice_summary": _player_vice_summary(uid),
                     "is_host":      False,
                 })
                 st.rerun()
@@ -493,8 +503,8 @@ def _render_setup():
             border:1px solid var(--border); border-radius:3px; text-align:center;">
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted); line-height:1.9;">
-    AI reads each player's logged sessions from ViceVault.<br>
-    The dares are built from your real habits. That's the whole point.
+    AI reads each player's logged sessions and desire profile from ViceVault.<br>
+    The dares are built from your real data. That's the whole point.
   </div>
 </div>
 """)
@@ -507,14 +517,14 @@ def _render_generating():
     players = st.session_state.dod_players
     mode    = st.session_state.dod_mode
 
-    ph_title  = st.empty()
-    ph_bar    = st.empty()
-    ph_msg    = st.empty()
+    ph_title = st.empty()
+    ph_bar   = st.empty()
+    ph_msg   = st.empty()
 
     all_dares = {}
     for i, p in enumerate(players):
         pct = int((i / len(players)) * 90)
-        ph_title.markdown(f"**Building dare deck…**")
+        ph_title.markdown("**Building dare deck…**")
         ph_bar.progress(pct)
         ph_msg.caption(f"Analysing {p['username']}'s vault history…")
 
@@ -525,8 +535,7 @@ def _render_generating():
     ph_bar.progress(100)
     ph_msg.caption("Shuffling the deck…")
 
-    # Round-robin deck: each round has one card per player (shuffled within the round)
-    # This prevents one player being asked 3x before another gets a turn
+    # Round-robin deck so each player gets one card per round before cycling
     max_dares = max((len(all_dares[p["username"]]) for p in players), default=0)
     deck = []
     for round_idx in range(max_dares):
@@ -535,7 +544,7 @@ def _render_generating():
             username = p["username"]
             if round_idx < len(all_dares[username]):
                 round_cards.append({"player": username, "dare_idx": round_idx})
-        random.shuffle(round_cards)   # randomise order within each round
+        random.shuffle(round_cards)
         deck.extend(round_cards)
 
     st.session_state.dod_dares    = all_dares
@@ -552,6 +561,7 @@ def _render_generating():
 _HEAT_LABELS = {1: "mild", 2: "spicy", 3: "atomic"}
 _HEAT_COLORS = {1: "var(--lime)", 2: "var(--amber)", 3: "var(--magenta)"}
 _TYPE_ICONS  = {"DO": "⚡", "TRUTH": "💬"}
+
 
 def _render_game():
     inject_css()
@@ -597,7 +607,7 @@ def _render_game():
             st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             {'border-top:2px solid var(--lime)' if is_active else 'border-top:2px solid var(--border)'};
-            border-radius:3px; padding:12px; text-align:center; {'animation: pulse-ring 1.5s ease-out 2;' if is_active else ''}">
+            border-radius:3px; padding:12px; text-align:center;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:15px; letter-spacing:1px;
               color:{'var(--lime)' if is_active else 'var(--text)'};">{uname}</div>
   <div style="display:flex; justify-content:center; gap:14px; margin-top:6px;">
@@ -619,12 +629,10 @@ def _render_game():
 
     # ── Current card or draw prompt ───────────────────────────────────────────
     if cur is None:
-        if not deck and not cur:
-            # Game over
+        if not deck:
             _render_game_over()
             return
 
-        # Draw button
         st.html("""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:48px; text-align:center;">
@@ -645,14 +653,13 @@ def _render_game():
             st.rerun()
 
     else:
-        # Show the active dare card
         player = cur["player"]
         dare   = cur["dare"]
         heat   = dare.get("heat", 1)
         dtype  = dare.get("type", "DO")
-        heat_color  = _HEAT_COLORS[heat]
-        heat_label  = _HEAT_LABELS[heat]
-        type_icon   = _TYPE_ICONS.get(dtype, "⚡")
+        heat_color = _HEAT_COLORS[heat]
+        heat_label = _HEAT_LABELS[heat]
+        type_icon  = _TYPE_ICONS.get(dtype, "⚡")
 
         st.html(f"""
 <div class="dare-card" style="background:var(--card); border:1px solid var(--border);
@@ -698,7 +705,6 @@ def _render_game():
                 st.rerun()
         with col_skip:
             if st.button("Skip", use_container_width=True, key="btn_skip"):
-                # Shuffle this card back into the latter half of the deck
                 remaining_len = len(st.session_state.dod_deck)
                 insert_at = random.randint(max(1, remaining_len // 2), max(1, remaining_len))
                 try:
@@ -706,17 +712,16 @@ def _render_game():
                 except ValueError:
                     dare_idx = 0
                 st.session_state.dod_deck.insert(insert_at, {"player": player, "dare_idx": dare_idx})
-                # Auto-draw next card so the game keeps flowing
                 if st.session_state.dod_deck:
-                    next_ref = st.session_state.dod_deck.pop(0)
+                    next_ref    = st.session_state.dod_deck.pop(0)
                     next_player = next_ref["player"]
-                    next_dare = dares[next_player][next_ref["dare_idx"]]
+                    next_dare   = dares[next_player][next_ref["dare_idx"]]
                     st.session_state.dod_cur_card = {"player": next_player, "dare": next_dare}
                 else:
                     st.session_state.dod_cur_card = None
                 st.rerun()
 
-    # ── Recent history ─────────────────────────────────────────────────────────
+    # ── Recent history ────────────────────────────────────────────────────────
     if history:
         st.html("<div style='height:20px'></div>")
         st.html("""
@@ -742,7 +747,7 @@ def _render_game():
 </div>
 """)
 
-    # ── End game button ────────────────────────────────────────────────────────
+    # ── End game button ───────────────────────────────────────────────────────
     st.html("<div style='height:16px'></div>")
     if st.button("End Game", use_container_width=True, key="end_game"):
         st.session_state.dod_phase = "gameover"
@@ -756,10 +761,9 @@ def _render_game_over():
     scores  = st.session_state.dod_scores
     history = st.session_state.dod_history
 
-    # Find winner (most dares done) and biggest drinker
     if scores:
-        winner   = max(scores, key=lambda u: scores[u]["done"])
-        drinker  = max(scores, key=lambda u: scores[u]["drinks"])
+        winner  = max(scores, key=lambda u: scores[u]["done"])
+        drinker = max(scores, key=lambda u: scores[u]["drinks"])
 
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
@@ -778,14 +782,13 @@ def _render_game_over():
 </div>
 """)
 
-    # Full leaderboard
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
             text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Final Standings</div>
 """)
     sorted_players = sorted(scores.items(), key=lambda x: x[1]["done"], reverse=True)
     for rank, (uname, s) in enumerate(sorted_players, 1):
-        rank_color = ["var(--lime)", "var(--amber)", "var(--cyan)"][min(rank-1, 2)]
+        rank_color = ["var(--lime)", "var(--amber)", "var(--cyan)"][min(rank - 1, 2)]
         st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:3px solid {rank_color}; border-radius:3px;
@@ -814,7 +817,6 @@ def _render_game_over():
     col1, col2 = st.columns(2)
     with col1:
         if st.button("↺  Play Again", use_container_width=True, type="primary"):
-            # Keep players, regenerate dares
             for k in ["dod_dares", "dod_deck", "dod_cur_card", "dod_scores", "dod_history"]:
                 if k in st.session_state:
                     del st.session_state[k]
@@ -829,7 +831,6 @@ def _render_game_over():
 
 def do_or_drink_page():
     _init()
-
     phase = st.session_state.dod_phase
 
     if phase == "setup":
