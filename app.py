@@ -126,8 +126,8 @@ def main():
         feature = st.session_state.selected_feature
 
         if feature == 'log':
-            from Pages.dashboard import log_session_page
-            log_session_page()
+            from Pages.dashboard import log_session_page 
+            log_session_page() 
         elif feature == 'history':
             from Pages.dashboard import history_page
             history_page()
