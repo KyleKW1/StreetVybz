@@ -1,5 +1,5 @@
 import streamlit as st
-from auth import logout
+from auth import logout, check_session_valid
 from styles import apply_custom_styles
 from Pages.auth_page import login_page, register_page
 from password_reset import forgot_password_page, reset_password_page, handle_reset_token_from_url
@@ -48,33 +48,27 @@ def render_sidebar():
 """, unsafe_allow_html=True)
 
         if st.button("◈  Dashboard",              use_container_width=True, key="sb_dashboard"):
-            st.session_state.selected_feature = 'stats'
-            st.rerun()
+            st.session_state.selected_feature = "stats";       st.rerun()
         if st.button("＋  Log Session",            use_container_width=True, key="sb_log"):
-            st.session_state.selected_feature = 'log'
-            st.rerun()
+            st.session_state.selected_feature = "log";         st.rerun()
         if st.button("≡  History",                 use_container_width=True, key="sb_history"):
-            st.session_state.selected_feature = 'history'
-            st.rerun()
+            st.session_state.selected_feature = "history";     st.rerun()
         if st.button("◉  Analytics",               use_container_width=True, key="sb_analytics"):
-            st.session_state.selected_feature = 'analytics'
-            st.rerun()
+            st.session_state.selected_feature = "analytics";   st.rerun()
+        if st.button("◎  Goals",                   use_container_width=True, key="sb_goals"):
+            st.session_state.selected_feature = "goals";       st.rerun()
 
         st.markdown("<div style='height:1px; background:#2a2a35; margin:12px 0;'></div>",
                     unsafe_allow_html=True)
 
         if st.button("⚡  Read Between The Lines", use_container_width=True, key="sb_wwyd"):
-            st.session_state.selected_feature = 'wwyd'
-            st.rerun()
+            st.session_state.selected_feature = "wwyd";        st.rerun()
         if st.button("📍  Kingston Hot Spots",     use_container_width=True, key="sb_hotspots"):
-            st.session_state.selected_feature = 'hotspots'
-            st.rerun()
+            st.session_state.selected_feature = "hotspots";    st.rerun()
         if st.button("🃏  Do or Drink",            use_container_width=True, key="sb_dod"):
-            st.session_state.selected_feature = 'do_or_drink'
-            st.rerun()
-        if st.button(" Confessions",              use_container_width=True, key="sb_confessions"):
-            st.session_state.selected_feature = 'confessions'
-            st.rerun()
+            st.session_state.selected_feature = "do_or_drink"; st.rerun()
+        if st.button("⬛  Confessions",            use_container_width=True, key="sb_confessions"):
+            st.session_state.selected_feature = "confessions"; st.rerun()
 
         st.markdown("<div style='height:1px; background:#2a2a35; margin:12px 0;'></div>",
                     unsafe_allow_html=True)
@@ -95,8 +89,8 @@ def main():
     )
 
     for key, default in [
-        ('authenticated', False), ('user', None), ('page', 'login'),
-        ('selected_feature', 'stats'), ('file_page', 0),
+        ("authenticated", False), ("user", None), ("page", "login"),
+        ("selected_feature", "stats"), ("file_page", 0),
     ]:
         if key not in st.session_state:
             st.session_state[key] = default
@@ -106,15 +100,21 @@ def main():
 
     if not st.session_state.authenticated:
         page = st.session_state.page
-        if page == 'register':
-            register_page()
-        elif page == 'forgot':
-            forgot_password_page()
-        elif page == 'reset_password':
-            reset_password_page()
-        else:
-            login_page()
+        if   page == "register":       register_page()
+        elif page == "forgot":         forgot_password_page()
+        elif page == "reset_password": reset_password_page()
+        else:                          login_page()
     else:
+        # ── Session validity check (catches screenshot logouts) ────────────
+        if not check_session_valid():
+            st.error("Your session was invalidated. Please log in again.")
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
+            st.session_state.authenticated = False
+            st.session_state.page          = "login"
+            st.rerun()
+            return
+
         user    = st.session_state.get("user", {})
         user_id = user.get("id") if user else None
 
@@ -125,30 +125,24 @@ def main():
         render_sidebar()
         feature = st.session_state.selected_feature
 
-        if feature == 'log':
-            from Pages.dashboard import log_session_page
-            log_session_page()
-        elif feature == 'history':
-            from Pages.dashboard import history_page
-            history_page()
-        elif feature == 'analytics':
-            from Pages.analytics import analytics_page
-            analytics_page()
-        elif feature == 'wwyd':
-            from Pages.what_would_you_do import what_would_you_do_page
-            what_would_you_do_page()
-        elif feature == 'hotspots':
-            from Pages.hotspots import hotspots_page
-            hotspots_page()
-        elif feature == 'confessions':
-            from Pages.confession import confessions_page
-            confessions_page()
-        elif feature == 'do_or_drink':
-            from Pages.do_or_drink import do_or_drink_page
-            do_or_drink_page()
+        if   feature == "log":
+            from Pages.dashboard import log_session_page;   log_session_page()
+        elif feature == "history":
+            from Pages.dashboard import history_page;        history_page()
+        elif feature == "analytics":
+            from Pages.analytics import analytics_page;      analytics_page()
+        elif feature == "goals":
+            from Pages.dashboard import goals_page;          goals_page()
+        elif feature == "wwyd":
+            from Pages.what_would_you_do import what_would_you_do_page; what_would_you_do_page()
+        elif feature == "hotspots":
+            from Pages.hotspots import hotspots_page;        hotspots_page()
+        elif feature == "confessions":
+            from Pages.confession import confessions_page;   confessions_page()
+        elif feature == "do_or_drink":
+            from Pages.do_or_drink import do_or_drink_page;  do_or_drink_page()
         else:
-            from Pages.dashboard import stats_page
-            stats_page()
+            from Pages.dashboard import stats_page;          stats_page()
 
 
 if __name__ == "__main__":
