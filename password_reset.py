@@ -1,15 +1,16 @@
 """
 password_reset.py — Password reset and username recovery.
+Uses bcrypt-aware hash_password from auth.py.
 """
 
 import streamlit as st
-import hashlib
 import re
 import secrets
 import smtplib
 from email.message import EmailMessage
 
-# ── DB config ─────────────────────────────────────────────────────────────────
+from auth import hash_password, validate_email
+
 try:
     from config import DB_CONFIG, EMAIL_CONFIG
     APP_EMAIL          = EMAIL_CONFIG.get("sender_email", "")
@@ -25,7 +26,6 @@ except Exception:
 
 try:
     import mysql.connector
-    from mysql.connector import Error
     MYSQL_AVAILABLE = True
 except ImportError:
     MYSQL_AVAILABLE = False
@@ -47,17 +47,8 @@ def _create_connection():
             connection_timeout=30,
             autocommit=False,
         )
-    except Exception as e:
-        st.error(f"DB connection error: {e}")
+    except Exception:
         return None
-
-
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
-
-
-def validate_email(email: str) -> bool:
-    return bool(re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email))
 
 
 def _check_email_exists(email: str) -> bool:
@@ -102,22 +93,20 @@ def _save_reset_token(email: str, token: str) -> bool:
             """INSERT INTO password_resets (email, token, expires_at)
                VALUES (%s, %s, DATE_ADD(NOW(), INTERVAL 1 HOUR))
                ON DUPLICATE KEY UPDATE
-                 token = VALUES(token),
+                 token      = VALUES(token),
                  expires_at = VALUES(expires_at)""",
             (email, token),
         )
         conn.commit()
         cur.close()
         return True
-    except Exception as e:
-        st.error(f"Error saving reset token: {e}")
+    except Exception:
         return False
     finally:
         conn.close()
 
 
 def _verify_reset_token(token: str):
-    """Returns (valid: bool, email: str | None)."""
     conn = _create_connection()
     if not conn:
         return False, None
@@ -152,8 +141,7 @@ def _reset_password(email: str, new_password: str) -> bool:
         conn.commit()
         cur.close()
         return True
-    except Exception as e:
-        st.error(f"Error resetting password: {e}")
+    except Exception:
         return False
     finally:
         conn.close()
@@ -171,7 +159,6 @@ def _send_email(to_email: str, token=None, reset_type="password") -> bool:
         msg["To"]   = to_email
         if reset_type == "password":
             msg["Subject"] = "ViceVault — Password Reset"
-            # FIX: added https:// so email clients render it as a clickable link
             reset_url = f"https://testrun01.streamlit.app/?reset_token={token}"
             body = (
                 f"Click the link below to reset your password (valid 1 hour):\n\n"
@@ -193,18 +180,13 @@ def _send_email(to_email: str, token=None, reset_type="password") -> bool:
             server.send_message(msg)
         return True
     except Exception as e:
-        st.error(f"Email send failed: {e}")
+        st.error("Email send failed — check your email configuration.")
         return False
 
 
 # ─── QUERY PARAM HANDLER ──────────────────────────────────────────────────────
 
 def handle_reset_token_from_url():
-    """
-    Call this at the TOP of your main app.py before any page routing.
-    If a ?reset_token=... param is present in the URL, it stores the token
-    in session_state, sets the page to 'reset_password', and clears the URL param.
-    """
     params = st.query_params
     if "reset_token" in params:
         st.session_state["reset_token"] = params["reset_token"]
@@ -296,7 +278,7 @@ def reset_password_page():
             return
 
         st.success(f"Resetting password for {email}")
-        new_pw  = st.text_input("New password", type="password", key="new_pw")
+        new_pw  = st.text_input("New password",     type="password", key="new_pw")
         conf_pw = st.text_input("Confirm password", type="password", key="conf_pw")
 
         col_a, col_b = st.columns(2)
