@@ -5,12 +5,11 @@ from Pages.auth_page import login_page, register_page
 from password_reset import forgot_password_page, reset_password_page, handle_reset_token_from_url
 
 
-# ─── DB SYNC HELPERS ──────────────────────────────────────────────────────────
-
 def _bootstrap_db():
     try:
         import database as db
         db.ensure_tables()
+        db.ensure_interactions_table()   # ← new
     except Exception:
         pass
 
@@ -29,8 +28,6 @@ def _load_vice_log_from_db(user_id: int):
         st.session_state.vice_log_loaded = True
 
 
-# ─── SIDEBAR ──────────────────────────────────────────────────────────────────
-
 def render_sidebar():
     with st.sidebar:
         user = st.session_state.get("user", {})
@@ -48,56 +45,40 @@ def render_sidebar():
 """, unsafe_allow_html=True)
 
         if st.button("◈  Dashboard",              use_container_width=True, key="sb_dashboard"):
-            st.session_state.selected_feature = 'stats'
-            st.rerun()
+            st.session_state.selected_feature = 'stats'; st.rerun()
         if st.button("＋  Log Session",            use_container_width=True, key="sb_log"):
-            st.session_state.selected_feature = 'log'
-            st.rerun()
+            st.session_state.selected_feature = 'log'; st.rerun()
         if st.button("≡  History",                 use_container_width=True, key="sb_history"):
-            st.session_state.selected_feature = 'history'
-            st.rerun()
+            st.session_state.selected_feature = 'history'; st.rerun()
         if st.button("◉  Analytics",               use_container_width=True, key="sb_analytics"):
-            st.session_state.selected_feature = 'analytics'
-            st.rerun()
+            st.session_state.selected_feature = 'analytics'; st.rerun()
 
         st.markdown("<div style='height:1px; background:#2a2a35; margin:12px 0;'></div>",
                     unsafe_allow_html=True)
 
         if st.button("⚡  Read Between The Lines", use_container_width=True, key="sb_wwyd"):
-            st.session_state.selected_feature = 'wwyd'
-            st.rerun()
+            st.session_state.selected_feature = 'wwyd'; st.rerun()
         if st.button("📍  Kingston Hot Spots",     use_container_width=True, key="sb_hotspots"):
-            st.session_state.selected_feature = 'hotspots'
-            st.rerun()
+            st.session_state.selected_feature = 'hotspots'; st.rerun()
         if st.button("🃏  Do or Drink",            use_container_width=True, key="sb_dod"):
-            st.session_state.selected_feature = 'do_or_drink'
-            st.rerun()
+            st.session_state.selected_feature = 'do_or_drink'; st.rerun()
         if st.button(" Confessions",              use_container_width=True, key="sb_confessions"):
-            st.session_state.selected_feature = 'confessions'
-            st.rerun()
-        if st.button("🔥  Vice Hot Takes",         use_container_width=True, key="sb_hot_takes"):
-            st.session_state.selected_feature = 'hot_takes'
-            st.rerun()
+            st.session_state.selected_feature = 'confessions'; st.rerun()
         if st.button("🪞  The Mirror Test",        use_container_width=True, key="sb_mirror"):
-            st.session_state.selected_feature = 'mirror_test'
-            st.rerun()
+            st.session_state.selected_feature = 'mirror_test'; st.rerun()
 
         st.markdown("<div style='height:1px; background:#2a2a35; margin:12px 0;'></div>",
                     unsafe_allow_html=True)
 
-        if st.button("→  Logout",                  use_container_width=True, key="sb_logout"):
+        if st.button("→  Logout", use_container_width=True, key="sb_logout"):
             st.session_state.pop("vice_log_loaded", None)
             logout()
 
 
-# ─── MAIN ─────────────────────────────────────────────────────────────────────
-
 def main():
     st.set_page_config(
-        page_title="ViceVault",
-        page_icon="⚡",
-        layout="wide",
-        initial_sidebar_state="expanded",
+        page_title="ViceVault", page_icon="⚡",
+        layout="wide", initial_sidebar_state="expanded",
     )
 
     for key, default in [
@@ -112,14 +93,10 @@ def main():
 
     if not st.session_state.authenticated:
         page = st.session_state.page
-        if page == 'register':
-            register_page()
-        elif page == 'forgot':
-            forgot_password_page()
-        elif page == 'reset_password':
-            reset_password_page()
-        else:
-            login_page()
+        if page == 'register':       register_page()
+        elif page == 'forgot':       forgot_password_page()
+        elif page == 'reset_password': reset_password_page()
+        else:                        login_page()
     else:
         user    = st.session_state.get("user", {})
         user_id = user.get("id") if user else None
@@ -152,9 +129,6 @@ def main():
         elif feature == 'do_or_drink':
             from Pages.do_or_drink import do_or_drink_page
             do_or_drink_page()
-        elif feature == 'hot_takes':
-            from Pages.vice_hot_takes import vice_hot_takes_page
-            vice_hot_takes_page()
         elif feature == 'mirror_test':
             from Pages.mirror_test import mirror_test_page
             mirror_test_page()
