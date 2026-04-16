@@ -1,6 +1,6 @@
 """
-Pages/hotspots.py — Kingston, Jamaica hot spots for drinks & weed.
-Now includes an interactive Leaflet map with CartoDB dark tiles.
+Pages/hotspots.py — Kingston hot spots. Where to go tonight.
+Vibe filter: Chill / Turn Up / Late Night
 """
 
 import streamlit as st
@@ -12,7 +12,8 @@ SPOTS = [
     {
         "name":    "Kingston Dub Club",
         "tag":     "🌿🥃", "type": "weed",
-        "vibe":    "Legendary hillside reggae venue. Open-air, epic city view, zero pretension.",
+        "vibe":    ["chill"],
+        "one_line": "Best view in Kingston. Bring a spliff and stay til the city lights up.",
         "details": "Sundays only · 5PM–midnight · $2000 JMD entry · Cash only",
         "tip":     "Go before sunset to catch the view. Wear flat shoes — the steps are steep.",
         "rating": 4.6, "reviews": 475,
@@ -23,7 +24,8 @@ SPOTS = [
     {
         "name":    "Ribbiz UltraLounge",
         "tag":     "🥃", "type": "drinks",
-        "vibe":    "The spot everyone ends up at. High energy, bottle service, massive crowd on weekends.",
+        "vibe":    ["turn_up", "late_night"],
+        "one_line": "The spot everyone ends up at. High energy, bottle service, no pretending you're going home early.",
         "details": "Mon–Thu til 3AM · Fri–Sat til 5AM · Ardenne Emirates Plaza",
         "tip":     "Friday and Saturday are wild. Go early or book a table — it fills fast.",
         "rating": 4.1, "reviews": 3145,
@@ -34,7 +36,8 @@ SPOTS = [
     {
         "name":    "Club Cubana",
         "tag":     "🥃", "type": "drinks",
-        "vibe":    "Cuban cocktails, live music, outdoor terrace on Hope Road. Mojitos are elite.",
+        "vibe":    ["chill", "turn_up"],
+        "one_line": "Cuban cocktails, live music, terrace on Hope Road. The mojito alone is worth it.",
         "details": "Tue–Thu til midnight · Fri til 2:30AM · Sat 7PM til 2:30AM",
         "tip":     "Classic mojito. Order it. That's the move.",
         "rating": 4.2, "reviews": 208,
@@ -45,9 +48,10 @@ SPOTS = [
     {
         "name":    "Dulcé Bar & Lounge",
         "tag":     "🥃", "type": "drinks",
-        "vibe":    "Highest-rated lounge in Kingston. Chill outdoor setting, live music, great for dates.",
+        "vibe":    ["chill"],
+        "one_line": "Highest-rated lounge in Kingston. Outdoor, live music, genuinely nice energy.",
         "details": "Mon–Sat noon til 2AM · Sun 1PM–10PM · 22 Barbican Rd",
-        "tip":     "Best for a Tuesday or Thursday — vibes without the weekend madness.",
+        "tip":     "Best on a Tuesday or Thursday — vibes without the weekend madness.",
         "rating": 4.8, "reviews": 15,
         "address": "22 Barbican Rd, Kingston",
         "maps":   "https://maps.google.com/?q=Dulce+Bar+Lounge+Kingston+Jamaica",
@@ -56,9 +60,10 @@ SPOTS = [
     {
         "name":    "Mezza Luna Kingston",
         "tag":     "🥃", "type": "drinks",
-        "vibe":    "Rooftop restaurant with a proper view. Cocktails, good food, date-night energy.",
+        "vibe":    ["chill"],
+        "one_line": "Rooftop with a view. Cocktails, good food, and the kind of atmosphere that makes a date work.",
         "details": "Daily noon–10:30PM · Rooftop at 110 Constant Spring Rd",
-        "tip":     "Book ahead on weekends. The bartender Taylor is the one to talk to.",
+        "tip":     "Book ahead on weekends. Ask for Taylor at the bar.",
         "rating": 4.6, "reviews": 302,
         "address": "110 Constant Spring Rd (Rooftop), Kingston",
         "maps":   "https://maps.google.com/?q=Mezza+Luna+Kingston+Jamaica",
@@ -67,7 +72,8 @@ SPOTS = [
     {
         "name":    "Di Bar at Blue Mahoe Estate",
         "tag":     "🥃", "type": "drinks",
-        "vibe":    "Local favourite. Soca Thursdays, good bartenders, laid-back atmosphere.",
+        "vibe":    ["chill", "turn_up"],
+        "one_line": "Soca Thursdays, solid bartenders, no pretension. A proper local spot.",
         "details": "Mon–Thu 3PM–midnight · Fri 3PM–2AM · Sat 3PM–midnight · Sun noon–6PM",
         "tip":     "Thursday night Soca session is the one. Bartender Theo knows his craft.",
         "rating": 4.1, "reviews": 122,
@@ -78,7 +84,8 @@ SPOTS = [
     {
         "name":    "Usain Bolt's Tracks & Records",
         "tag":     "🥃", "type": "drinks",
-        "vibe":    "Sports bar vibes, Jamaican food, open til midnight daily. Tourist-friendly but genuinely fun.",
+        "vibe":    ["chill", "turn_up"],
+        "one_line": "Sports bar energy, Jamaican food, open til midnight. More fun than you expect.",
         "details": "Daily 11:30AM–midnight · 67 Constant Spring Rd",
         "tip":     "Go for drinks and wings. Skip the ribs. The Scotch bonnet hot sauce is legendary.",
         "rating": 4.1, "reviews": 3470,
@@ -89,7 +96,8 @@ SPOTS = [
     {
         "name":    "Offshore Rooftop Lounge",
         "tag":     "🥃", "type": "drinks",
-        "vibe":    "Rooftop with views, Jamaican food, karaoke nights. Casual Kingston energy.",
+        "vibe":    ["late_night"],
+        "one_line": "Rooftop, karaoke Sundays, and a Thursday pasta + $500 margarita deal that makes no sense but works.",
         "details": "Wed–Sun 3PM–midnight · Consumer Plaza, 103 Constant Spring Rd",
         "tip":     "Thursday pasta + $500 margarita deal is unbeatable. Karaoke on Sundays.",
         "rating": 3.8, "reviews": 319,
@@ -100,8 +108,9 @@ SPOTS = [
     {
         "name":    "Kaya Herb House",
         "tag":     "🌿", "type": "weed",
-        "vibe":    "Jamaica's premier licensed cannabis dispensary. Farm tour, high-quality flower, knowledgeable staff.",
-        "details": "Daily 9AM–10PM (Sat til 11PM) · 1 Weed Street, Drax Hall (St. Ann — day trip)",
+        "vibe":    ["chill"],
+        "one_line": "Jamaica's only licensed dispensary worth the drive. Farm tour, quality flower, staff who actually know what they're talking about.",
+        "details": "Daily 9AM–10PM (Sat til 11PM) · 1 Weed Street, Drax Hall, St. Ann",
         "tip":     "Worth the drive from Kingston. Staff product knowledge is exceptional.",
         "rating": 4.2, "reviews": 157,
         "address": "1 Weed Street, Drax Hall, St. Ann",
@@ -111,7 +120,8 @@ SPOTS = [
     {
         "name":    "Bamboo Bar & Lounge",
         "tag":     "🌿🥃", "type": "weed",
-        "vibe":    "Chill outdoor spot. Good atmosphere, laid-back crowd, weed-friendly energy.",
+        "vibe":    ["chill"],
+        "one_line": "Outdoor, laid-back, bring your own. Good for an afternoon that drifts into evening.",
         "details": "Daily 11AM–11:30PM · 8 Barbican Rd, Kingston",
         "tip":     "Good for an afternoon session. Bring your own — it's that kind of spot.",
         "rating": 4.0, "reviews": 72,
@@ -123,14 +133,11 @@ SPOTS = [
 
 
 def _build_leaflet_map(visible_spots):
-    """Render a Leaflet map with CartoDB dark tiles."""
     if not visible_spots:
         return
 
-    # Build JS marker array
     markers_js = ""
     for s in visible_spots:
-        # Escape single quotes in strings
         name    = s["name"].replace("'", "\\'")
         address = s["address"].replace("'", "\\'")
         tip     = s["tip"].replace("'", "\\'")
@@ -156,7 +163,6 @@ def _build_leaflet_map(visible_spots):
             {{maxWidth: 220}}
         );"""
 
-    # Centre map on visible spots
     avg_lat = sum(s["lat"] for s in visible_spots) / len(visible_spots)
     avg_lng = sum(s["lng"] for s in visible_spots) / len(visible_spots)
 
@@ -203,13 +209,22 @@ def spot_card(s):
                  "WEED" if s["type"] == "weed" else "DRINKS"
     type_color = "#c6ff00" if s["type"] == "weed" else "#ffb300"
 
+    # Vibe tags
+    vibe_map = {"chill": ("CHILL", "var(--cyan)"), "turn_up": ("TURN UP", "var(--amber)"), "late_night": ("LATE NIGHT", "var(--magenta)")}
+    vibe_chips = "".join(
+        f'<span style="font-family:\'Space Mono\',monospace; font-size:7px; letter-spacing:1px; '
+        f'padding:2px 7px; border:1px solid {col}; color:{col}; border-radius:2px; margin-right:4px;">{lbl}</span>'
+        for v in s.get("vibe", [])
+        for lbl, col in [vibe_map.get(v, ("", "var(--muted)"))]
+    )
+
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:3px solid {s['color']}; border-radius:4px;
             padding:20px 22px; margin-bottom:12px;">
   <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:10px;">
     <div style="flex:1; min-width:0;">
-      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:4px;">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
         <span style="font-family:'Bebas Neue',sans-serif; font-size:20px; color:var(--text);
                      letter-spacing:1px;">{s['name']}</span>
         <span style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
@@ -217,6 +232,7 @@ def spot_card(s):
                      border-radius:2px; text-transform:uppercase;">{type_label}</span>
         <span style="font-size:16px;">{s['tag']}</span>
       </div>
+      <div style="margin-bottom:6px;">{vibe_chips}</div>
       <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);">
         {s['address']}
       </div>
@@ -230,8 +246,8 @@ def spot_card(s):
       </div>
     </div>
   </div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
-              line-height:1.7; margin-bottom:10px;">{s['vibe']}</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text);
+              line-height:1.6; margin-bottom:10px; font-style:italic;">"{s['one_line']}"</div>
   <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;">
     <span style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
                  background:var(--surface); border:1px solid var(--border);
@@ -240,7 +256,7 @@ def spot_card(s):
   <div style="background:var(--surface); border-left:2px solid {s['color']};
               padding:8px 12px; border-radius:0 3px 3px 0; margin-bottom:12px;">
     <span style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
-                 color:var(--muted); text-transform:uppercase;">Pro tip · </span>
+                 color:var(--muted); text-transform:uppercase;">Tip · </span>
     <span style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft);
                  font-style:italic;">{s['tip']}</span>
   </div>
@@ -259,63 +275,126 @@ def hotspots_page():
     st.html("""
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">
-    Vice Vault · Kingston, Jamaica
-  </div>
+              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Kingston, Jamaica</div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:var(--text);
-              letter-spacing:3px; line-height:0.95;">HOT SPOTS</div>
+              letter-spacing:3px; line-height:0.95;">WHERE TO GO TONIGHT</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-top:6px;">
-    Drinks. Weed. Kingston's finest.
+    Drinks. Weed. Picked by someone who's been.
   </div>
 </div>
 """)
 
-    # Filter tabs
-    filter_key = "hotspots_filter"
-    if filter_key not in st.session_state:
-        st.session_state[filter_key] = "all"
+    # ── Vibe filter ───────────────────────────────────────────────────────────
+    st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">What's the vibe tonight?</div>
+""")
 
-    col_all, col_drinks, col_weed = st.columns(3)
-    with col_all:
-        if st.button("◈  All Spots", use_container_width=True,
-                     type="primary" if st.session_state[filter_key] == "all" else "secondary",
-                     key="hs_all"):
-            st.session_state[filter_key] = "all"; st.rerun()
-    with col_drinks:
+    vibe_key = "hotspots_vibe"
+    type_key = "hotspots_type"
+    if vibe_key not in st.session_state:
+        st.session_state[vibe_key] = "all"
+    if type_key not in st.session_state:
+        st.session_state[type_key] = "all"
+
+    # Vibe row
+    cv1, cv2, cv3, cv4 = st.columns(4)
+    with cv1:
+        if st.button("◈  All Vibes", use_container_width=True,
+                     type="primary" if st.session_state[vibe_key] == "all" else "secondary",
+                     key="vibe_all"):
+            st.session_state[vibe_key] = "all"; st.rerun()
+    with cv2:
+        if st.button("🌊  Chill", use_container_width=True,
+                     type="primary" if st.session_state[vibe_key] == "chill" else "secondary",
+                     key="vibe_chill"):
+            st.session_state[vibe_key] = "chill"; st.rerun()
+    with cv3:
+        if st.button("🔥  Turn Up", use_container_width=True,
+                     type="primary" if st.session_state[vibe_key] == "turn_up" else "secondary",
+                     key="vibe_turn_up"):
+            st.session_state[vibe_key] = "turn_up"; st.rerun()
+    with cv4:
+        if st.button("🌙  Late Night", use_container_width=True,
+                     type="primary" if st.session_state[vibe_key] == "late_night" else "secondary",
+                     key="vibe_late"):
+            st.session_state[vibe_key] = "late_night"; st.rerun()
+
+    # Vibe descriptions
+    vibe_desc = {
+        "all":       "",
+        "chill":     "Low-key, outdoor, easy conversation. No pressure.",
+        "turn_up":   "Loud music, big crowd, bottle service. You know what you came for.",
+        "late_night": "Still going when everyone else stopped. These places know.",
+    }
+    desc = vibe_desc.get(st.session_state[vibe_key], "")
+    if desc:
+        st.html(f"""
+<div style="background:var(--surface); border:1px solid var(--border); border-radius:3px;
+            padding:8px 14px; margin-bottom:16px;">
+  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft);">{desc}</div>
+</div>
+""")
+    else:
+        st.html("<div style='height:8px'></div>")
+
+    # Type row
+    ct1, ct2, ct3 = st.columns(3)
+    with ct1:
+        if st.button("◈  Everything", use_container_width=True,
+                     type="primary" if st.session_state[type_key] == "all" else "secondary",
+                     key="type_all"):
+            st.session_state[type_key] = "all"; st.rerun()
+    with ct2:
         if st.button("🥃  Drinks", use_container_width=True,
-                     type="primary" if st.session_state[filter_key] == "drinks" else "secondary",
-                     key="hs_drinks"):
-            st.session_state[filter_key] = "drinks"; st.rerun()
-    with col_weed:
+                     type="primary" if st.session_state[type_key] == "drinks" else "secondary",
+                     key="type_drinks"):
+            st.session_state[type_key] = "drinks"; st.rerun()
+    with ct3:
         if st.button("🌿  Weed", use_container_width=True,
-                     type="primary" if st.session_state[filter_key] == "weed" else "secondary",
-                     key="hs_weed"):
-            st.session_state[filter_key] = "weed"; st.rerun()
+                     type="primary" if st.session_state[type_key] == "weed" else "secondary",
+                     key="type_weed"):
+            st.session_state[type_key] = "weed"; st.rerun()
 
     st.html("<div style='height:1rem'></div>")
 
-    filt    = st.session_state[filter_key]
+    # ── Filter logic ──────────────────────────────────────────────────────────
+    vibe_f = st.session_state[vibe_key]
+    type_f = st.session_state[type_key]
+
     visible = [
         s for s in SPOTS
-        if filt == "all"
-        or s["type"] == filt
-        or (filt == "weed" and "weed" in s["type"])
+        if (vibe_f == "all" or vibe_f in s.get("vibe", []))
+        and (type_f == "all" or s["type"] == type_f or (type_f == "weed" and "weed" in s["type"]))
     ]
 
-    # ── Interactive map ───────────────────────────────────────────────────────
-    st.html("""
+    # ── Map ───────────────────────────────────────────────────────────────────
+    if visible:
+        st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
             text-transform:uppercase; color:var(--muted); margin-bottom:10px;">Map</div>
 """)
-    _build_leaflet_map(visible)
+        _build_leaflet_map(visible)
+        st.html("<div style='height:1.5rem'></div>")
 
-    st.html("<div style='height:1.5rem'></div>")
+    # ── Count ─────────────────────────────────────────────────────────────────
+    if not visible:
+        st.html("""
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:60px; text-align:center;">
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:3px;
+              color:var(--muted);">NOTHING MATCHES</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-top:8px;">
+    Try a different vibe or type filter.
+  </div>
+</div>
+""")
+        return
 
-    # ── Count badge ───────────────────────────────────────────────────────────
     st.html(f"""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
             text-transform:uppercase; color:var(--muted); margin-bottom:16px;">
-  {len(visible)} spot{"s" if len(visible) != 1 else ""} · Kingston & surrounds
+  {len(visible)} spot{"s" if len(visible) != 1 else ""}
 </div>
 """)
 
