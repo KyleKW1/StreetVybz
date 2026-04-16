@@ -146,6 +146,27 @@ SPOTS = [
 # Curated spot names — used to avoid duplicates when merging Places results
 CURATED_NAMES = {s["name"].lower() for s in SPOTS}
 
+# ── API Key ───────────────────────────────────────────────────────────────────
+FALLBACK_API_KEY = "AIzaSyChWnmVYKUW8NeiBFe24wGPh_YAyIknALE"
+
+
+def get_api_key() -> str | None:
+    """Return Google Places API key from secrets, session state, or hardcoded fallback."""
+    # 1. Streamlit secrets
+    try:
+        key = st.secrets["GOOGLE_PLACES_KEY"]
+        if key:
+            return key
+    except Exception:
+        pass
+
+    # 2. Manual entry via expander (stored in session state)
+    if st.session_state.get("gplaces_key_input"):
+        return st.session_state["gplaces_key_input"]
+
+    # 3. Hardcoded fallback
+    return FALLBACK_API_KEY
+
 
 # ── Google Places fetcher ─────────────────────────────────────────────────────
 
@@ -218,7 +239,8 @@ def fetch_places_spots(api_key: str) -> list[dict]:
                 timeout=8,
             )
             data = resp.json()
-        except Exception:
+        except Exception as e:
+            st.warning(f"Places API error for query '{q}': {e}")
             continue
 
         for place in data.get("places", []):
@@ -264,10 +286,8 @@ def fetch_places_spots(api_key: str) -> list[dict]:
     return results
 
 
-def get_all_spots(api_key: str | None) -> list[dict]:
+def get_all_spots(api_key: str) -> list[dict]:
     """Merge curated spots with Places API results, curated first."""
-    if not api_key:
-        return SPOTS
     live = fetch_places_spots(api_key)
     return SPOTS + live
 
@@ -450,29 +470,22 @@ def hotspots_page():
 </div>
 """)
 
-    # ── Google Places API key (from secrets or manual entry) ──────────────────
-    api_key = None
-    try:
-        api_key = st.secrets["GOOGLE_PLACES_KEY"]
-    except Exception:
-        pass  # No secret configured yet
+    # ── Get API key ───────────────────────────────────────────────────────────
+    api_key = get_api_key()
 
-    if not api_key:
-        with st.expander("🔑 Add Google Places API key to discover more spots", expanded=False):
-            st.markdown(
-                "Add `GOOGLE_PLACES_KEY = 'your_key'` to `.streamlit/secrets.toml` "
-                "to pull live bars and nightlife from Google. Currently showing curated spots only."
-            )
-            manual_key = st.text_input("Or paste your key here (session only):", type="password", key="gplaces_key_input")
-            if manual_key:
-                api_key = manual_key
+    # ── Load spots (always with API key now) ──────────────────────────────────
+    with st.spinner("Loading spots…"):
+        all_spots = get_all_spots(api_key)
 
-    # ── Load spots ────────────────────────────────────────────────────────────
-    if api_key:
-        with st.spinner("Pulling live spots from Google Places…"):
-            all_spots = get_all_spots(api_key)
-    else:
-        all_spots = SPOTS
+    # Show how many came from Places
+    live_count = sum(1 for s in all_spots if s.get("source") == "places_api")
+    if live_count:
+        st.html(f"""
+<div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:20px;">
+  ✦ {len(SPOTS)} curated &nbsp;·&nbsp; ◈ {live_count} from Google Places
+</div>
+""")
 
     # ── Vibe filter ───────────────────────────────────────────────────────────
     st.html("""
