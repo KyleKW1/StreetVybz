@@ -75,6 +75,12 @@ def render_sidebar():
         if st.button(" Confessions",              use_container_width=True, key="sb_confessions"):
             st.session_state.selected_feature = 'confessions'
             st.rerun()
+        if st.button("🔥  Vice Hot Takes",         use_container_width=True, key="sb_hot_takes"):
+            st.session_state.selected_feature = 'hot_takes'
+            st.rerun()
+        if st.button("🪞  The Mirror Test",        use_container_width=True, key="sb_mirror"):
+            st.session_state.selected_feature = 'mirror_test'
+            st.rerun()
 
         st.markdown("<div style='height:1px; background:#2a2a35; margin:12px 0;'></div>",
                     unsafe_allow_html=True)
@@ -126,8 +132,8 @@ def main():
         feature = st.session_state.selected_feature
 
         if feature == 'log':
-            from Pages.dashboard import log_session_page 
-            log_session_page() 
+            from Pages.dashboard import log_session_page
+            log_session_page()
         elif feature == 'history':
             from Pages.dashboard import history_page
             history_page()
@@ -146,6 +152,12 @@ def main():
         elif feature == 'do_or_drink':
             from Pages.do_or_drink import do_or_drink_page
             do_or_drink_page()
+        elif feature == 'hot_takes':
+            from Pages.vice_hot_takes import vice_hot_takes_page
+            vice_hot_takes_page()
+        elif feature == 'mirror_test':
+            from Pages.mirror_test import mirror_test_page
+            mirror_test_page()
         else:
             from Pages.dashboard import stats_page
             stats_page()
