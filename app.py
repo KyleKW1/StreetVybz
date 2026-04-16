@@ -9,7 +9,7 @@ def _bootstrap_db():
     try:
         import database as db
         db.ensure_tables()
-        db.ensure_interactions_table()   # ← new
+        db.ensure_interactions_table()
     except Exception:
         pass
 
@@ -58,14 +58,12 @@ def render_sidebar():
 
         if st.button("⚡  Read Between The Lines", use_container_width=True, key="sb_wwyd"):
             st.session_state.selected_feature = 'wwyd'; st.rerun()
-        if st.button("📍  Kingston Hot Spots",     use_container_width=True, key="sb_hotspots"):
+        if st.button("📍  Where To Go Tonight",    use_container_width=True, key="sb_hotspots"):
             st.session_state.selected_feature = 'hotspots'; st.rerun()
         if st.button("🃏  Do or Drink",            use_container_width=True, key="sb_dod"):
             st.session_state.selected_feature = 'do_or_drink'; st.rerun()
         if st.button(" Confessions",              use_container_width=True, key="sb_confessions"):
             st.session_state.selected_feature = 'confessions'; st.rerun()
-        if st.button("🪞  The Mirror Test",        use_container_width=True, key="sb_mirror"):
-            st.session_state.selected_feature = 'mirror_test'; st.rerun()
 
         st.markdown("<div style='height:1px; background:#2a2a35; margin:12px 0;'></div>",
                     unsafe_allow_html=True)
@@ -93,10 +91,10 @@ def main():
 
     if not st.session_state.authenticated:
         page = st.session_state.page
-        if page == 'register':       register_page()
-        elif page == 'forgot':       forgot_password_page()
+        if page == 'register':         register_page()
+        elif page == 'forgot':         forgot_password_page()
         elif page == 'reset_password': reset_password_page()
-        else:                        login_page()
+        else:                          login_page()
     else:
         user    = st.session_state.get("user", {})
         user_id = user.get("id") if user else None
@@ -129,9 +127,6 @@ def main():
         elif feature == 'do_or_drink':
             from Pages.do_or_drink import do_or_drink_page
             do_or_drink_page()
-        elif feature == 'mirror_test':
-            from Pages.mirror_test import mirror_test_page
-            mirror_test_page()
         else:
             from Pages.dashboard import stats_page
             stats_page()
