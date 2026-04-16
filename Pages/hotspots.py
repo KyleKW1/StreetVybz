@@ -4,7 +4,6 @@ Vibe filter: Chill / Turn Up / Late Night
 """
 
 import streamlit as st
-import streamlit.components.v1 as components
 import requests
 from styles import inject_page_css
 
@@ -68,7 +67,6 @@ def get_api_key():
 def _assign_vibe(types, name):
     name = name.lower()
     t = " ".join(types)
-
     if "night_club" in t or "club" in name:
         return ["turn_up"]
     return ["chill"]
@@ -91,8 +89,6 @@ def fetch_places_spots(api_key):
     queries = [
         ("bars in Kingston Jamaica", "drinks"),
         ("nightlife Kingston Jamaica", "drinks"),
-
-        # Cannabis (expanded)
         ("cannabis store Kingston Jamaica", "cannabis"),
         ("weed shop Kingston Jamaica", "cannabis"),
         ("herb house Kingston Jamaica", "cannabis"),
@@ -137,39 +133,115 @@ def get_all_spots(api_key):
     return SPOTS + fetch_places_spots(api_key)
 
 
-# ── UI ────────────────────────────────────────────────────────────────────────
+# ── Card component ────────────────────────────────────────────────────────────
 def spot_card(s):
-    if s["type"] == "cannabis":
-        label = "CANNABIS"
-        color = "#c6ff00"
-    else:
-        label = "DRINKS"
-        color = "#ffb300"
+    type_color = "#c6ff00" if s["type"] == "cannabis" else "#ffb300"
+    type_label = "CANNABIS" if s["type"] == "cannabis" else "DRINKS"
+    rating_color = _rating_color(s["rating"])
+    tip_html = ""
+    if s.get("tip"):
+        tip_html = f"""
+        <div style="background:#111114;border:1px solid #2a2a35;border-radius:4px;
+            padding:8px 12px;margin-bottom:12px;">
+            <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
+                color:#5a5a72;text-transform:uppercase;">TIP</span>
+            <p style="color:#9090aa;font-size:12px;margin:4px 0 0;line-height:1.5;">{s["tip"]}</p>
+        </div>"""
 
-    st.markdown(f"""
-**{s['name']}**  
-{label} · ⭐ {s['rating']} ({s['reviews']})  
-{s['address']}  
+    st.html(f"""
+    <div style="background:#18181d;border:1px solid #2a2a35;border-left:3px solid {type_color};
+        border-radius:6px;padding:20px 24px;margin-bottom:12px;font-family:'DM Sans',sans-serif;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+            <div>
+                <span style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:#f0f0f5;
+                    letter-spacing:1px;line-height:1.1;">{s['name']}</span>
+                <div style="margin-top:6px;">
+                    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
+                        text-transform:uppercase;color:{type_color};background:{type_color}18;
+                        border:1px solid {type_color}40;padding:2px 8px;border-radius:2px;
+                        margin-right:8px;">{type_label}</span>
+                    <span style="font-family:'Space Mono',monospace;font-size:9px;
+                        letter-spacing:1px;color:{rating_color};">
+                        ⭐ {s['rating']} <span style="color:#5a5a72;">({s['reviews']:,})</span>
+                    </span>
+                </div>
+            </div>
+            <span style="font-size:24px;line-height:1;">{s['tag']}</span>
+        </div>
+        <p style="color:#9090aa;font-size:13px;margin:10px 0 6px;font-style:italic;line-height:1.5;">
+            {s['one_line']}</p>
+        <p style="color:#5a5a72;font-size:12px;font-family:'Space Mono',monospace;margin:0 0 4px;">
+            {s['address']}</p>
+        <p style="color:#5a5a72;font-size:11px;margin:0 0 12px;">{s['details']}</p>
+        {tip_html}
+        <a href="{s['maps']}" target="_blank" style="font-family:'Space Mono',monospace;
+            font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#00e5ff;
+            text-decoration:none;border-bottom:1px solid #00e5ff40;padding-bottom:1px;">
+            Open in Maps →</a>
+    </div>
+    """)
 
-_{s['one_line']}_  
 
-[Open in Maps]({s['maps']})
----
-""")
-
-
+# ── Page ──────────────────────────────────────────────────────────────────────
 def hotspots_page():
     inject_page_css()
 
-    st.title("Where to go tonight")
-    st.caption("Drinks. Cannabis. Picked by someone who's been.")
+    st.html("""
+    <div style="margin-bottom:4px;">
+        <span style="font-family:'Bebas Neue',sans-serif;font-size:40px;color:#f0f0f5;letter-spacing:2px;">
+            Where to go tonight
+        </span>
+    </div>
+    <p style="font-family:'Space Mono',monospace;font-size:11px;letter-spacing:2px;
+        color:#5a5a72;text-transform:uppercase;margin-bottom:28px;">
+        Drinks · Cannabis · Picked by someone who's been
+    </p>
+    """)
 
     api_key = get_api_key()
     spots = get_all_spots(api_key)
 
-    # Filters
-    vibe = st.selectbox("Vibe", ["all", "chill", "turn_up", "late_night"])
-    typ = st.selectbox("Type", ["all", "drinks", "cannabis"])
+    # ── Session state for filters ─────────────────────────────────────────────
+    if "vibe_filter" not in st.session_state:
+        st.session_state.vibe_filter = "all"
+    if "type_filter" not in st.session_state:
+        st.session_state.type_filter = "all"
+
+    # ── Vibe filter pills ─────────────────────────────────────────────────────
+    st.html("""<p style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
+        color:#5a5a72;text-transform:uppercase;margin-bottom:4px;">VIBE</p>""")
+
+    vibe_options = {"All": "all", "Chill 🌿": "chill", "Turn Up 🔥": "turn_up", "Late Night 🌙": "late_night"}
+    vcols = st.columns(len(vibe_options))
+    for i, (label, val) in enumerate(vibe_options.items()):
+        with vcols[i]:
+            is_active = st.session_state.vibe_filter == val
+            if st.button(label, key=f"vibe_{val}",
+                         type="primary" if is_active else "secondary",
+                         use_container_width=True):
+                st.session_state.vibe_filter = val
+                st.rerun()
+
+    # ── Type filter pills ─────────────────────────────────────────────────────
+    st.html("""<p style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
+        color:#5a5a72;text-transform:uppercase;margin:16px 0 4px;">TYPE</p>""")
+
+    type_options = {"All": "all", "Drinks 🥃": "drinks", "Cannabis 🌿": "cannabis"}
+    tcols = st.columns(len(type_options))
+    for i, (label, val) in enumerate(type_options.items()):
+        with tcols[i]:
+            is_active = st.session_state.type_filter == val
+            if st.button(label, key=f"type_{val}",
+                         type="primary" if is_active else "secondary",
+                         use_container_width=True):
+                st.session_state.type_filter = val
+                st.rerun()
+
+    st.html("<div style='margin-top:24px;'></div>")
+
+    # ── Results ───────────────────────────────────────────────────────────────
+    vibe = st.session_state.vibe_filter
+    typ = st.session_state.type_filter
 
     visible = [
         s for s in spots
@@ -177,5 +249,13 @@ def hotspots_page():
         and (typ == "all" or s["type"] == typ)
     ]
 
-    for s in visible:
-        spot_card(s)
+    if not visible:
+        st.html("""
+        <div style="text-align:center;padding:60px 0;color:#5a5a72;
+            font-family:'Space Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;">
+            No spots match that filter
+        </div>
+        """)
+    else:
+        for s in visible:
+            spot_card(s)
