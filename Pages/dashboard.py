@@ -293,6 +293,53 @@ def _render_social_feed():
 """)
 
 
+# ─── FREAK SCORE CARD ─────────────────────────────────────────────────────────
+
+def _render_freak_score_card(freak: dict):
+    from styles import inject_page_css
+    inject_page_css()
+    col   = freak["color"]
+    label = freak["label"]
+    fp    = freak["freak_pct"]
+    ci    = freak["conflict_idx"]
+    hp    = freak["hesitation_pct"]
+    tot   = freak["total"]
+    st.html(f'''
+<div style="background:var(--card); border:1px solid var(--border);
+            border-left:3px solid {col}; border-radius:4px;
+            padding:18px 20px; margin-bottom:12px;">
+  <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+    <div>
+      <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+                  text-transform:uppercase; color:var(--muted); margin-bottom:4px;">
+        Freak Score · {tot} hot takes
+      </div>
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:22px;
+                  color:{col}; letter-spacing:1px;">{label.upper()}</div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:44px;
+                  color:{col}; line-height:1;">{fp}</div>
+      <div style="font-family:'Space Mono',monospace; font-size:7px;
+                  color:var(--muted); text-transform:uppercase;">/100</div>
+    </div>
+  </div>
+  <div style="display:flex; gap:16px; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
+    <div style="text-align:center;">
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--amber);">{ci}</div>
+      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+                  text-transform:uppercase; letter-spacing:1px;">Conflict</div>
+    </div>
+    <div style="text-align:center;">
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--magenta);">{hp}%</div>
+      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+                  text-transform:uppercase; letter-spacing:1px;">Hesitated</div>
+    </div>
+  </div>
+</div>
+''')
+
+
 # ─── STATS PAGE ───────────────────────────────────────────────────────────────
 
 def stats_page():
@@ -383,6 +430,17 @@ def stats_page():
 
     st.html("<div style='height:1.5rem'></div>")
 
+    # ── Freak Score card ──────────────────────────────────────────────────────
+    user_id = _current_user_id()
+    if user_id:
+        try:
+            from Pages.vice_hot_takes import compute_freak_score
+            freak = compute_freak_score(user_id)
+            if freak:
+                _render_freak_score_card(freak)
+        except Exception:
+            pass
+
     # AI weekly reflection
     _render_ai_reflection(all_entries(7))
 
@@ -433,6 +491,15 @@ def render_log_form(vice_key: str):
         entry_dt = datetime.combine(log_date, log_time)
         add_entry(vice_key, form_data, entry_dt)
         st.success(f"Logged. {v['icon']}")
+        # ── Hot Take interrupt ────────────────────────────────────────────────
+        st.session_state.ht_fresh = True
+        try:
+            from Pages.vice_hot_takes import maybe_render_hot_take
+            user_id = _current_user_id()
+            maybe_render_hot_take(vice=vice_key, user_id=user_id)
+        except Exception:
+            pass
+        # ─────────────────────────────────────────────────────────────────────
         st.rerun()
 
 
