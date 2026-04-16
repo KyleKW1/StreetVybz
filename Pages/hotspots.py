@@ -89,15 +89,15 @@ def fetch_places_spots(api_key):
     }
 
     queries = [
-    ("bars in Kingston Jamaica", "drinks"),
-    ("nightlife Kingston Jamaica", "drinks"),
+        ("bars in Kingston Jamaica", "drinks"),
+        ("nightlife Kingston Jamaica", "drinks"),
 
-    # Cannabis (expanded)
-    ("cannabis store Kingston Jamaica", "cannabis"),
-    ("weed shop Kingston Jamaica", "cannabis"),
-    ("herb house Kingston Jamaica", "cannabis"),
-    ("dispensary Kingston Jamaica", "cannabis"),
-]
+        # Cannabis (expanded)
+        ("cannabis store Kingston Jamaica", "cannabis"),
+        ("weed shop Kingston Jamaica", "cannabis"),
+        ("herb house Kingston Jamaica", "cannabis"),
+        ("dispensary Kingston Jamaica", "cannabis"),
+    ]
 
     results = []
     seen = set(CURATED_NAMES)
@@ -114,8 +114,8 @@ def fetch_places_spots(api_key):
 
             results.append({
                 "name": name,
-                "tag": "🌿" if spot_type == "cannabis" else "🥃",
-                "type": spot_type,
+                "tag": "🌿" if base_type == "cannabis" else "🥃",
+                "type": base_type,
                 "vibe": _assign_vibe(p.get("types", []), name),
                 "one_line": p.get("formattedAddress", ""),
                 "details": "Hours not listed",
