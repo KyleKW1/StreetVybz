@@ -687,3 +687,156 @@ def dismiss_screenshot_alert(alert_id: int) -> bool:
 
 def invalidate_user_sessions(user_id: int) -> None:
     pass
+
+# ─── INTERACTIONS TABLE ───────────────────────────────────────────────────────
+# Unified mini-game data store.
+# interaction_type: 'hot_take' | 'mirror_judgment'
+# payload: JSON — varies by type
+ 
+INTERACTIONS_DDL = """
+CREATE TABLE IF NOT EXISTS interactions (
+    id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id          INT NOT NULL,
+    interaction_type VARCHAR(32)  NOT NULL,
+    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    payload          JSON,
+    INDEX idx_int_user (user_id),
+    INDEX idx_int_type (user_id, interaction_type),
+    INDEX idx_int_time (user_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"""
+ 
+# ─── SHADOW SCORE TABLE ───────────────────────────────────────────────────────
+ 
+SHADOW_SCORE_DDL = """
+CREATE TABLE IF NOT EXISTS shadow_scores (
+    user_id          INT NOT NULL PRIMARY KEY,
+    hypocrisy_idx    TINYINT UNSIGNED DEFAULT 0,
+    conflict_idx     TINYINT UNSIGNED DEFAULT 0,
+    freak_score      TINYINT UNSIGNED DEFAULT 0,
+    updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"""
+ 
+ 
+def ensure_interactions_table():
+    """Call this inside ensure_tables()."""
+    conn = create_connection()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(INTERACTIONS_DDL)
+        cur.execute(SHADOW_SCORE_DDL)
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        pass  # silently skip if already exists
+    finally:
+        conn.close()
+ 
+ 
+def save_interaction(user_id: int, interaction_type: str, payload: dict) -> bool:
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO interactions (user_id, interaction_type, payload)
+               VALUES (%s, %s, %s)""",
+            (user_id, interaction_type, json.dumps(payload, default=str))
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+ 
+ 
+def load_interactions(user_id: int, interaction_type: str = None) -> list:
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        if interaction_type:
+            cur.execute(
+                """SELECT * FROM interactions
+                   WHERE user_id = %s AND interaction_type = %s
+                   ORDER BY created_at DESC""",
+                (user_id, interaction_type)
+            )
+        else:
+            cur.execute(
+                "SELECT * FROM interactions WHERE user_id = %s ORDER BY created_at DESC",
+                (user_id,)
+            )
+        rows = cur.fetchall()
+        cur.close()
+        result = []
+        for row in rows:
+            p = row.get("payload")
+            if isinstance(p, str):
+                try:
+                    p = json.loads(p)
+                except Exception:
+                    p = {}
+            row["payload"] = p or {}
+            result.append(row)
+        return result
+    except Exception:
+        return []
+    finally:
+        conn.close()
+ 
+ 
+def upsert_shadow_score(user_id: int, hypocrisy_idx: int = None,
+                         conflict_idx: int = None, freak_score: int = None) -> bool:
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM shadow_scores WHERE user_id = %s", (user_id,))
+        existing = cur.fetchone() or {}
+ 
+        h = hypocrisy_idx if hypocrisy_idx is not None else existing.get("hypocrisy_idx", 0)
+        c = conflict_idx  if conflict_idx  is not None else existing.get("conflict_idx", 0)
+        f = freak_score   if freak_score   is not None else existing.get("freak_score", 0)
+ 
+        cur.execute(
+            """INSERT INTO shadow_scores (user_id, hypocrisy_idx, conflict_idx, freak_score)
+               VALUES (%s, %s, %s, %s)
+               ON DUPLICATE KEY UPDATE
+                 hypocrisy_idx = VALUES(hypocrisy_idx),
+                 conflict_idx  = VALUES(conflict_idx),
+                 freak_score   = VALUES(freak_score)""",
+            (user_id, h, c, f)
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+ 
+ 
+def get_shadow_score(user_id: int) -> dict:
+    conn = create_connection()
+    if not conn:
+        return {}
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM shadow_scores WHERE user_id = %s", (user_id,))
+        row = cur.fetchone()
+        cur.close()
+        return row or {}
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+ 
