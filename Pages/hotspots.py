@@ -89,14 +89,20 @@ def fetch_places_spots(api_key):
     }
 
     queries = [
-        ("bars in Kingston Jamaica", "drinks"),
-        ("dispensary Kingston Jamaica", "cannabis"),
-    ]
+    ("bars in Kingston Jamaica", "drinks"),
+    ("nightlife Kingston Jamaica", "drinks"),
+
+    # Cannabis (expanded)
+    ("cannabis store Kingston Jamaica", "cannabis"),
+    ("weed shop Kingston Jamaica", "cannabis"),
+    ("herb house Kingston Jamaica", "cannabis"),
+    ("dispensary Kingston Jamaica", "cannabis"),
+]
 
     results = []
     seen = set(CURATED_NAMES)
 
-    for q, spot_type in queries:
+    for q, base_type in queries:
         r = requests.post(url, headers=headers, json={"textQuery": q})
         data = r.json()
 
