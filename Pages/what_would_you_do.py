@@ -438,7 +438,7 @@ def generate_fantasies(result_type, openness_pct, hd_answers, questions, answers
     hd_str           = _hd_signal_str(hd_answers)
     pos_str, neg_str = _quiz_context(questions, answers)
 
-    prompt = f"""You generate a personalised fantasy/content category menu for Vice Vault — a verified 18+ adult lifestyle app.
+    prompt = f"""You generate a personalised adult fantasy category menu for Vice Vault — a verified 18+ adult platform.
 
 USER PROFILE:
 - Openness result: {result_type['name']} — "{result_type['meta']}"
@@ -454,13 +454,15 @@ SCENARIOS THEY RESONATED WITH:
 SCENARIOS THEY REJECTED (do NOT appear in any form):
 {neg_str}
 
-Generate exactly 25 fantasy/content category labels tailored to this person.
+Generate exactly 25 EXPLICIT adult sexual fantasy category labels for this person.
+These are real adult content categories — specific, direct, and genuinely arousing. Not soft or euphemistic.
+
 Rules:
-- Short labels, 3-8 words each (like content library categories)
-- Order: highest match → lowest match for this specific person
-- Gender-neutral, orientation-neutral language
+- Name the actual fantasy, kink, or scenario directly (e.g. "power exchange", "being watched", "stranger in a hotel room", "slow seduction from behind", "dominance and submission", "tied up and teased", "voice-only arousal", "public risk", "possessive partner energy", "consensual loss of control")
+- Short labels, 3-8 words each
+- Order: closest match to this person's signals → interesting adjacent territory → 4-5 stretches at the end
+- Gender-neutral, orientation-neutral phrasing
 - No gendered anatomy in labels
-- Mix their strong signals, adjacent themes, and 4-5 interesting stretches at the end
 - Rejected scenarios must NOT appear in any form
 
 Return ONLY a JSON array of exactly 25 strings, no markdown, no preamble:
@@ -675,24 +677,42 @@ def render_loading():
         posts = fetch_posts()
         upd(30, f"Found {len(posts)} relevant scenarios — generating questions with AI…")
 
-        client    = _get_client()
-        selected  = posts[:POST_COUNT]
-        questions = []
+        client   = _get_client()
+        selected = posts[:POST_COUNT]
 
+        upd(32, f"Generating {len(selected)} questions in parallel…")
+
+        # Fire all generate_question calls simultaneously instead of sequentially.
+        # Before: 10 calls × ~2s each = ~20s total. After: ~3-5s total.
         failed_questions = []
-        for i, post in enumerate(selected):
-            pct = 35 + int((i / len(selected)) * 58)
-            upd(pct, f"Writing question {i + 1} of {len(selected)}…")
+        results          = [None] * len(selected)
+
+        def _gen_one(args):
+            idx, post = args
             try:
-                q_data = generate_question(post, client)
-                questions.append({**post, **q_data})
+                return idx, generate_question(post, client), None
             except Exception as e:
-                failed_questions.append(str(e))
-                questions.append({
-                    **post,
-                    "prompt": f"Read the story above — what's your honest gut reaction?",
-                    "opts":   FALLBACK_OPTS,
-                })
+                return idx, None, str(e)
+
+        with ThreadPoolExecutor(max_workers=len(selected)) as pool:
+            futs = {pool.submit(_gen_one, (i, p)): i for i, p in enumerate(selected)}
+            done = 0
+            for fut in as_completed(futs, timeout=60):
+                done += 1
+                pct = 35 + int((done / len(selected)) * 58)
+                upd(pct, f"Questions ready: {done}/{len(selected)}…")
+                idx, q_data, err = fut.result()
+                if q_data:
+                    results[idx] = {**selected[idx], **q_data}
+                else:
+                    failed_questions.append(str(err))
+                    results[idx] = {
+                        **selected[idx],
+                        "prompt": "Read the story above — what's your honest gut reaction?",
+                        "opts":   FALLBACK_OPTS,
+                    }
+
+        questions = results
 
         if failed_questions:
             st.session_state.wwyd_load_errors = failed_questions
