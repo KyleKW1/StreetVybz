@@ -139,7 +139,7 @@ def stat_card(label, value, sublabel, color):
 def _generate_reflection(entries: list) -> str:
     try:
         import anthropic
-        client  = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+        client  = anthropic.Anthropic(api_key=st.secrets["OPENAI_API_KEY"])
         counts  = defaultdict(int)
         details = {}
         for e in entries:
