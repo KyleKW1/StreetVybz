@@ -148,30 +148,24 @@ def ensure_tables():
             cur.execute(ddl)
         conn.commit()
 
-        # ── Migrations for existing deployments ──────────────────────────────
-
-        # Add revealed_at if missing
         try:
             cur.execute("ALTER TABLE confessions ADD COLUMN revealed_at DATETIME DEFAULT NULL")
             conn.commit()
         except Exception:
             pass
 
-        # Add reveal_window_secs if missing
         try:
             cur.execute("ALTER TABLE confessions ADD COLUMN reveal_window_secs INT NOT NULL DEFAULT 60")
             conn.commit()
         except Exception:
             pass
 
-        # Make recipient_id nullable
         try:
             cur.execute("ALTER TABLE confessions MODIFY COLUMN recipient_id INT DEFAULT NULL")
             conn.commit()
         except Exception:
             pass
 
-        # Add recipient_email if missing
         try:
             cur.execute("ALTER TABLE confessions ADD COLUMN recipient_email VARCHAR(255) DEFAULT NULL")
             conn.commit()
@@ -299,7 +293,7 @@ def create_session_token(user_id: int, token: str) -> bool:
 def verify_session_token(user_id: int, token: str) -> bool:
     conn = create_connection()
     if not conn:
-        return True  # fail open on DB error
+        return True
     try:
         cur = conn.cursor()
         cur.execute(
@@ -312,7 +306,7 @@ def verify_session_token(user_id: int, token: str) -> bool:
         cur.close()
         return row is not None
     except Exception:
-        return True  # fail open
+        return True
     finally:
         conn.close()
 
@@ -337,7 +331,6 @@ def invalidate_session_token(token: str) -> bool:
 
 
 def invalidate_user_sessions(user_id: int) -> None:
-    """Invalidate all active session tokens for a user (e.g. after screenshot logout)."""
     conn = create_connection()
     if not conn:
         return
@@ -432,17 +425,13 @@ def delete_vice_log(user_id: int) -> bool:
 # ─── SOCIAL FEED ──────────────────────────────────────────────────────────────
 
 def load_social_feed(limit: int = 20) -> list:
-    """Return recent anonymised vice log entries for the live activity feed."""
     conn = create_connection()
     if not conn:
         return []
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """SELECT vice, logged_at
-               FROM vice_log
-               ORDER BY logged_at DESC
-               LIMIT %s""",
+            "SELECT vice, logged_at FROM vice_log ORDER BY logged_at DESC LIMIT %s",
             (limit,)
         )
         rows = cur.fetchall()
@@ -457,16 +446,12 @@ def load_social_feed(limit: int = 20) -> list:
 # ─── VICE GOALS ───────────────────────────────────────────────────────────────
 
 def get_vice_goals(user_id: int) -> dict:
-    """Return {vice: weekly_limit} dict for a user."""
     conn = create_connection()
     if not conn:
         return {}
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute(
-            "SELECT vice, weekly_limit FROM vice_goals WHERE user_id = %s",
-            (user_id,)
-        )
+        cur.execute("SELECT vice, weekly_limit FROM vice_goals WHERE user_id = %s", (user_id,))
         rows = cur.fetchall()
         cur.close()
         return {r["vice"]: r["weekly_limit"] for r in rows}
@@ -552,15 +537,15 @@ def save_what_would_you_do_result(user_id, result_name, result_meta,
 
 
 def save_read_between_lines_v4(
-    user_id:      int,
-    phase:        str,
-    result_name:  str,
-    result_meta:  str,
-    openness_pct: int,
-    total_pts:    int,
-    questions:    list,
-    answers:      list,
-    dim_scores:   dict,
+    user_id:         int,
+    phase:           str,
+    result_name:     str,
+    result_meta:     str,
+    openness_pct:    int,
+    total_pts:       int,
+    questions:       list,
+    answers:         list,
+    dim_scores:      dict,
     recommendations: list,
 ) -> bool:
     conn = create_connection()
@@ -575,11 +560,7 @@ def save_read_between_lines_v4(
                 openness_pct, total_pts,
                 questions, answers,
                 dim_scores, recommendations)
-               VALUES (%s, %s,
-                       %s, %s,
-                       %s, %s,
-                       %s, %s,
-                       %s, %s)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 user_id,
                 f"read_between_lines_v4_{phase}",
@@ -587,10 +568,10 @@ def save_read_between_lines_v4(
                 result_meta[:255] if result_meta else "",
                 max(0, min(255, openness_pct)),
                 max(0, min(65535, total_pts)),
-                json.dumps(questions, default=str),
-                json.dumps(answers,   default=str),
-                json.dumps(dim_scores,       default=str),
-                json.dumps(recommendations,  default=str),
+                json.dumps(questions,       default=str),
+                json.dumps(answers,         default=str),
+                json.dumps(dim_scores,      default=str),
+                json.dumps(recommendations, default=str),
             )
         )
         conn.commit()
@@ -603,6 +584,51 @@ def save_read_between_lines_v4(
         conn.close()
 
 
+def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> bool:
+    """
+    Update the most recent RBTL quiz result row with the user's confirmed
+    category selections. Called after the user clicks 'See My Full Profile →'
+    so what's stored reflects their actual choices, not just the AI defaults.
+    """
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT id, dim_scores FROM quiz_results
+               WHERE user_id = %s AND quiz_type LIKE 'read_between_lines_v4%%'
+               ORDER BY completed_at DESC LIMIT 1""",
+            (user_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            return False
+
+        dim_scores = row.get("dim_scores") or {}
+        if isinstance(dim_scores, str):
+            try:
+                dim_scores = json.loads(dim_scores)
+            except Exception:
+                dim_scores = {}
+
+        dim_scores["selected"]             = selected_cats
+        dim_scores["selection_confirmed"]  = True
+
+        cur.execute(
+            "UPDATE quiz_results SET dim_scores = %s WHERE id = %s",
+            (json.dumps(dim_scores, default=str), row["id"])
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
 def load_latest_rbtl_result(user_id: int) -> dict | None:
     conn = create_connection()
     if not conn:
@@ -610,12 +636,9 @@ def load_latest_rbtl_result(user_id: int) -> dict | None:
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """SELECT *
-               FROM quiz_results
-               WHERE user_id = %s
-                 AND quiz_type LIKE 'read_between_lines_v4%'
-               ORDER BY completed_at DESC
-               LIMIT 1""",
+            """SELECT * FROM quiz_results
+               WHERE user_id = %s AND quiz_type LIKE 'read_between_lines_v4%'
+               ORDER BY completed_at DESC LIMIT 1""",
             (user_id,)
         )
         row = cur.fetchone()
@@ -669,7 +692,6 @@ def save_confession(sender_id: int, recipient_id: int, code: str,
 
 def save_confession_invite(sender_id: int, recipient_email: str, code: str,
                             questions: list, window_seconds: int = 60) -> bool:
-    """Save a confession for a recipient who isn't on the app yet (email invite path)."""
     conn = create_connection()
     if not conn:
         return False
@@ -816,7 +838,6 @@ def confession_recipient_answer(code: str, recipient_answers: list) -> bool:
 
 
 def confession_sender_answer(code: str, sender_answers: list) -> bool:
-    """Final step — sets status=revealed and stamps revealed_at."""
     conn = create_connection()
     if not conn:
         return False
@@ -860,10 +881,6 @@ def delete_confession(code: str) -> bool:
 
 
 def delete_expired_confessions() -> int:
-    """
-    Delete revealed confessions whose reveal window has elapsed.
-    Uses the per-confession reveal_window_secs column (not a hardcoded value).
-    """
     conn = create_connection()
     if not conn:
         return 0
@@ -910,8 +927,7 @@ def save_reaction(confession_code: str, user_id: int, emoji: str) -> bool:
     try:
         cur = conn.cursor()
         cur.execute(
-            """INSERT IGNORE INTO confession_reactions (confession_code, user_id, emoji)
-               VALUES (%s, %s, %s)""",
+            "INSERT IGNORE INTO confession_reactions (confession_code, user_id, emoji) VALUES (%s, %s, %s)",
             (confession_code, user_id, emoji)
         )
         conn.commit()
@@ -924,15 +940,13 @@ def save_reaction(confession_code: str, user_id: int, emoji: str) -> bool:
 
 
 def load_reactions(confession_code: str, user_id: int) -> list:
-    """Return list of reaction dicts for this user on this confession."""
     conn = create_connection()
     if not conn:
         return []
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """SELECT emoji FROM confession_reactions
-               WHERE confession_code = %s AND user_id = %s""",
+            "SELECT emoji FROM confession_reactions WHERE confession_code = %s AND user_id = %s",
             (confession_code, user_id)
         )
         rows = cur.fetchall()
@@ -951,8 +965,7 @@ def count_reactions(confession_code: str, emoji: str) -> int:
     try:
         cur = conn.cursor()
         cur.execute(
-            """SELECT COUNT(*) FROM confession_reactions
-               WHERE confession_code = %s AND emoji = %s""",
+            "SELECT COUNT(*) FROM confession_reactions WHERE confession_code = %s AND emoji = %s",
             (confession_code, emoji)
         )
         row = cur.fetchone()
@@ -1084,8 +1097,7 @@ def save_interaction(user_id: int, interaction_type: str, payload: dict) -> bool
     try:
         cur = conn.cursor()
         cur.execute(
-            """INSERT INTO interactions (user_id, interaction_type, payload)
-               VALUES (%s, %s, %s)""",
+            "INSERT INTO interactions (user_id, interaction_type, payload) VALUES (%s, %s, %s)",
             (user_id, interaction_type, json.dumps(payload, default=str))
         )
         conn.commit()
@@ -1143,11 +1155,9 @@ def upsert_shadow_score(user_id: int, hypocrisy_idx: int = None,
         cur = conn.cursor(dictionary=True)
         cur.execute("SELECT * FROM shadow_scores WHERE user_id = %s", (user_id,))
         existing = cur.fetchone() or {}
-
         h = hypocrisy_idx if hypocrisy_idx is not None else existing.get("hypocrisy_idx", 0)
         c = conflict_idx  if conflict_idx  is not None else existing.get("conflict_idx", 0)
         f = freak_score   if freak_score   is not None else existing.get("freak_score", 0)
-
         cur.execute(
             """INSERT INTO shadow_scores (user_id, hypocrisy_idx, conflict_idx, freak_score)
                VALUES (%s, %s, %s, %s)
