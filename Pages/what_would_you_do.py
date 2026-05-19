@@ -259,9 +259,9 @@ div[data-testid="stRadio"] > div > label[data-checked="true"] {
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 def _get_client():
-    key = st.secrets.get("ANTHROPIC_API_KEY") or st.secrets.get("anthropic_api_key") or ""
+    key = st.secrets.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY") or ""
     if not key:
-        raise RuntimeError("ANTHROPIC_API_KEY not found in Streamlit secrets.")
+        raise RuntimeError("OPENAI_API_KEY not found in Streamlit secrets.")
     return anthropic.Anthropic(api_key=key)
 
 
@@ -693,9 +693,9 @@ def render_loading():
         posts = fetch_posts()
         upd(20, f"{len(posts)} scenarios loaded — generating questions in parallel…")
 
-        api_key = st.secrets.get("ANTHROPIC_API_KEY") or st.secrets.get("anthropic_api_key", "")
+        api_key = st.secrets.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", "")
         if not api_key:
-            st.session_state.wwyd_error = "ANTHROPIC_API_KEY not found in secrets."
+            st.session_state.wwyd_error = "OPENAI_API_KEY not found in secrets."
             st.session_state.wwyd_phase = "start"
             st.rerun()
             return
