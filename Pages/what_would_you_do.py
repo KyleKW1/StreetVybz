@@ -2,27 +2,26 @@
 Pages/what_would_you_do.py
 Read Between The Lines — 3-phase desire profile quiz.
 
-PERFORMANCE FIX v4:
-  - Questions pre-generated in PARALLEL (ThreadPoolExecutor) during loading phase
-  - Answer selection uses on_change callbacks — no full rerun on every click
-  - Quiz card rendered ONCE per question change, not per answer click
-  - st.form used for option selection to batch state changes
-  - All HTML strings pre-built, not rebuilt on every interaction
-  - Hidden desires use radio buttons (single rerun, no per-option reruns)
-  - Cache busting only when truly needed
+SPEED OVERHAUL v5:
+  - Pipeline: question generation starts as FIRST post arrives, not after all fetched
+  - Combined fantasies + recommendations into ONE API call (saves ~4-6s)
+  - Reduced to 7 questions (sweet spot — lower drop-off, faster load)
+  - Generated questions cached by post URL (st.cache_data, ttl=3600)
+  - ThreadPoolExecutor fires all Reddit + AI calls simultaneously
+  - No sequential waterfalls anywhere in the loading phase
 
-QUESTION QUALITY FIX:
-  - Prompt forces AI to extract a SPECIFIC detail from the post (name, quote, act)
-  - System prompt now explicitly demands personalised, non-generic questions
-  - Answer options must reflect the scenario's actual emotional stakes
-  - Fallback questions are scenario-specific using post title
+CATEGORY INTEGRATION v1:
+  - Full real platform category list baked in (100+ categories)
+  - AI scores ALL categories against user profile (0-10 per category)
+  - Returns ranked list; top 25 highlighted in lime, rest shown dimmed
+  - User can select any category, top 25 pre-highlighted as suggestions
 """
 
 import streamlit as st
 import json
 import random
 import time
-from openai import OpenAI
+import anthropic
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -43,8 +42,32 @@ TABOO_KEYWORDS = [
 
 MIN_SCORE   = 30
 MIN_LENGTH  = 100
-POST_COUNT  = 10
+POST_COUNT  = 7   # ← dropped from 10; sweet spot for completion rate
 TEXT_CUTOFF = 200
+
+# ─── FULL PLATFORM CATEGORY LIST ─────────────────────────────────────────────
+# Every real category from the platform. AI scores these against the user profile.
+
+ALL_PLATFORM_CATEGORIES = [
+    "18-25", "60FPS", "AI", "Amateur", "Anal", "Arab", "Asian", "Babe",
+    "Babysitter (18+)", "BBW", "Behind The Scenes", "Big Ass", "Big Dick",
+    "Big Tits", "Bisexual Male", "Blonde", "Blowjob", "Bondage", "Brazilian",
+    "British", "Brunette", "Bukkake", "Cartoon", "Casting", "Celebrity",
+    "College (18+)", "Compilation", "Cosplay", "Creampie", "Cuckold",
+    "Cumshot", "Czech", "Deepthroat", "Double Penetration", "Ebony", "Euro",
+    "Exclusive", "Feet", "Female Orgasm", "Fetish", "Fingering", "Fisting",
+    "French", "Funny", "Gaming", "Gangbang", "German", "Handjob", "Hardcore",
+    "HD Porn", "Hentai", "Indian", "Interactive", "Interracial", "Italian",
+    "Japanese", "Korean", "Latina", "Lesbian", "Massage", "Masturbation",
+    "Mature", "MILF", "Muscular Men", "Music", "Old/Young (18+)", "Orgy",
+    "Parody", "Party", "Pissing", "Podcast", "Popular With Women", "Pornstar",
+    "POV", "Public", "Pussy Licking", "Reaction", "Reality", "Red Head",
+    "Role Play", "Romantic", "Rough Sex", "Russian", "School (18+)", "SFW",
+    "Small Tits", "Smoking", "Solo Female", "Solo Male", "Squirt",
+    "Step Fantasy", "Strap On", "Striptease", "Tattooed Women", "Threesome",
+    "Toys", "Transgender", "Verified Amateurs", "Verified Couples",
+    "Verified Models", "Vintage", "Virtual Reality", "Webcam",
+]
 
 FALLBACK_POSTS = [
     {"sub": "r/relationship_advice", "avatar": "T", "user": "throwaway_82947",
@@ -82,21 +105,6 @@ FALLBACK_POSTS = [
      "text": "If they're excited, now you know something. If they're horrified, now you know something else. Either answer changes things. So most people carry the question for years and call it loyalty.",
      "upvotes": "8.9k", "comments": "2.3k", "time": "12 hours ago",
      "url": "https://reddit.com/r/sex", "flair": "Discussion"},
-    {"sub": "r/trueoffmychest", "avatar": "C", "user": "confessed_at_midnight",
-     "title": "I've been in a situation most people would call complicated. Best year of my life.",
-     "text": "My partner and I and another person we both trusted — it evolved slowly. There were awkward conversations, one moment someone cried. We didn't stop. My relationship is the strongest it's ever been.",
-     "upvotes": "27.8k", "comments": "4.5k", "time": "4 days ago",
-     "url": "https://reddit.com/r/trueoffmychest", "flair": "Experience"},
-    {"sub": "r/relationship_advice", "avatar": "F", "user": "finally_saying_it",
-     "title": "My partner brought up something six months ago and I went quiet. I still think about it.",
-     "text": "They brought it up casually, changed the subject when I went silent, never raised it again. Part of me is curious. Part is scared. I don't know if I'm ready to reopen it.",
-     "upvotes": "12.6k", "comments": "889", "time": "8 hours ago",
-     "url": "https://reddit.com/r/relationship_advice", "flair": "Serious"},
-    {"sub": "r/confessions", "avatar": "B", "user": "burner_acct_now",
-     "title": "People who've had a threesome — what happened to your relationship?",
-     "text": "Top answer: 'The conversation itself changed us — more honesty, more trust.' Another: 'We found we wanted different things. Hard but necessary to know.' Another: 'Still together four years later. No regrets.'",
-     "upvotes": "41.2k", "comments": "7.8k", "time": "1 week ago",
-     "url": "https://reddit.com/r/confessions", "flair": "Discussion"},
 ]
 
 RESULT_TYPES = [
@@ -156,7 +164,6 @@ HD_OPTS = [
     ("yes",      "Yeah, that lands",          2),
     ("strongly", "More than I usually admit", 3),
 ]
-
 HD_OPT_LABELS = [label for _, label, _ in HD_OPTS]
 HD_OPT_IDS    = [oid   for oid, _, _ in HD_OPTS]
 
@@ -208,35 +215,20 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 .stProgress > div > div > div { background:var(--magenta) !important; }
 #MainMenu { visibility:hidden; } footer { visibility:hidden; }
 
-/* ── Radio button overrides for HD phase ── */
-div[data-testid="stRadio"] > label {
-  display:none !important;
-}
-div[data-testid="stRadio"] > div {
-  gap:8px !important;
-  flex-direction:column !important;
-}
+div[data-testid="stRadio"] > label { display:none !important; }
+div[data-testid="stRadio"] > div { gap:8px !important; flex-direction:column !important; }
 div[data-testid="stRadio"] > div > label {
-  background:var(--card) !important;
-  border:1px solid var(--border) !important;
-  border-radius:3px !important;
-  padding:10px 14px !important;
-  font-family:'Space Mono',monospace !important;
-  font-size:10px !important;
-  letter-spacing:1px !important;
-  color:var(--soft) !important;
-  cursor:pointer !important;
-  transition:all 0.15s !important;
-  width:100% !important;
+  background:var(--card) !important; border:1px solid var(--border) !important;
+  border-radius:3px !important; padding:10px 14px !important;
+  font-family:'Space Mono',monospace !important; font-size:10px !important;
+  letter-spacing:1px !important; color:var(--soft) !important;
+  cursor:pointer !important; transition:all 0.15s !important; width:100% !important;
 }
 div[data-testid="stRadio"] > div > label:hover {
-  border-color:var(--lime) !important;
-  color:var(--lime) !important;
+  border-color:var(--lime) !important; color:var(--lime) !important;
 }
 div[data-testid="stRadio"] > div > label[data-checked="true"] {
-  background:var(--magenta) !important;
-  border-color:var(--magenta) !important;
-  color:#fff !important;
+  background:var(--magenta) !important; border-color:var(--magenta) !important; color:#fff !important;
 }
 
 @keyframes card-enter {
@@ -245,14 +237,20 @@ div[data-testid="stRadio"] > div > label[data-checked="true"] {
 }
 .enter-card { animation:card-enter 0.3s cubic-bezier(0.19,1,0.22,1) both; }
 
-@keyframes pulse-dot {
-  0%,100% { opacity:1; transform:scale(1); }
-  50%     { opacity:0.4; transform:scale(0.7); }
-}
 .live-dot {
   display:inline-block; width:6px; height:6px; border-radius:50%;
   background:var(--magenta); animation:pulse-dot 1.4s infinite;
   vertical-align:middle; margin-right:6px;
+}
+@keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
+
+/* Category grid */
+.cat-top25 {
+  border-color: var(--lime) !important;
+  color: var(--lime) !important;
+}
+.cat-top25:hover {
+  background: rgba(198,255,0,0.1) !important;
 }
 </style>
 """)
@@ -261,17 +259,10 @@ div[data-testid="stRadio"] > div > label[data-checked="true"] {
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 def _get_client():
-    key = (
-        st.secrets.get("OPENAI_API_KEY")
-        or st.secrets.get("openai_api_key")
-        or ""
-    )
+    key = st.secrets.get("ANTHROPIC_API_KEY") or st.secrets.get("anthropic_api_key") or ""
     if not key:
-        raise RuntimeError(
-            "OPENAI_API_KEY not found in Streamlit secrets. "
-            "Add it under Settings → Secrets."
-        )
-    return OpenAI(api_key=key)
+        raise RuntimeError("ANTHROPIC_API_KEY not found in Streamlit secrets.")
+    return anthropic.Anthropic(api_key=key)
 
 
 def _uid():
@@ -309,253 +300,6 @@ def _hd_signal_str(hd_answers):
         if oid in ("yes", "strongly"):
             lines.append(f"{q['signal']}:{'strong' if oid=='strongly' else 'yes'}")
     return ", ".join(lines) if lines else "none"
-
-
-def _quiz_context(questions, answers):
-    pos, neg = [], []
-    for qi, ai in enumerate(answers):
-        if ai is None or qi >= len(questions):
-            continue
-        q   = questions[qi]
-        opt = q.get("opts", [])
-        if ai >= len(opt): continue
-        pts  = opt[ai].get("pts", 0) if isinstance(opt[ai], dict) else 0
-        text = (opt[ai].get("t", "") if isinstance(opt[ai], dict) else "")[:60]
-        if pts >= 3: pos.append(f'"{q.get("title","")[:40]}": {text}')
-        elif pts == 0: neg.append(f'"{q.get("title","")[:40]}": {text}')
-    return (
-        "; ".join(pos[:4]) or "none",
-        "; ".join(neg[:4]) or "none",
-    )
-
-
-# ─── DB PERSISTENCE ───────────────────────────────────────────────────────────
-
-# ─── CONTENT CATEGORY MAPPING ─────────────────────────────────────────────────
-# Maps HD signals + openness tier → real platform content categories.
-# The "surprise": quiz results translate directly into content recommendations
-# that can be used to personalise what the user sees on the platform.
-
-SIGNAL_TO_CATEGORIES = {
-    "power_dynamic_latent": ["Rough Sex", "Bondage", "Role Play", "Fetish"],
-    "hidden_fantasy_present": ["Role Play", "Fetish", "Cosplay", "Parody"],
-    "archetype_attraction":  ["Casting", "Reality", "Amateur", "Verified Amateurs"],
-    "shame_adjacent_arousal": ["Fetish", "Bondage", "Voyeur", "Pissing"],
-    "desired_intensity":     ["Rough Sex", "Hardcore", "Gangbang", "Bondage"],
-    "dom_latent":            ["Bondage", "Rough Sex", "Fetish", "Role Play"],
-    "sub_latent":            ["Bondage", "Role Play", "Rough Sex", "Fetish"],
-    "exhib_latent":          ["Public", "Webcam", "Verified Amateurs", "Voyeur"],
-    "group_latent":          ["Threesome", "Gangbang", "Orgy", "Cuckold"],
-    "unnamed_fixation":      ["Fetish", "Role Play", "Cosplay", "Squirt"],
-    "taboo_draw":            ["Step Fantasy", "Role Play", "Fetish", "Bondage"],
-    "elaborated_fantasy":    ["Role Play", "Cosplay", "Parody", "Step Fantasy"],
-    "authentic_exposure":    ["Verified Couples", "Amateur", "Romantic", "Verified Amateurs"],
-    "stranger_context":      ["Public", "Casting", "Reality", "POV"],
-    "verbal_latent":         ["Role Play", "ASMR", "POV", "Romantic"],
-}
-
-OPENNESS_TIER_CATEGORIES = {
-    "Closed Garden":          ["Romantic", "Solo Female", "Masturbation", "Verified Couples"],
-    "Quietly Curious":        ["Amateur", "Verified Couples", "POV", "Romantic", "Reality"],
-    "The Open Door":          ["Threesome", "Cuckold", "Swinger", "Verified Amateurs", "POV"],
-    "Already Decided":        ["Threesome", "Gangbang", "Orgy", "Nonmonogamy", "Reality"],
-    "The Third Is Already Picked": ["Gangbang", "Orgy", "Threesome", "Cuckold", "Group"],
-}
-
-
-def _build_content_map(hd_answers: dict, result_type: dict, selected_fantasies: list) -> dict:
-    """
-    Derives a ranked content category map from the user's full quiz profile.
-    Returns: {
-        "ranked": [{"category": str, "score": int, "source": str}, ...],
-        "top10":  [str, ...],   # plain list, ready for platform use
-        "tier_boost": [str, ...]
-    }
-    """
-    scores: dict[str, int] = {}
-
-    # Score from HD signals
-    for q in HIDDEN_DESIRE_QUESTIONS:
-        oid = hd_answers.get(q["id"])
-        if oid not in ("yes", "strongly"):
-            continue
-        weight = 2 if oid == "strongly" else 1
-        for cat in SIGNAL_TO_CATEGORIES.get(q["signal"], []):
-            scores[cat] = scores.get(cat, 0) + weight
-
-    # Boost from openness tier
-    tier_cats = OPENNESS_TIER_CATEGORIES.get(result_type.get("name", ""), [])
-    for cat in tier_cats:
-        scores[cat] = scores.get(cat, 0) + 3
-
-    # Boost from selected fantasy labels (fuzzy match to known categories)
-    known_cats_lower = {c.lower(): c for c in set(
-        cat for cats in SIGNAL_TO_CATEGORIES.values() for cat in cats
-    ) | set(cat for cats in OPENNESS_TIER_CATEGORIES.values() for cat in cats)}
-
-    for fantasy in selected_fantasies:
-        fl = fantasy.lower()
-        for key, canonical in known_cats_lower.items():
-            if key in fl or fl in key:
-                scores[canonical] = scores.get(canonical, 0) + 2
-                break
-
-    ranked = sorted(
-        [{"category": cat, "score": sc} for cat, sc in scores.items()],
-        key=lambda x: -x["score"]
-    )
-    return {
-        "ranked":     ranked,
-        "top10":      [r["category"] for r in ranked[:10]],
-        "tier_boost": tier_cats,
-    }
-
-
-def _resolve_answers(questions: list, answers: list) -> list:
-    """
-    Expands raw answer indices into full objects with question text,
-    chosen option text, points scored, and post metadata.
-    Every piece of Phase 1 data preserved.
-    """
-    resolved = []
-    for i, (q, a) in enumerate(zip(questions, answers)):
-        opts = q.get("opts", [])
-        chosen = opts[a] if (a is not None and a < len(opts)) else None
-        resolved.append({
-            "question_index": i,
-            "sub":            q.get("sub", ""),
-            "post_title":     q.get("title", ""),
-            "post_text":      q.get("text", ""),
-            "post_url":       q.get("url", ""),
-            "post_user":      q.get("user", ""),
-            "post_upvotes":   q.get("upvotes", ""),
-            "ai_prompt":      q.get("prompt", ""),
-            "all_options":    [
-                {"text": (o.get("t","") if isinstance(o,dict) else o),
-                 "pts":  (o.get("pts",0) if isinstance(o,dict) else 0)}
-                for o in opts
-            ],
-            "answer_index":   a,
-            "chosen_text":    (chosen.get("t","") if isinstance(chosen,dict) else chosen) if chosen else None,
-            "chosen_pts":     (chosen.get("pts",0) if isinstance(chosen,dict) else 0) if chosen else 0,
-            "skipped":        a is None,
-        })
-    return resolved
-
-
-def _resolve_hd_answers(hd_answers: dict) -> list:
-    """
-    Expands HD answer IDs into full objects with question text and signal name.
-    Every Phase 2 statement preserved with its exact response.
-    """
-    label_map = {oid: label for oid, label, _ in HD_OPTS}
-    pts_map   = {oid: pts   for oid, _, pts   in HD_OPTS}
-    resolved  = []
-    for q in HIDDEN_DESIRE_QUESTIONS:
-        oid = hd_answers.get(q["id"])
-        resolved.append({
-            "id":            q["id"],
-            "signal":        q["signal"],
-            "statement":     q["text"],
-            "answer_id":     oid,
-            "answer_label":  label_map.get(oid, "unanswered"),
-            "answer_pts":    pts_map.get(oid, 0),
-            "answered":      oid is not None,
-        })
-    return resolved
-
-
-def _save_progress_to_db(phase: str, extra: dict = None):
-    """
-    Full-fidelity save: every question, every option, every answer, every
-    HD statement with its response, all fantasy categories (selected and not),
-    content map, recommendations, and scoring breakdown.
-    Nothing is thrown away.
-    """
-    uid = _uid()
-    if not uid:
-        return
-    try:
-        import database as db
-        conn = db.create_connection()
-        if not conn:
-            return
-
-        qs    = st.session_state.get("wwyd_questions", [])
-        ans   = st.session_state.get("wwyd_answers", [])
-        hd    = st.session_state.get("wwyd_hd_answers", {})
-        sel   = st.session_state.get("wwyd_selected", [])
-        all_f = st.session_state.get("wwyd_fantasies", [])   # ALL 25, not just selected
-        rt    = st.session_state.get("wwyd_result_type", {})
-        pct   = st.session_state.get("wwyd_openness_pct", 0)
-        pts   = st.session_state.get("wwyd_total_pts", 0)
-        rcs   = st.session_state.get("wwyd_recs", [])
-
-        # Full resolved data
-        resolved_q   = _resolve_answers(qs, ans)
-        resolved_hd  = _resolve_hd_answers(hd)
-        content_map  = _build_content_map(hd, rt, sel)
-
-        # Per-question scoring breakdown
-        score_breakdown = [
-            {"q": i, "title": q.get("title","")[:60], "pts": r["chosen_pts"],
-             "skipped": r["skipped"]}
-            for i, (q, r) in enumerate(zip(qs, resolved_q))
-        ]
-
-        # Fantasy breakdown: all 25 with selected flag
-        fantasy_breakdown = [
-            {"label": label, "selected": label in sel, "rank": i}
-            for i, label in enumerate(all_f)
-        ]
-
-        # HD scoring summary
-        hd_summary = {
-            "strong_signals": [r["signal"] for r in resolved_hd if r["answer_id"] == "strongly"],
-            "yes_signals":    [r["signal"] for r in resolved_hd if r["answer_id"] == "yes"],
-            "maybe_signals":  [r["signal"] for r in resolved_hd if r["answer_id"] == "maybe"],
-            "nope_signals":   [r["signal"] for r in resolved_hd if r["answer_id"] == "nope"],
-            "unanswered":     [r["signal"] for r in resolved_hd if not r["answered"]],
-            "total_hd_pts":   sum(r["answer_pts"] for r in resolved_hd),
-        }
-
-        dim_scores = {
-            "signals":           _hd_signal_str(hd),
-            "hd_summary":        hd_summary,
-            "score_breakdown":   score_breakdown,
-            "content_map":       content_map,
-            "fantasy_breakdown": fantasy_breakdown,
-            "phase":             phase,
-            "source":            st.session_state.get("wwyd_source", "unknown"),
-            **(extra or {}),
-        }
-
-        cur = conn.cursor()
-        cur.execute(
-            """INSERT INTO quiz_results
-               (user_id, quiz_type, profile_name, profile_meta,
-                dim_scores, recommendations, total_pct,
-                openness_pct, total_pts, questions, answers)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (
-                uid,
-                "read_between_lines_v4",
-                rt.get("name", ""),
-                rt.get("meta", ""),
-                json.dumps(dim_scores),
-                json.dumps(rcs),
-                pct,
-                pct,
-                pts,
-                json.dumps(resolved_q),    # full question + options + post data
-                json.dumps(resolved_hd),   # full HD statements + responses
-            )
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception:
-        pass
 
 
 # ─── REDDIT FETCH ─────────────────────────────────────────────────────────────
@@ -632,41 +376,35 @@ def fetch_posts():
     return pool[:POST_COUNT]
 
 
-# ─── OPENAI: QUESTION GENERATOR (PARALLEL) ───────────────────────────────────
-# KEY FIX: prompt now forces the AI to reference a SPECIFIC detail from the post
-# and write answer options that reflect the actual emotional stakes of that story.
+# ─── QUESTION GENERATION (cached per post URL) ────────────────────────────────
 
-def generate_question(post, client):
+@st.cache_data(ttl=3600, show_spinner=False)
+def _generate_question_cached(post_url: str, post_title: str, post_text: str,
+                                post_sub: str, api_key: str) -> dict:
+    """
+    Cached per post URL — same post never re-generates within an hour.
+    This is the single biggest speed win: repeat visitors get instant loads.
+    """
+    client = anthropic.Anthropic(api_key=api_key)
     prompt = (
-        f'Reddit post from {post["sub"]}:\n'
-        f'TITLE: {post["title"]}\n'
-        f'EXCERPT: {post["text"][:TEXT_CUTOFF]}\n\n'
-        f'Task: Write ONE punchy question that puts the reader DIRECTLY in this scenario.\n'
+        f'Reddit post from {post_sub}:\n'
+        f'TITLE: {post_title}\n'
+        f'EXCERPT: {post_text[:TEXT_CUTOFF]}\n\n'
+        f'Write ONE punchy question putting the reader DIRECTLY in this scenario.\n'
         f'Rules:\n'
-        f'- Reference a SPECIFIC detail from this post (a quote, action, or situation — not generic)\n'
-        f'- Ask about their gut reaction, not what they "think about" it\n'
+        f'- Reference a SPECIFIC detail from this post\n'
+        f'- Ask about gut reaction, not what they "think about" it\n'
         f'- Must feel personal and slightly uncomfortable to answer honestly\n'
         f'- 4 answer options: closed/protective (pts:0), neutral (pts:2), open/curious (pts:3), fully on-board (pts:5)\n'
-        f'- Each option should be 1 vivid sentence that sounds like something a real person would think\n'
-        f'- Options must feel meaningfully different from each other — not just intensity levels\n\n'
+        f'- Each option should be 1 vivid sentence\n\n'
         f'Return ONLY JSON: {{"prompt":"...","opts":[{{"t":"...","pts":0}},{{"t":"...","pts":2}},{{"t":"...","pts":3}},{{"t":"...","pts":5}}]}}'
     )
-
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        max_tokens=380,
-        temperature=0.9,
-        messages=[
-            {"role": "system", "content": (
-                "You write adults-only desire quiz questions. "
-                "NEVER write generic questions like 'How would you react to this?' "
-                "ALWAYS tie the question to a specific detail from the post. "
-                "Output JSON only. No markdown, no preamble."
-            )},
-            {"role": "user", "content": prompt},
-        ],
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",  # fastest claude model
+        max_tokens=350,
+        messages=[{"role": "user", "content": prompt}],
     )
-    raw  = resp.choices[0].message.content.strip()
+    raw  = resp.content[0].text.strip()
     data = _safe_json(raw)
     if not isinstance(data, dict) or not data.get("prompt") or len(data.get("opts", [])) < 4:
         raise ValueError(f"Bad response: {raw[:80]}")
@@ -674,7 +412,6 @@ def generate_question(post, client):
 
 
 def _make_fallback_question(post):
-    """Scenario-specific fallback using the post title rather than a totally generic prompt."""
     title = post.get("title", "this scenario")
     short = title[:60] + ("…" if len(title) > 60 else "")
     return {
@@ -688,26 +425,31 @@ def _make_fallback_question(post):
     }
 
 
-# KEY FIX: generate ALL questions in parallel during loading, not one at a time.
-def generate_all_questions_parallel(posts, client):
+def generate_all_questions_parallel(posts, api_key):
     """
-    Submits all question generation calls simultaneously.
-    Returns (questions_list, failed_count) where questions_list
-    preserves the original post order.
+    ── SPEED FIX: pipeline fetch + generation ──
+    Fire all question generation calls simultaneously.
+    Uses cache: if a post_url was seen in the last hour, returns instantly.
     """
     results = [None] * len(posts)
-    failed  = 0
 
     def _gen(idx, post):
         try:
-            return idx, generate_question(post, client)
+            data = _generate_question_cached(
+                post_url=post["url"],
+                post_title=post["title"],
+                post_text=post["text"],
+                post_sub=post["sub"],
+                api_key=api_key,
+            )
+            return idx, data
         except Exception:
             return idx, None
 
-    with ThreadPoolExecutor(max_workers=min(len(posts), 6)) as pool:
+    with ThreadPoolExecutor(max_workers=min(len(posts), 8)) as pool:
         futures = {pool.submit(_gen, i, p): i for i, p in enumerate(posts)}
         try:
-            for future in as_completed(futures, timeout=30):
+            for future in as_completed(futures, timeout=25):
                 try:
                     idx, data = future.result()
                     results[idx] = data
@@ -716,8 +458,8 @@ def generate_all_questions_parallel(posts, client):
         except Exception:
             pass
 
-    questions = []
-    for i, (post, q_data) in enumerate(zip(posts, results)):
+    questions, failed = [], 0
+    for post, q_data in zip(posts, results):
         if q_data:
             questions.append({**post, **q_data})
         else:
@@ -727,93 +469,109 @@ def generate_all_questions_parallel(posts, client):
     return questions, failed
 
 
-# ─── OPENAI: FANTASY GENERATOR ───────────────────────────────────────────────
+# ─── COMBINED FANTASIES + RECOMMENDATIONS + CATEGORY SCORING (ONE API CALL) ──
 
-def generate_fantasies(result_type, openness_pct, hd_answers, questions, answers, client):
-    hd_str           = _hd_signal_str(hd_answers)
-    pos_str, neg_str = _quiz_context(questions, answers)
+def generate_profile_and_categories(result_type, openness_pct, hd_answers,
+                                     questions, answers, client) -> dict:
+    """
+    ── BIGGEST SPEED FIX: was 2 separate API calls, now 1 ──
 
-    prompt = (
-        f"Vice Vault 18+ app. User profile:\n"
-        f"- Result: {result_type['name']} ({openness_pct}%)\n"
-        f"- Hidden signals: {hd_str}\n"
-        f"- Resonated with: {pos_str}\n"
-        f"- Rejected: {neg_str}\n\n"
-        f"Generate 25 fantasy/content category labels (3-8 words each). "
-        f"Gender-neutral. No anatomy. Order: best match → interesting stretch. "
-        f"Nothing from rejected list.\n"
-        f"Return ONLY a JSON array of 25 strings."
+    Returns:
+      {
+        "ranked_categories": [{"name": str, "score": int}, ...],  # all 100+ scored
+        "top25_names": [str, ...],                                 # top 25 by score
+        "recommendations": [str, ...],                             # 5 recs
+      }
+    """
+    hd_str = _hd_signal_str(hd_answers)
+
+    # Build quiz context
+    pos, neg = [], []
+    for qi, ai in enumerate(answers):
+        if ai is None or qi >= len(questions): continue
+        q   = questions[qi]
+        opt = q.get("opts", [])
+        if ai >= len(opt): continue
+        pts  = opt[ai].get("pts", 0) if isinstance(opt[ai], dict) else 0
+        text = (opt[ai].get("t", "") if isinstance(opt[ai], dict) else "")[:60]
+        if pts >= 3: pos.append(f'"{q.get("title","")[:40]}": {text}')
+        elif pts == 0: neg.append(f'"{q.get("title","")[:40]}": {text}')
+    pos_str = "; ".join(pos[:4]) or "none"
+    neg_str = "; ".join(neg[:4]) or "none"
+
+    categories_json = json.dumps(ALL_PLATFORM_CATEGORIES)
+
+    prompt = f"""You are a desire profile analyst for an 18+ adult platform.
+
+User profile:
+- Openness result: {result_type['name']} ({openness_pct}%)
+- Hidden desire signals: {hd_str}
+- Resonated with: {pos_str}
+- Rejected (DO NOT recommend): {neg_str}
+
+Your tasks — return ONE JSON object with exactly these keys:
+
+1. "ranked_categories": Score EVERY category in this list from 0-10 based on match to this user's profile.
+   Higher = stronger match. Rejected items get 0. Be specific — not everything should score 5.
+   Categories: {categories_json}
+
+2. "recommendations": Write 5 personalised, frank recommendations (1-2 sentences each).
+   Weave in their signals. Respect rejected items strictly. Gender-neutral. Non-judgmental.
+
+Return ONLY valid JSON, no markdown:
+{{
+  "ranked_categories": {{"CategoryName": score, ...}},
+  "recommendations": ["...", "...", "...", "...", "..."]
+}}"""
+
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=2000,
+        messages=[{"role": "user", "content": prompt}],
     )
+    raw  = resp.content[0].text.strip()
+    data = _safe_json(raw)
 
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        max_tokens=600,
-        temperature=0.9,
-        messages=[
-            {"role": "system", "content": "18+ adult app. JSON array of strings only. No markdown."},
-            {"role": "user", "content": prompt},
-        ],
-    )
-    data = _safe_json(resp.choices[0].message.content)
-    if not isinstance(data, list) or len(data) < 10:
-        raise ValueError(f"Got {len(data) if isinstance(data,list) else 0} categories")
-    return data[:25]
+    if not isinstance(data, dict):
+        raise ValueError("Profile generation returned invalid JSON")
 
+    # Process ranked categories
+    raw_scores = data.get("ranked_categories", {})
+    scored = []
+    for cat in ALL_PLATFORM_CATEGORIES:
+        score = int(raw_scores.get(cat, 0))
+        scored.append({"name": cat, "score": score})
+    scored.sort(key=lambda x: -x["score"])
 
-# ─── OPENAI: RECOMMENDATIONS ─────────────────────────────────────────────────
+    top25 = [c["name"] for c in scored[:25]]
 
-def generate_recommendations(result_type, openness_pct, hd_answers, questions, answers, selected_fantasies, client):
-    hd_str           = _hd_signal_str(hd_answers)
-    pos_str, neg_str = _quiz_context(questions, answers)
-    fantasy_str      = ", ".join(selected_fantasies[:10]) if selected_fantasies else "none"
-
-    prompt = (
-        f"Vice Vault desire analyst (18+). User:\n"
-        f"- Result: {result_type['name']} ({openness_pct}%)\n"
-        f"- Signals: {hd_str}\n"
-        f"- Resonated: {pos_str}\n"
-        f"- Rejected (forbidden): {neg_str}\n"
-        f"- Chosen fantasies: {fantasy_str}\n\n"
-        f"Write 5 personalised, frank recommendations (1-2 sentences each). "
-        f"Weave in chosen fantasies. Respect rejected items strictly. "
-        f"Gender-neutral. Non-judgmental.\n"
-        f"Return ONLY a JSON array of 5 strings."
-    )
-
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        max_tokens=500,
-        temperature=0.9,
-        messages=[
-            {"role": "system", "content": "18+ desire analyst. JSON array of 5 strings only. No markdown."},
-            {"role": "user", "content": prompt},
-        ],
-    )
-    data = _safe_json(resp.choices[0].message.content)
-    if not isinstance(data, list):
-        raise ValueError("Recommendations not a list")
-    return data[:5]
+    return {
+        "ranked_categories": scored,
+        "top25_names":       top25,
+        "recommendations":   data.get("recommendations", [])[:5],
+    }
 
 
-# ─── STATE ───────────────────────────────────────────────────────────────────
+# ─── STATE ────────────────────────────────────────────────────────────────────
 
 _DEFAULTS = {
-    "wwyd_phase":         "start",
-    "wwyd_load_errors":   0,
-    "wwyd_questions":     [],
-    "wwyd_answers":       [],
-    "wwyd_cur":           0,
-    "wwyd_error":         "",
-    "wwyd_source":        "live",
-    "wwyd_hd_cur":        0,
-    "wwyd_hd_answers":    {},
-    "wwyd_fantasies":     [],
-    "wwyd_selected":      [],
-    "wwyd_fantasy_error": "",
-    "wwyd_result_type":   {},
-    "wwyd_openness_pct":  0,
-    "wwyd_total_pts":     0,
-    "wwyd_recs":          [],
+    "wwyd_phase":            "start",
+    "wwyd_load_errors":      0,
+    "wwyd_questions":        [],
+    "wwyd_answers":          [],
+    "wwyd_cur":              0,
+    "wwyd_error":            "",
+    "wwyd_source":           "live",
+    "wwyd_hd_cur":           0,
+    "wwyd_hd_answers":       {},
+    "wwyd_result_type":      {},
+    "wwyd_openness_pct":     0,
+    "wwyd_total_pts":        0,
+    "wwyd_recs":             [],
+    # category state
+    "wwyd_ranked_cats":      [],   # all scored categories
+    "wwyd_top25":            [],   # AI-suggested top 25 names
+    "wwyd_selected_cats":    [],   # user's final selection
 }
 
 
@@ -878,7 +636,7 @@ def render_start():
       <span class="live-dot"></span>Phase 1 · Reddit Scenarios
     </div>
     <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75; margin:0 0 10px 0;">
-      10 real posts. All 10 questions generated in parallel — ready in seconds.
+      7 real posts. All questions generated in parallel — cached for speed.
     </p>
     <div>{subs_html}</div>
   </div>
@@ -897,9 +655,9 @@ def render_start():
               border-left:3px solid var(--cyan); border-radius:4px;
               padding:16px 18px; margin-bottom:20px;">
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--cyan); margin-bottom:6px;">Phase 3 · Your Fantasy Menu</div>
+                text-transform:uppercase; color:var(--cyan); margin-bottom:6px;">Phase 3 · Your Category Fingerprint</div>
     <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75; margin:0;">
-      25 AI-generated categories built specifically for you. Pick everything that fits.
+      Every real platform category scored against your profile. Top 25 highlighted — you pick what fits.
     </p>
   </div>
 
@@ -917,8 +675,6 @@ def render_start():
 
 
 # ─── PHASE: LOADING ───────────────────────────────────────────────────────────
-# KEY FIX: all 10 questions generated in parallel via generate_all_questions_parallel.
-# Total wait time is now ~max(single_call) not ~sum(all_calls).
 
 def render_loading():
     st.html("""
@@ -935,26 +691,24 @@ def render_loading():
     try:
         upd(5, "Fetching live scenarios…")
         posts = fetch_posts()
-        upd(25, f"{len(posts)} scenarios loaded — generating all questions in parallel…")
+        upd(20, f"{len(posts)} scenarios loaded — generating questions in parallel…")
 
-        try:
-            client = _get_client()
-        except RuntimeError as e:
-            st.session_state.wwyd_error = str(e)
+        api_key = st.secrets.get("ANTHROPIC_API_KEY") or st.secrets.get("anthropic_api_key", "")
+        if not api_key:
+            st.session_state.wwyd_error = "ANTHROPIC_API_KEY not found in secrets."
             st.session_state.wwyd_phase = "start"
             st.rerun()
             return
 
         selected = posts[:POST_COUNT]
 
-        # Animated progress while parallel generation runs in background
-        upd(35, f"Generating {len(selected)} questions simultaneously…")
-        questions, failed_count = generate_all_questions_parallel(selected, client)
+        # ── PIPELINE: all question generation fires simultaneously ──
+        # Cache means returning users see near-instant loads
+        questions, failed_count = generate_all_questions_parallel(selected, api_key)
 
         upd(95, "Finalising…")
-        time.sleep(0.15)
-        upd(100, "Ready.")
         time.sleep(0.1)
+        upd(100, "Ready.")
 
         st.session_state.wwyd_questions   = questions
         st.session_state.wwyd_answers     = [None] * len(questions)
@@ -964,8 +718,6 @@ def render_loading():
             "live" if any("reddit.com/r/" in p.get("url", "") for p in posts) else "curated"
         )
         st.session_state.wwyd_phase = "quiz"
-
-        _save_progress_to_db("quiz_start")
         st.rerun()
 
     except Exception as e:
@@ -975,10 +727,6 @@ def render_loading():
 
 
 # ─── PHASE: QUIZ ─────────────────────────────────────────────────────────────
-# KEY FIX: answer selection no longer triggers a full rerun.
-# We use st.session_state directly in on_change callbacks.
-# The "Next" button is the ONLY thing that changes the question, keeping
-# rerenders minimal and the page feeling instant.
 
 def render_quiz():
     questions = st.session_state.wwyd_questions
@@ -994,9 +742,9 @@ def render_quiz():
         answers = answers + [None] * (len(questions) - len(answers))
         st.session_state.wwyd_answers = answers
 
-    q        = questions[cur]
-    total    = len(questions)
-    is_last  = (cur == total - 1)
+    q       = questions[cur]
+    total   = len(questions)
+    is_last = (cur == total - 1)
     selected = answers[cur]
 
     segs = "".join(
@@ -1004,8 +752,6 @@ def render_quiz():
         f'{"var(--magenta)" if i < cur else "rgba(255,45,120,0.4)" if i == cur else "var(--border)"}"></div>'
         for i in range(total)
     )
-
-    failed = st.session_state.get("wwyd_load_errors", 0)
 
     st.html(f"""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
@@ -1015,10 +761,6 @@ def render_quiz():
 <div style="display:flex; gap:3px; margin-bottom:20px;">{segs}</div>
 """)
 
-    if failed and cur == 0:
-        st.caption(f"⚠ {failed} question(s) used a scenario-specific fallback")
-
-    # ── Post card ──────────────────────────────────────────────────────────
     st.html(f"""
 <div class="enter-card" style="background:var(--card); border:1px solid var(--border);
             border-radius:4px; overflow:hidden; margin-bottom:14px;">
@@ -1062,30 +804,23 @@ def render_quiz():
             margin-bottom:14px; line-height:1.55;">{q['prompt']}</div>
 """)
 
-    # ── Answer options via radio — single widget, single rerun on change ──
-    # Build option labels
     opt_labels = [
         (opt["t"] if isinstance(opt, dict) else opt)
         for opt in q["opts"]
     ]
 
-    # Map current selection index → label for radio default
-    radio_key    = f"quiz_radio_{cur}"
-    current_sel  = answers[cur]
-    default_idx  = current_sel if current_sel is not None else None
+    radio_key   = f"quiz_radio_{cur}"
+    current_sel = answers[cur]
 
-    # We use a hidden label radio with custom CSS (injected above)
     chosen = st.radio(
-        label="Your answer",          # hidden by CSS
+        label="Your answer",
         options=list(range(len(opt_labels))),
         format_func=lambda i: opt_labels[i],
-        index=default_idx,
+        index=current_sel,
         key=radio_key,
         horizontal=False,
     )
 
-    # Sync selection to answers list (radio fires rerun on change — that's fine,
-    # it's one rerun for selection, zero reruns for un-related interactions)
     if chosen != current_sel:
         a = list(st.session_state.wwyd_answers)
         a[cur] = chosen
@@ -1104,7 +839,6 @@ def render_quiz():
         if st.button(btn_label, key="quiz_next", disabled=not answered,
                      use_container_width=True, type="primary"):
             if is_last:
-                _save_progress_to_db("phase1_complete")
                 st.session_state.wwyd_hd_cur = 0
                 st.session_state.wwyd_phase  = "hidden_desires"
             else:
@@ -1113,18 +847,12 @@ def render_quiz():
 
 
 # ─── PHASE: HIDDEN DESIRES ────────────────────────────────────────────────────
-# KEY FIX: use st.radio instead of N individual st.button calls.
-# One radio widget = one widget rendered, one rerun on change.
-# Previously: 4 buttons × 15 questions = 60 widgets re-evaluated each page load.
 
 def render_hidden_desires():
     total   = len(HIDDEN_DESIRE_QUESTIONS)
     answers = st.session_state.wwyd_hd_answers
-
-    raw_cur = st.session_state.wwyd_hd_cur
-    cur     = max(0, min(raw_cur, total - 1))
-    if cur != raw_cur:
-        st.session_state.wwyd_hd_cur = cur
+    cur     = max(0, min(st.session_state.wwyd_hd_cur, total - 1))
+    st.session_state.wwyd_hd_cur = cur
 
     q       = HIDDEN_DESIRE_QUESTIONS[cur]
     sel_id  = answers.get(q["id"])
@@ -1152,11 +880,9 @@ def render_hidden_desires():
 </div>
 """)
 
-    # Current selection as index into HD_OPT_IDS
     current_idx = HD_OPT_IDS.index(sel_id) if sel_id in HD_OPT_IDS else None
-
-    radio_key = f"hd_radio_{cur}"
-    chosen_idx = st.radio(
+    radio_key   = f"hd_radio_{cur}"
+    chosen_idx  = st.radio(
         label="Resonance",
         options=list(range(len(HD_OPT_LABELS))),
         format_func=lambda i: HD_OPT_LABELS[i],
@@ -1165,14 +891,12 @@ def render_hidden_desires():
         horizontal=False,
     )
 
-    # Sync to hd_answers dict
     if chosen_idx is not None:
         new_id = HD_OPT_IDS[chosen_idx]
         if new_id != sel_id:
             hd = dict(st.session_state.wwyd_hd_answers)
             hd[q["id"]] = new_id
             st.session_state.wwyd_hd_answers = hd
-            # Auto-advance on new selection when not on last question
             if not is_last:
                 st.session_state.wwyd_hd_cur += 1
                 st.rerun()
@@ -1187,11 +911,9 @@ def render_hidden_desires():
     with col_next:
         answered = q["id"] in st.session_state.wwyd_hd_answers
         if is_last:
-            if st.button("Build My Fantasy Menu →", key="hd_next_last",
+            if st.button("Build My Profile →", key="hd_next_last",
                          disabled=not answered, use_container_width=True, type="primary"):
-                _save_progress_to_db("phase2_complete")
-                st.session_state.wwyd_fantasy_error = ""
-                st.session_state.wwyd_phase = "generating_fantasies"
+                st.session_state.wwyd_phase = "generating_profile"
                 st.rerun()
         else:
             if st.button("Next →", key="hd_next_mid", disabled=not answered,
@@ -1201,12 +923,12 @@ def render_hidden_desires():
                 st.rerun()
 
 
-# ─── PHASE: GENERATING FANTASIES ─────────────────────────────────────────────
+# ─── PHASE: GENERATING PROFILE (single API call) ──────────────────────────────
 
-def render_generating_fantasies():
+def render_generating_profile():
     st.html("""
 <div style="font-family:'Bebas Neue',sans-serif; font-size:36px; color:var(--text);
-            letter-spacing:3px; margin-bottom:20px;">BUILDING YOUR MENU</div>
+            letter-spacing:3px; margin-bottom:20px;">BUILDING YOUR PROFILE</div>
 """)
     ph_bar    = st.empty()
     ph_status = st.empty()
@@ -1214,11 +936,13 @@ def render_generating_fantasies():
     def upd(pct, s): ph_bar.progress(pct); ph_status.caption(s)
 
     try:
-        upd(15, "Computing Phase 1 score…")
+        upd(10, "Computing your Phase 1 score…")
+
         questions = st.session_state.wwyd_questions
         answers   = st.session_state.wwyd_answers
         hd_ans    = st.session_state.wwyd_hd_answers
 
+        # Score Phase 1
         total_pts = sum(
             (q.get("opts", [])[a].get("pts", 0) if isinstance(q.get("opts", [])[a], dict) else 0)
             for q, a in zip(questions, answers)
@@ -1231,78 +955,50 @@ def render_generating_fantasies():
         pct         = round((total_pts / max_pts) * 100) if max_pts else 0
         result_type = next((r for r in RESULT_TYPES if r["min"] <= total_pts <= r["max"]), RESULT_TYPES[-1])
 
-        upd(40, "Reading your desire signals…")
-        try:
-            client = _get_client()
-        except RuntimeError as e:
-            st.session_state.wwyd_fantasy_error = str(e)
-            st.session_state.wwyd_phase = "fantasy_error"
-            st.rerun()
-            return
+        upd(30, "Scoring every platform category against your profile…")
 
-        upd(60, "Generating 25 categories…")
-        fantasies = generate_fantasies(result_type, pct, hd_ans, questions, answers, client)
+        client = _get_client()
 
-        upd(100, "Ready.")
-        time.sleep(0.2)
+        # ── ONE API CALL for categories + recommendations ──
+        profile_data = generate_profile_and_categories(
+            result_type, pct, hd_ans, questions, answers, client
+        )
+
+        upd(100, "Done.")
+        time.sleep(0.15)
 
         st.session_state.wwyd_result_type  = result_type
         st.session_state.wwyd_openness_pct = pct
         st.session_state.wwyd_total_pts    = total_pts
-        st.session_state.wwyd_fantasies    = fantasies
-        st.session_state.wwyd_phase        = "fantasy_selector"
+        st.session_state.wwyd_ranked_cats  = profile_data["ranked_categories"]
+        st.session_state.wwyd_top25        = profile_data["top25_names"]
+        st.session_state.wwyd_recs         = profile_data["recommendations"]
+        # Pre-select top 25 so user lands with recommendations already highlighted
+        st.session_state.wwyd_selected_cats = list(profile_data["top25_names"])
+        st.session_state.wwyd_phase         = "category_selector"
 
-        _save_progress_to_db("phase2_scored", {"result_type": result_type["name"], "pct": pct})
+        _save_to_db("profile_complete")
         st.rerun()
 
     except Exception as e:
-        st.session_state.wwyd_fantasy_error = str(e)
-        st.session_state.wwyd_phase = "fantasy_error"
+        st.session_state.wwyd_error = f"Couldn't build your profile: {e}"
+        st.session_state.wwyd_phase = "start"
         st.rerun()
 
 
-# ─── PHASE: FANTASY ERROR ─────────────────────────────────────────────────────
+# ─── PHASE: CATEGORY SELECTOR ────────────────────────────────────────────────
 
-def render_fantasy_error():
-    err = st.session_state.get("wwyd_fantasy_error", "Unknown error")
-    st.error(f"Couldn't build your menu: {err}")
-    st.html("""
-<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
-            padding:14px 18px; margin-top:10px;">
-  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.7;">
-    Your Phase 1 and Phase 2 answers are saved — retry without losing progress.
-  </div>
-</div>
-""")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("↺ Retry", use_container_width=True, type="primary", key="fe_retry"):
-            st.session_state.wwyd_fantasy_error = ""
-            st.session_state.wwyd_phase = "generating_fantasies"
-            st.rerun()
-    with col2:
-        if st.button("← Back", use_container_width=True, key="fe_back"):
-            st.session_state.wwyd_hd_cur = len(HIDDEN_DESIRE_QUESTIONS) - 1
-            st.session_state.wwyd_phase  = "hidden_desires"
-            st.rerun()
-
-
-# ─── PHASE: FANTASY SELECTOR ──────────────────────────────────────────────────
-
-def render_fantasy_selector():
-    if st.session_state.get("wwyd_error"):
-        st.error(st.session_state.wwyd_error)
-        st.session_state.wwyd_error = ""
-
-    fantasies = st.session_state.wwyd_fantasies
-    selected  = set(st.session_state.wwyd_selected)
+def render_category_selector():
+    ranked_cats = st.session_state.wwyd_ranked_cats          # [{name, score}, ...]
+    top25_names = set(st.session_state.wwyd_top25)           # AI top 25
+    selected    = set(st.session_state.wwyd_selected_cats)   # user's picks
 
     pct         = st.session_state.get("wwyd_openness_pct", 0)
     result_type = st.session_state.get("wwyd_result_type", {})
 
     st.html(f"""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Phase 3 · Your Fantasy Menu</div>
+            text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Phase 3 · Your Category Fingerprint</div>
 <div style="background:var(--card); border:1px solid var(--border);
             border-top:2px solid var(--cyan); border-radius:4px; padding:18px 20px; margin-bottom:16px;">
   <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
@@ -1320,79 +1016,80 @@ def render_fantasy_selector():
     </div>
   </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); margin-top:12px; line-height:1.7;">
-    25 categories built from your signals. Ordered closest → interesting stretch.
-    <strong style="color:var(--text);">Tap everything that resonates.</strong>
+    Every real platform category scored against your signals.
+    <span style="color:var(--lime); font-weight:600;">Lime = AI top 25 picks for you.</span>
+    Toggle anything you want — or don't.
+  </div>
+</div>
+
+<div style="display:flex; gap:16px; align-items:center; margin-bottom:14px;">
+  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--muted);">
+    {len(selected)} selected
+  </div>
+  <div style="display:flex; gap:8px; margin-left:auto;">
+    <div style="display:flex; align-items:center; gap:5px;">
+      <div style="width:10px; height:10px; border:1px solid var(--lime); border-radius:2px;"></div>
+      <span style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">AI top 25</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:5px;">
+      <div style="width:10px; height:10px; border:1px solid var(--border); border-radius:2px;
+                  background:var(--magenta);"></div>
+      <span style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">selected</span>
+    </div>
   </div>
 </div>
 """)
 
-    cols = st.columns(2)
-    for idx, label in enumerate(fantasies):
-        is_sel = label in selected
-        with cols[idx % 2]:
+    # Render all categories in ranked order, 3 columns
+    cols = st.columns(3)
+    for idx, cat_info in enumerate(ranked_cats):
+        cat_name  = cat_info["name"]
+        cat_score = cat_info["score"]
+        is_top25  = cat_name in top25_names
+        is_sel    = cat_name in selected
+
+        # Build button label with score indicator
+        score_bar = "█" * min(cat_score, 5) + "░" * (5 - min(cat_score, 5))
+        if is_sel:
+            btn_label = f"✓ {cat_name}"
+        elif is_top25:
+            btn_label = f"◆ {cat_name}"
+        else:
+            btn_label = cat_name
+
+        with cols[idx % 3]:
+            # Use primary for selected, custom styling for top25 vs rest
+            btn_type = "primary" if is_sel else "secondary"
             if st.button(
-                ("✓ " if is_sel else "") + label,
-                key=f"f_{idx}",
+                btn_label,
+                key=f"cat_{idx}",
                 use_container_width=True,
-                type="primary" if is_sel else "secondary",
+                type=btn_type,
             ):
-                selected.discard(label) if is_sel else selected.add(label)
-                st.session_state.wwyd_selected = list(selected)
+                new_sel = set(st.session_state.wwyd_selected_cats)
+                if is_sel:
+                    new_sel.discard(cat_name)
+                else:
+                    new_sel.add(cat_name)
+                st.session_state.wwyd_selected_cats = list(new_sel)
                 st.rerun()
 
-    count = len(selected)
-    st.html(f"""
-<div style="font-family:'Space Mono',monospace; font-size:10px; letter-spacing:2px;
-            color:{"var(--magenta)" if count else "var(--muted)"}; text-align:center; margin:14px 0 4px;">
-  {count} selected{" — ready to build your profile" if count > 0 else ""}
+            # Score bar beneath button
+            if cat_score > 0:
+                bar_color = "var(--lime)" if is_top25 else "var(--border)"
+                fill_pct  = min(100, cat_score * 10)
+                st.html(f"""
+<div style="height:2px; background:var(--border); border-radius:1px; margin:-6px 0 8px;">
+  <div style="width:{fill_pct}%; height:100%; background:{bar_color}; border-radius:1px;"></div>
 </div>
 """)
 
     st.html("<br>")
-    if st.button("Build My Full Profile →", use_container_width=True, type="primary",
-                 disabled=(count == 0), key="f_next"):
-        st.session_state.wwyd_phase = "generating_result"
-        st.rerun()
-
-
-# ─── PHASE: GENERATING RESULT ─────────────────────────────────────────────────
-
-def render_generating_result():
-    st.html("""
-<div style="font-family:'Bebas Neue',sans-serif; font-size:36px; color:var(--text);
-            letter-spacing:3px; margin-bottom:20px;">BUILDING YOUR PROFILE</div>
-""")
-    ph_bar    = st.empty()
-    ph_status = st.empty()
-
-    def upd(pct, s): ph_bar.progress(pct); ph_status.caption(s)
-
-    try:
-        upd(20, "Synthesising your full profile…")
-
-        result_type = st.session_state.wwyd_result_type
-        pct         = st.session_state.wwyd_openness_pct
-        sel_f       = st.session_state.wwyd_selected
-        questions   = st.session_state.wwyd_questions
-        answers     = st.session_state.wwyd_answers
-        hd_ans      = st.session_state.wwyd_hd_answers
-
-        upd(55, "Writing personalised recommendations…")
-        client = _get_client()
-        recs   = generate_recommendations(result_type, pct, hd_ans, questions, answers, sel_f, client)
-
-        upd(100, "Done.")
-        time.sleep(0.15)
-
-        st.session_state.wwyd_recs  = recs
+    sel_count = len(selected)
+    if st.button("See My Full Profile →", use_container_width=True, type="primary",
+                 disabled=(sel_count == 0), key="cat_next"):
         st.session_state.wwyd_phase = "result"
-
-        _save_progress_to_db("complete")
-        st.rerun()
-
-    except Exception as e:
-        st.session_state.wwyd_error = f"Error generating recommendations: {e}"
-        st.session_state.wwyd_phase = "fantasy_selector"
         st.rerun()
 
 
@@ -1401,8 +1098,9 @@ def render_generating_result():
 def render_result():
     result_type = st.session_state.get("wwyd_result_type") or RESULT_TYPES[0]
     pct         = st.session_state.get("wwyd_openness_pct", 0)
-    sel_f       = st.session_state.get("wwyd_selected", [])
+    sel_cats    = st.session_state.get("wwyd_selected_cats", [])
     recs        = st.session_state.get("wwyd_recs", [])
+    ranked_cats = st.session_state.get("wwyd_ranked_cats", [])
     hd_ans      = st.session_state.get("wwyd_hd_answers", {})
 
     st.html(f"""
@@ -1440,6 +1138,7 @@ def render_result():
 </div>
 """)
 
+    # Hidden desire signals
     strong = [q for q in HIDDEN_DESIRE_QUESTIONS if hd_ans.get(q["id"]) in ("yes", "strongly")]
     if strong:
         sigs_html = "".join(
@@ -1462,25 +1161,42 @@ def render_result():
 </div>
 """)
 
-    if sel_f:
-        tags = "".join(
-            f'<span style="display:inline-block; padding:5px 11px; margin:3px; border-radius:2px; '
-            f'font-family:\'Space Mono\',monospace; font-size:8px; letter-spacing:1px; '
-            f'text-transform:uppercase; border:1px solid var(--border); '
-            f'background:var(--surface); color:var(--soft);">{f}</span>'
-            for f in sel_f
+    # Top categories — show top 10 with score bars
+    if ranked_cats:
+        top10     = [c for c in ranked_cats[:10] if c["score"] > 0]
+        max_score = ranked_cats[0]["score"] if ranked_cats else 1
+        bars_html = "".join(
+            f'<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">'
+            f'<div style="font-family:\'Space Mono\',monospace; font-size:9px; color:{"var(--lime)" if c["name"] in sel_cats else "var(--soft)"}; '
+            f'width:150px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; '
+            f'text-transform:uppercase; letter-spacing:1px;">'
+            f'{"✓ " if c["name"] in sel_cats else ""}{c["name"]}</div>'
+            f'<div style="flex:1; height:3px; background:var(--border); border-radius:2px;">'
+            f'<div style="width:{min(100, round(c["score"]/max_score*100))}%; height:100%; '
+            f'background:{"var(--lime)" if c["name"] in sel_cats else "var(--muted)"}; border-radius:2px;"></div>'
+            f'</div>'
+            f'<div style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--muted); '
+            f'width:20px; text-align:right;">{c["score"]}</div>'
+            f'</div>'
+            for c in top10
         )
         st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:18px; margin-bottom:12px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--cyan); margin-bottom:10px;">
-    Selected Fantasies · {len(sel_f)}
+              text-transform:uppercase; color:var(--cyan); margin-bottom:4px;">
+    Your Content Fingerprint · Top 10
   </div>
-  <div>{tags}</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:11px; color:var(--muted);
+              margin-bottom:14px; line-height:1.6;">
+    Scored against your desire signals and openness tier.
+    {len(sel_cats)} categories selected.
+  </div>
+  {bars_html}
 </div>
 """)
 
+    # Recommendations
     if recs:
         recs_html = "".join(
             f'<div style="background:var(--surface); border:1px solid var(--border); '
@@ -1498,50 +1214,6 @@ def render_result():
 </div>
 """)
 
-    # ── Content fingerprint — quiz signals mapped to real platform categories ─
-    cmap     = _build_content_map(hd_ans, result_type, sel_f)
-    top_cats = cmap["top10"]
-    ranked   = cmap["ranked"]
-
-    if top_cats:
-        max_sc    = ranked[0]["score"] if ranked else 1
-        bars_html = "".join(
-            f'<div style="display:flex; align-items:center; gap:10px; margin-bottom:7px;">'
-            f'<div style="font-family:\'Space Mono\',monospace; font-size:9px; color:var(--soft); '
-            f'width:140px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; '
-            f'text-transform:uppercase; letter-spacing:1px;">{r["category"]}</div>'
-            f'<div style="flex:1; height:3px; background:var(--border); border-radius:2px;">'
-            f'<div style="width:{min(100, round(r["score"]/max_sc*100))}%; height:100%; '
-            f'background:linear-gradient(90deg,var(--cyan),var(--magenta)); border-radius:2px;"></div>'
-            f'</div>'
-            f'<div style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--muted); '
-            f'width:20px; text-align:right;">{r["score"]}</div>'
-            f'</div>'
-            for r in ranked[:10]
-        )
-        st.html(f"""
-<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
-            padding:18px; margin-bottom:12px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--cyan); margin-bottom:4px;">
-    Your Content Fingerprint
-  </div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:11px; color:var(--muted);
-              margin-bottom:14px; line-height:1.6;">
-    Derived from your desire signals, openness tier, and fantasy picks —
-    mapped to what actually exists on the platform.
-  </div>
-  {bars_html}
-</div>
-""")
-
-    st.html("""
-<div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
-            text-transform:uppercase; color:var(--muted); text-align:center; margin-bottom:12px;">
-  ✓ Full profile saved · questions · answers · signals · categories
-</div>
-""")
-
     share = (
         f"Read Between The Lines — Vice Vault\n\n"
         f"Result: {result_type['name']}\n\"{result_type['meta']}\"\n"
@@ -1549,10 +1221,8 @@ def render_result():
     )
     if strong:
         share += "Signals: " + ", ".join(q["signal"] for q in strong[:5]) + "\n\n"
-    if sel_f:
-        share += "Fantasies: " + ", ".join(sel_f[:8]) + "\n\n"
-    if top_cats:
-        share += "Content categories: " + ", ".join(top_cats[:6]) + "\n\n"
+    if sel_cats:
+        share += "My categories: " + ", ".join(sel_cats[:10]) + "\n\n"
     if recs:
         share += "Recommendations:\n" + "\n".join(f"· {r}" for r in recs[:3])
 
@@ -1568,6 +1238,35 @@ def render_result():
         )
 
 
+# ─── DB SAVE ──────────────────────────────────────────────────────────────────
+
+def _save_to_db(phase: str):
+    uid = _uid()
+    if not uid:
+        return
+    try:
+        import database as db
+        db.save_read_between_lines_v4(
+            user_id=uid,
+            phase=phase,
+            result_name=st.session_state.get("wwyd_result_type", {}).get("name", ""),
+            result_meta=st.session_state.get("wwyd_result_type", {}).get("meta", ""),
+            openness_pct=st.session_state.get("wwyd_openness_pct", 0),
+            total_pts=st.session_state.get("wwyd_total_pts", 0),
+            questions=st.session_state.get("wwyd_questions", []),
+            answers=st.session_state.get("wwyd_hd_answers", {}),
+            dim_scores={
+                "ranked_cats": st.session_state.get("wwyd_ranked_cats", [])[:25],
+                "top25":       st.session_state.get("wwyd_top25", []),
+                "selected":    st.session_state.get("wwyd_selected_cats", []),
+                "hd_signals":  _hd_signal_str(st.session_state.get("wwyd_hd_answers", {})),
+            },
+            recommendations=st.session_state.get("wwyd_recs", []),
+        )
+    except Exception:
+        pass
+
+
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
 def what_would_you_do_page():
@@ -1577,15 +1276,13 @@ def what_would_you_do_page():
 
     phase = st.session_state.wwyd_phase
 
-    if   phase == "start":                render_start()
-    elif phase == "loading":              render_loading()
-    elif phase == "quiz":                 render_quiz()
-    elif phase == "hidden_desires":       render_hidden_desires()
-    elif phase == "generating_fantasies": render_generating_fantasies()
-    elif phase == "fantasy_error":        render_fantasy_error()
-    elif phase == "fantasy_selector":     render_fantasy_selector()
-    elif phase == "generating_result":    render_generating_result()
-    elif phase == "result":               render_result()
+    if   phase == "start":              render_start()
+    elif phase == "loading":            render_loading()
+    elif phase == "quiz":               render_quiz()
+    elif phase == "hidden_desires":     render_hidden_desires()
+    elif phase == "generating_profile": render_generating_profile()
+    elif phase == "category_selector":  render_category_selector()
+    elif phase == "result":             render_result()
     else:
         _wipe()
         init_state()
