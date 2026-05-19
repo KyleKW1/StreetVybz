@@ -52,11 +52,13 @@ def ensure_tables():
             INDEX idx_vice_log_time (user_id, logged_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
+        # FIX: quiz_type widened to VARCHAR(64) — previously VARCHAR(32) caused
+        # silent truncation/failure for values like 'read_between_lines_v4_profile_complete' (38 chars)
         """
         CREATE TABLE IF NOT EXISTS quiz_results (
             id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             user_id         INT NOT NULL,
-            quiz_type       VARCHAR(32)  NOT NULL,
+            quiz_type       VARCHAR(64)  NOT NULL,
             completed_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
             profile_name    VARCHAR(128),
             profile_meta    VARCHAR(255),
@@ -147,6 +149,17 @@ def ensure_tables():
         for ddl in ddl_statements:
             cur.execute(ddl)
         conn.commit()
+
+        # ── Migration: widen quiz_type on existing deployments ────────────────
+        # This is the root cause of "DB save failed (profile_complete)" —
+        # VARCHAR(32) silently rejected the 38-char quiz_type value.
+        try:
+            cur.execute(
+                "ALTER TABLE quiz_results MODIFY COLUMN quiz_type VARCHAR(64) NOT NULL"
+            )
+            conn.commit()
+        except Exception:
+            pass  # already wide enough, or table doesn't exist yet — safe to ignore
 
         try:
             cur.execute("ALTER TABLE confessions ADD COLUMN revealed_at DATETIME DEFAULT NULL")
@@ -551,6 +564,12 @@ def save_read_between_lines_v4(
     conn = create_connection()
     if not conn:
         return False
+
+    # Truncate phase to keep quiz_type within VARCHAR(64).
+    # Full value e.g. "read_between_lines_v4_profile_complete" = 38 chars — safe now,
+    # but guard anyway in case phase strings grow further.
+    quiz_type = f"rbtl_v4_{phase}"[:64]
+
     try:
         cur = conn.cursor()
         cur.execute(
@@ -563,7 +582,7 @@ def save_read_between_lines_v4(
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 user_id,
-                f"read_between_lines_v4_{phase}",
+                quiz_type,
                 result_name[:128] if result_name else "",
                 result_meta[:255] if result_meta else "",
                 max(0, min(255, openness_pct)),
@@ -576,8 +595,10 @@ def save_read_between_lines_v4(
         )
         conn.commit()
         cur.close()
-        return True          # plain bool — callers must NOT unpack as tuple
-    except Exception:
+        return True
+    except Exception as e:
+        # Surface the real error so it's visible in the UI
+        st.error(f"DB save error (rbtl_v4/{phase}): {e}")
         return False
     finally:
         conn.close()
@@ -589,9 +610,10 @@ def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> bool:
         return False
     try:
         cur = conn.cursor(dictionary=True)
+        # Match the new quiz_type prefix used by save_read_between_lines_v4
         cur.execute(
             """SELECT id, dim_scores FROM quiz_results
-               WHERE user_id = %s AND quiz_type LIKE 'read_between_lines_v4%%'
+               WHERE user_id = %s AND quiz_type LIKE 'rbtl_v4_%'
                ORDER BY completed_at DESC LIMIT 1""",
             (user_id,)
         )
@@ -616,8 +638,9 @@ def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> bool:
         )
         conn.commit()
         cur.close()
-        return True          # plain bool — callers must NOT unpack as tuple
-    except Exception:
+        return True
+    except Exception as e:
+        st.error(f"DB update error (selected_categories): {e}")
         return False
     finally:
         conn.close()
@@ -631,7 +654,7 @@ def load_latest_rbtl_result(user_id: int) -> dict | None:
         cur = conn.cursor(dictionary=True)
         cur.execute(
             """SELECT * FROM quiz_results
-               WHERE user_id = %s AND quiz_type LIKE 'read_between_lines_v4%'
+               WHERE user_id = %s AND quiz_type LIKE 'rbtl_v4_%'
                ORDER BY completed_at DESC LIMIT 1""",
             (user_id,)
         )
