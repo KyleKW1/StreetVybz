@@ -1,7 +1,7 @@
 """
 Pages/dashboard.py
 Vice tracker — stats, log, history, goals, and streak pages.
-DB-backed. AI weekly reflection via Anthropic. Anonymous social feed.
+DB-backed. AI weekly reflection via OpenAI. Anonymous social feed.
 """
 
 import streamlit as st
@@ -138,8 +138,8 @@ def stat_card(label, value, sublabel, color):
 
 def _generate_reflection(entries: list) -> str:
     try:
-        import anthropic
-        client  = anthropic.Anthropic(api_key=st.secrets["OPENAI_API_KEY"])
+        from openai import OpenAI
+        client  = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
         counts  = defaultdict(int)
         details = {}
         for e in entries:
@@ -155,8 +155,8 @@ def _generate_reflection(entries: list) -> str:
 
         summary = ", ".join(lines) if lines else "no activity"
 
-        msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        msg = client.chat.completions.create(
+            model="gpt-4o-mini",
             max_tokens=180,
             messages=[{
                 "role": "user",
@@ -169,7 +169,7 @@ def _generate_reflection(entries: list) -> str:
                 ),
             }],
         )
-        return msg.content[0].text.strip()
+        return msg.choices[0].message.content.strip()
     except Exception:
         return ""
 
@@ -181,9 +181,9 @@ def _render_ai_reflection(entries_7d: list):
   Weekly Reflection
 </div>
 """)
-    cached = st.session_state.get("_reflection_text")
+    cached    = st.session_state.get("_reflection_text")
     cached_at = st.session_state.get("_reflection_ts", 0)
-    stale = (time.time() - cached_at) > 3600  # Re-generate after 1 hour
+    stale     = (time.time() - cached_at) > 3600  # Re-generate after 1 hour
 
     if cached and not stale:
         text = cached
@@ -212,7 +212,7 @@ def _render_ai_reflection(entries_7d: list):
             st.session_state._reflection_ts   = time.time()
             st.rerun()
         else:
-            st.warning("Couldn't generate reflection — check your Anthropic API key.")
+            st.warning("Couldn't generate reflection — check your OpenAI API key.")
 
 
 # ─── ANONYMOUS SOCIAL FEED ────────────────────────────────────────────────────
