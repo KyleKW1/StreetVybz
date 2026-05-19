@@ -1,20 +1,6 @@
 """
 Pages/what_would_you_do.py
 Read Between The Lines — 3-phase desire profile quiz.
-
-SPEED OVERHAUL v5:
-  - Pipeline: question generation starts as FIRST post arrives, not after all fetched
-  - Combined fantasies + recommendations into ONE API call (saves ~4-6s)
-  - Reduced to 7 questions (sweet spot — lower drop-off, faster load)
-  - Generated questions cached by post URL (st.cache_data, ttl=3600)
-  - ThreadPoolExecutor fires all Reddit + AI calls simultaneously
-  - No sequential waterfalls anywhere in the loading phase
-
-CATEGORY INTEGRATION v1:
-  - Full real platform category list baked in (100+ categories)
-  - AI scores ALL categories against user profile (0-10 per category)
-  - Returns ranked list; top 25 highlighted in lime, rest shown dimmed
-  - User can select any category, top 25 pre-highlighted as suggestions
 """
 
 import streamlit as st
@@ -44,8 +30,6 @@ MIN_SCORE   = 30
 MIN_LENGTH  = 100
 POST_COUNT  = 7
 TEXT_CUTOFF = 200
-
-# ─── FULL PLATFORM CATEGORY LIST ─────────────────────────────────────────────
 
 ALL_PLATFORM_CATEGORIES = [
     "18-25", "60FPS", "AI", "Amateur", "Anal", "Arab", "Asian", "Babe",
@@ -213,7 +197,6 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 }
 .stProgress > div > div > div { background:var(--magenta) !important; }
 #MainMenu { visibility:hidden; } footer { visibility:hidden; }
-
 div[data-testid="stRadio"] > label { display:none !important; }
 div[data-testid="stRadio"] > div { gap:8px !important; flex-direction:column !important; }
 div[data-testid="stRadio"] > div > label {
@@ -229,27 +212,17 @@ div[data-testid="stRadio"] > div > label:hover {
 div[data-testid="stRadio"] > div > label[data-checked="true"] {
   background:var(--magenta) !important; border-color:var(--magenta) !important; color:#fff !important;
 }
-
 @keyframes card-enter {
   from { opacity:0; transform:translateY(14px) scale(0.98); }
   to   { opacity:1; transform:translateY(0) scale(1); }
 }
 .enter-card { animation:card-enter 0.3s cubic-bezier(0.19,1,0.22,1) both; }
-
 .live-dot {
   display:inline-block; width:6px; height:6px; border-radius:50%;
   background:var(--magenta); animation:pulse-dot 1.4s infinite;
   vertical-align:middle; margin-right:6px;
 }
 @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
-
-.cat-top25 {
-  border-color: var(--lime) !important;
-  color: var(--lime) !important;
-}
-.cat-top25:hover {
-  background: rgba(198,255,0,0.1) !important;
-}
 </style>
 """)
 
@@ -374,7 +347,7 @@ def fetch_posts():
     return pool[:POST_COUNT]
 
 
-# ─── QUESTION GENERATION (cached per post URL) ────────────────────────────────
+# ─── QUESTION GENERATION ──────────────────────────────────────────────────────
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _generate_question_cached(post_url: str, post_title: str, post_text: str,
@@ -458,7 +431,7 @@ def generate_all_questions_parallel(posts, api_key):
     return questions, failed
 
 
-# ─── COMBINED FANTASIES + RECOMMENDATIONS + CATEGORY SCORING (ONE API CALL) ──
+# ─── PROFILE + CATEGORY SCORING ───────────────────────────────────────────────
 
 def generate_profile_and_categories(result_type, openness_pct, hd_answers,
                                      questions, answers, client) -> dict:
@@ -532,22 +505,22 @@ Return ONLY valid JSON, no markdown:
 # ─── STATE ────────────────────────────────────────────────────────────────────
 
 _DEFAULTS = {
-    "wwyd_phase":            "start",
-    "wwyd_load_errors":      0,
-    "wwyd_questions":        [],
-    "wwyd_answers":          [],
-    "wwyd_cur":              0,
-    "wwyd_error":            "",
-    "wwyd_source":           "live",
-    "wwyd_hd_cur":           0,
-    "wwyd_hd_answers":       {},
-    "wwyd_result_type":      {},
-    "wwyd_openness_pct":     0,
-    "wwyd_total_pts":        0,
-    "wwyd_recs":             [],
-    "wwyd_ranked_cats":      [],
-    "wwyd_top25":            [],
-    "wwyd_selected_cats":    [],
+    "wwyd_phase":         "start",
+    "wwyd_load_errors":   0,
+    "wwyd_questions":     [],
+    "wwyd_answers":       [],
+    "wwyd_cur":           0,
+    "wwyd_error":         "",
+    "wwyd_source":        "live",
+    "wwyd_hd_cur":        0,
+    "wwyd_hd_answers":    {},
+    "wwyd_result_type":   {},
+    "wwyd_openness_pct":  0,
+    "wwyd_total_pts":     0,
+    "wwyd_recs":          [],
+    "wwyd_ranked_cats":   [],
+    "wwyd_top25":         [],
+    "wwyd_selected_cats": [],
 }
 
 
@@ -568,6 +541,52 @@ def hard_reset():
     fetch_posts.clear()
     init_state()
     st.rerun()
+
+
+# ─── DB SAVE ──────────────────────────────────────────────────────────────────
+
+def _save_to_db(phase: str):
+    """Insert a full result row. Called at profile_complete."""
+    uid = _uid()
+    if not uid:
+        return
+    try:
+        import database as db
+        db.save_read_between_lines_v4(
+            user_id=uid,
+            phase=phase,
+            result_name=st.session_state.get("wwyd_result_type", {}).get("name", ""),
+            result_meta=st.session_state.get("wwyd_result_type", {}).get("meta", ""),
+            openness_pct=st.session_state.get("wwyd_openness_pct", 0),
+            total_pts=st.session_state.get("wwyd_total_pts", 0),
+            questions=st.session_state.get("wwyd_questions", []),
+            answers=st.session_state.get("wwyd_hd_answers", {}),
+            dim_scores={
+                "ranked_cats": st.session_state.get("wwyd_ranked_cats", [])[:25],
+                "top25":       st.session_state.get("wwyd_top25", []),
+                "selected":    st.session_state.get("wwyd_selected_cats", []),
+                "hd_signals":  _hd_signal_str(st.session_state.get("wwyd_hd_answers", {})),
+            },
+            recommendations=st.session_state.get("wwyd_recs", []),
+        )
+    except Exception:
+        pass
+
+
+def _update_selections_in_db(selected_cats: list):
+    """
+    Update the existing DB row with the user's confirmed category picks.
+    Called when the user clicks 'See My Full Profile →' — after they've
+    toggled categories, so what's stored reflects their actual choices.
+    """
+    uid = _uid()
+    if not uid:
+        return
+    try:
+        import database as db
+        db.update_rbtl_selected_categories(uid, selected_cats)
+    except Exception:
+        pass
 
 
 # ─── HEADER ──────────────────────────────────────────────────────────────────
@@ -616,7 +635,6 @@ def render_start():
     </p>
     <div>{subs_html}</div>
   </div>
-
   <div style="background:var(--card); border:1px solid var(--border);
               border-left:3px solid var(--amber); border-radius:4px;
               padding:16px 18px; margin-bottom:10px;">
@@ -626,7 +644,6 @@ def render_start():
       15 statements designed to surface what you don't usually name out loud.
     </p>
   </div>
-
   <div style="background:var(--card); border:1px solid var(--border);
               border-left:3px solid var(--cyan); border-radius:4px;
               padding:16px 18px; margin-bottom:20px;">
@@ -636,7 +653,6 @@ def render_start():
       Every real platform category scored against your profile. Top 25 highlighted — you pick what fits.
     </p>
   </div>
-
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
               text-transform:uppercase; color:var(--muted); text-align:center; margin-bottom:14px;">
     18+ only · Results saved to your profile
@@ -677,7 +693,6 @@ def render_loading():
             return
 
         selected = posts[:POST_COUNT]
-
         questions, failed_count = generate_all_questions_parallel(selected, api_key)
 
         upd(95, "Finalising…")
@@ -716,10 +731,9 @@ def render_quiz():
         answers = answers + [None] * (len(questions) - len(answers))
         st.session_state.wwyd_answers = answers
 
-    q       = questions[cur]
-    total   = len(questions)
-    is_last = (cur == total - 1)
-    selected = answers[cur]
+    q        = questions[cur]
+    total    = len(questions)
+    is_last  = (cur == total - 1)
 
     segs = "".join(
         f'<div style="flex:1; height:3px; border-radius:2px; background:'
@@ -772,17 +786,12 @@ def render_quiz():
     </a>
   </div>
 </div>
-
 <div style="font-family:'DM Sans',sans-serif; font-size:14px; font-style:italic;
             color:var(--amber); border-left:2px solid var(--amber); padding-left:12px;
             margin-bottom:14px; line-height:1.55;">{q['prompt']}</div>
 """)
 
-    opt_labels = [
-        (opt["t"] if isinstance(opt, dict) else opt)
-        for opt in q["opts"]
-    ]
-
+    opt_labels  = [(opt["t"] if isinstance(opt, dict) else opt) for opt in q["opts"]]
     radio_key   = f"quiz_radio_{cur}"
     current_sel = answers[cur]
 
@@ -844,7 +853,6 @@ def render_hidden_desires():
   Phase 2 · Hidden Desires · {cur + 1} / {total}
 </div>
 <div style="display:flex; gap:2px; margin-bottom:20px;">{segs}</div>
-
 <div class="enter-card" style="background:var(--card); border:1px solid var(--border);
             border-top:2px solid var(--amber); border-radius:4px; padding:24px; margin-bottom:14px;">
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:3px;
@@ -930,8 +938,7 @@ def render_generating_profile():
 
         upd(30, "Scoring every platform category against your profile…")
 
-        client = _get_client()
-
+        client       = _get_client()
         profile_data = generate_profile_and_categories(
             result_type, pct, hd_ans, questions, answers, client
         )
@@ -939,15 +946,17 @@ def render_generating_profile():
         upd(100, "Done.")
         time.sleep(0.15)
 
-        st.session_state.wwyd_result_type  = result_type
-        st.session_state.wwyd_openness_pct = pct
-        st.session_state.wwyd_total_pts    = total_pts
-        st.session_state.wwyd_ranked_cats  = profile_data["ranked_categories"]
-        st.session_state.wwyd_top25        = profile_data["top25_names"]
-        st.session_state.wwyd_recs         = profile_data["recommendations"]
+        st.session_state.wwyd_result_type   = result_type
+        st.session_state.wwyd_openness_pct  = pct
+        st.session_state.wwyd_total_pts     = total_pts
+        st.session_state.wwyd_ranked_cats   = profile_data["ranked_categories"]
+        st.session_state.wwyd_top25         = profile_data["top25_names"]
+        st.session_state.wwyd_recs          = profile_data["recommendations"]
+        # Pre-select AI top 25 as the starting point
         st.session_state.wwyd_selected_cats = list(profile_data["top25_names"])
         st.session_state.wwyd_phase         = "category_selector"
 
+        # Save initial result row (selected = AI top 25 defaults at this point)
         _save_to_db("profile_complete")
         st.rerun()
 
@@ -992,7 +1001,6 @@ def render_category_selector():
     Toggle anything you want — or don't.
   </div>
 </div>
-
 <div style="display:flex; gap:16px; align-items:center; margin-bottom:14px;">
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted);">
@@ -1019,7 +1027,6 @@ def render_category_selector():
         is_top25  = cat_name in top25_names
         is_sel    = cat_name in selected
 
-        score_bar = "█" * min(cat_score, 5) + "░" * (5 - min(cat_score, 5))
         if is_sel:
             btn_label = f"✓ {cat_name}"
         elif is_top25:
@@ -1028,12 +1035,11 @@ def render_category_selector():
             btn_label = cat_name
 
         with cols[idx % 3]:
-            btn_type = "primary" if is_sel else "secondary"
             if st.button(
                 btn_label,
                 key=f"cat_{idx}",
                 use_container_width=True,
-                type=btn_type,
+                type="primary" if is_sel else "secondary",
             ):
                 new_sel = set(st.session_state.wwyd_selected_cats)
                 if is_sel:
@@ -1056,6 +1062,11 @@ def render_category_selector():
     sel_count = len(selected)
     if st.button("See My Full Profile →", use_container_width=True, type="primary",
                  disabled=(sel_count == 0), key="cat_next"):
+        # ── SAVE USER'S ACTUAL SELECTIONS TO DB ──────────────────────────────
+        # This updates the row created at profile_complete so the stored record
+        # reflects what the user actually chose, not just the AI defaults.
+        _update_selections_in_db(list(selected))
+        # ─────────────────────────────────────────────────────────────────────
         st.session_state.wwyd_phase = "result"
         st.rerun()
 
@@ -1132,7 +1143,8 @@ def render_result():
         max_score = ranked_cats[0]["score"] if ranked_cats else 1
         bars_html = "".join(
             f'<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">'
-            f'<div style="font-family:\'Space Mono\',monospace; font-size:9px; color:{"var(--lime)" if c["name"] in sel_cats else "var(--soft)"}; '
+            f'<div style="font-family:\'Space Mono\',monospace; font-size:9px; '
+            f'color:{"var(--lime)" if c["name"] in sel_cats else "var(--soft)"}; '
             f'width:150px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; '
             f'text-transform:uppercase; letter-spacing:1px;">'
             f'{"✓ " if c["name"] in sel_cats else ""}{c["name"]}</div>'
@@ -1200,35 +1212,6 @@ def render_result():
             data=share, file_name="rbtl_result.txt",
             mime="text/plain", use_container_width=True, key="save_result"
         )
-
-
-# ─── DB SAVE ──────────────────────────────────────────────────────────────────
-
-def _save_to_db(phase: str):
-    uid = _uid()
-    if not uid:
-        return
-    try:
-        import database as db
-        db.save_read_between_lines_v4(
-            user_id=uid,
-            phase=phase,
-            result_name=st.session_state.get("wwyd_result_type", {}).get("name", ""),
-            result_meta=st.session_state.get("wwyd_result_type", {}).get("meta", ""),
-            openness_pct=st.session_state.get("wwyd_openness_pct", 0),
-            total_pts=st.session_state.get("wwyd_total_pts", 0),
-            questions=st.session_state.get("wwyd_questions", []),
-            answers=st.session_state.get("wwyd_hd_answers", {}),
-            dim_scores={
-                "ranked_cats": st.session_state.get("wwyd_ranked_cats", [])[:25],
-                "top25":       st.session_state.get("wwyd_top25", []),
-                "selected":    st.session_state.get("wwyd_selected_cats", []),
-                "hd_signals":  _hd_signal_str(st.session_state.get("wwyd_hd_answers", {})),
-            },
-            recommendations=st.session_state.get("wwyd_recs", []),
-        )
-    except Exception:
-        pass
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
