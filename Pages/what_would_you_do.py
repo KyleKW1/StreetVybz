@@ -1095,6 +1095,14 @@ def render_generating_profile():
 
         _save_to_db("profile_complete")
 
+        # ── NEW: surface any DB error BEFORE rerunning ──────────────────────
+        db_err = st.session_state.get("wwyd_db_error", "")
+        if db_err:
+            st.error(f"⚠️ Save failed: {db_err}")
+            st.caption("Your quiz result is still available — you can continue, but it won't be stored.")
+            time.sleep(2)          # give the user a moment to read it
+        # ────────────────────────────────────────────────────────────────────
+
         upd(100, "Done.")
         time.sleep(0.1)
         st.session_state.wwyd_phase = "category_selector"
