@@ -358,6 +358,122 @@ def save_what_would_you_do_result(user_id, result_name, result_meta,
         conn.close()
 
 
+def save_read_between_lines_v4(
+    user_id:      int,
+    phase:        str,
+    result_name:  str,
+    result_meta:  str,
+    openness_pct: int,
+    total_pts:    int,
+    # Full resolved Phase 1: list of dicts with post + question + all options + chosen answer
+    questions:    list,
+    # Full resolved Phase 2: list of dicts with statement + signal + answer label + pts
+    answers:      list,
+    # Everything else — HD summary, score breakdown, content map, fantasy breakdown, source
+    dim_scores:   dict,
+    # GPT recommendations
+    recommendations: list,
+) -> bool:
+    """
+    Full-fidelity save for the Read Between The Lines v4 quiz.
+
+    Column mapping (matches quiz_results schema exactly):
+        result_name     → result tier name  (e.g. "The Open Door")
+        result_meta     → result tagline     (e.g. "You've thought this through.")
+        openness_pct    → 0-100 score
+        total_pts       → raw point total from Phase 1
+        questions       → LONGTEXT — full Phase 1 data (post + AI prompt + all opts + chosen)
+        answers         → JSON    — full Phase 2 HD data (statement + signal + label + pts)
+        dim_scores      → JSON    — hd_summary, score_breakdown, content_map,
+                                    fantasy_breakdown, phase, source
+        recommendations → JSON    — list of 5 recommendation strings
+    """
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO quiz_results
+               (user_id, quiz_type,
+                result_name, result_meta,
+                openness_pct, total_pts,
+                questions, answers,
+                dim_scores, recommendations)
+               VALUES (%s, %s,
+                       %s, %s,
+                       %s, %s,
+                       %s, %s,
+                       %s, %s)""",
+            (
+                user_id,
+                f"read_between_lines_v4_{phase}",  # lets you query by phase easily
+                result_name[:128] if result_name else "",
+                result_meta[:255] if result_meta else "",
+                max(0, min(255, openness_pct)),     # TINYINT UNSIGNED safe
+                max(0, min(65535, total_pts)),       # SMALLINT UNSIGNED safe
+                json.dumps(questions, default=str),  # LONGTEXT — no size worry
+                json.dumps(answers,   default=str),  # JSON
+                json.dumps(dim_scores,       default=str),
+                json.dumps(recommendations,  default=str),
+            )
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception as e:
+        # Surface the real error in dev; silent fail in prod is handled by caller
+        st.error(f"Error saving RBTL v4 result: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def load_latest_rbtl_result(user_id: int) -> dict | None:
+    """
+    Returns the most recent completed Read Between The Lines v4 result for a user.
+    Useful for displaying past results or pre-filling a returning user's profile.
+    """
+    conn = create_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT *
+               FROM quiz_results
+               WHERE user_id = %s
+                 AND quiz_type LIKE 'read_between_lines_v4%'
+               ORDER BY completed_at DESC
+               LIMIT 1""",
+            (user_id,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            return None
+        # Parse JSON columns
+        for col in ("dim_scores", "recommendations", "answers"):
+            val = row.get(col)
+            if isinstance(val, str):
+                try:
+                    row[col] = json.loads(val)
+                except Exception:
+                    row[col] = {} if col == "dim_scores" else []
+        # questions is LONGTEXT so also parse it
+        q = row.get("questions")
+        if isinstance(q, str):
+            try:
+                row["questions"] = json.loads(q)
+            except Exception:
+                row["questions"] = []
+        return row
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
 # ─── CONFESSIONS ──────────────────────────────────────────────────────────────
 
 def save_confession(sender_id: int, recipient_id: int, code: str, questions: list) -> bool:
@@ -689,10 +805,7 @@ def invalidate_user_sessions(user_id: int) -> None:
     pass
 
 # ─── INTERACTIONS TABLE ───────────────────────────────────────────────────────
-# Unified mini-game data store.
-# interaction_type: 'hot_take' | 'mirror_judgment'
-# payload: JSON — varies by type
- 
+
 INTERACTIONS_DDL = """
 CREATE TABLE IF NOT EXISTS interactions (
     id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -705,9 +818,7 @@ CREATE TABLE IF NOT EXISTS interactions (
     INDEX idx_int_time (user_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
- 
-# ─── SHADOW SCORE TABLE ───────────────────────────────────────────────────────
- 
+
 SHADOW_SCORE_DDL = """
 CREATE TABLE IF NOT EXISTS shadow_scores (
     user_id          INT NOT NULL PRIMARY KEY,
@@ -717,10 +828,9 @@ CREATE TABLE IF NOT EXISTS shadow_scores (
     updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
- 
- 
+
+
 def ensure_interactions_table():
-    """Call this inside ensure_tables()."""
     conn = create_connection()
     if not conn:
         return
@@ -730,12 +840,12 @@ def ensure_interactions_table():
         cur.execute(SHADOW_SCORE_DDL)
         conn.commit()
         cur.close()
-    except Exception as e:
-        pass  # silently skip if already exists
+    except Exception:
+        pass
     finally:
         conn.close()
- 
- 
+
+
 def save_interaction(user_id: int, interaction_type: str, payload: dict) -> bool:
     conn = create_connection()
     if not conn:
@@ -754,8 +864,8 @@ def save_interaction(user_id: int, interaction_type: str, payload: dict) -> bool
         return False
     finally:
         conn.close()
- 
- 
+
+
 def load_interactions(user_id: int, interaction_type: str = None) -> list:
     conn = create_connection()
     if not conn:
@@ -791,8 +901,8 @@ def load_interactions(user_id: int, interaction_type: str = None) -> list:
         return []
     finally:
         conn.close()
- 
- 
+
+
 def upsert_shadow_score(user_id: int, hypocrisy_idx: int = None,
                          conflict_idx: int = None, freak_score: int = None) -> bool:
     conn = create_connection()
@@ -802,11 +912,11 @@ def upsert_shadow_score(user_id: int, hypocrisy_idx: int = None,
         cur = conn.cursor(dictionary=True)
         cur.execute("SELECT * FROM shadow_scores WHERE user_id = %s", (user_id,))
         existing = cur.fetchone() or {}
- 
+
         h = hypocrisy_idx if hypocrisy_idx is not None else existing.get("hypocrisy_idx", 0)
         c = conflict_idx  if conflict_idx  is not None else existing.get("conflict_idx", 0)
         f = freak_score   if freak_score   is not None else existing.get("freak_score", 0)
- 
+
         cur.execute(
             """INSERT INTO shadow_scores (user_id, hypocrisy_idx, conflict_idx, freak_score)
                VALUES (%s, %s, %s, %s)
@@ -823,8 +933,8 @@ def upsert_shadow_score(user_id: int, hypocrisy_idx: int = None,
         return False
     finally:
         conn.close()
- 
- 
+
+
 def get_shadow_score(user_id: int) -> dict:
     conn = create_connection()
     if not conn:
@@ -839,4 +949,3 @@ def get_shadow_score(user_id: int) -> dict:
         return {}
     finally:
         conn.close()
- 
