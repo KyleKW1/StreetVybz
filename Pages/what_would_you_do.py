@@ -12,9 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
-SUBREDDITS = [
-    "sex", "nonmonogamy", "confessions", "trueoffmychest",
-]
+SUBREDDITS = ["sex", "nonmonogamy", "confessions", "trueoffmychest"]
 
 TABOO_KEYWORDS = [
     "threesome", "3some", "open relationship", "swinger", "polyamory",
@@ -55,37 +53,37 @@ ALL_PLATFORM_CATEGORIES = [
 FALLBACK_POSTS = [
     {"sub": "r/relationship_advice", "avatar": "T", "user": "throwaway_82947",
      "title": "My partner and I accidentally started a conversation we can't take back",
-     "text": "We talked for two hours about things we'd never said out loud before. I don't know what we're doing but I don't feel scared about it.",
+     "text": "We talked for two hours about things we'd never said out loud before.",
      "upvotes": "14.2k", "comments": "832", "time": "6 hours ago",
      "url": "https://reddit.com/r/relationship_advice", "flair": "Long Post"},
     {"sub": "r/confessions", "avatar": "A", "user": "anon_user_2291",
-     "title": "I described what happens in our bedroom to my best friend — my partner walked in halfway through",
-     "text": "She asked if I'd describe what it's actually like. I did. In detail. My partner walked in and just sat down and listened. When she left, my partner said: 'I didn't mind that.'",
+     "title": "I described what happens in our bedroom to my best friend",
+     "text": "She asked if I'd describe what it's actually like. I did. In detail.",
      "upvotes": "9.7k", "comments": "1.2k", "time": "2 days ago",
      "url": "https://reddit.com/r/confessions", "flair": "True Story"},
     {"sub": "r/trueoffmychest", "avatar": "S", "user": "strangebutreal",
      "title": "My partner and I spent four hours talking about a hypothetical last night",
-     "text": "'If you could add anyone to our relationship for one night, who?' They didn't laugh it off. They answered. With a name. So I answered too. I feel like I know them more than yesterday.",
+     "text": "'If you could add anyone to our relationship for one night, who?' They answered.",
      "upvotes": "18.3k", "comments": "976", "time": "5 hours ago",
      "url": "https://reddit.com/r/trueoffmychest", "flair": "Personal"},
     {"sub": "r/sex", "avatar": "M", "user": "maybe_mistakes",
      "title": "My girlfriend said my fantasy made her feel like she wasn't enough",
-     "text": "I told her about a recurring fantasy — nothing I planned to act on. She got quiet and said it made her feel inadequate. I said that's not what fantasies mean. We're still in this argument three days later.",
+     "text": "I told her about a recurring fantasy. She got quiet.",
      "upvotes": "22.1k", "comments": "3.4k", "time": "1 day ago",
      "url": "https://reddit.com/r/sex", "flair": "Advice"},
     {"sub": "r/nonmonogamy", "avatar": "L", "user": "late_night_post_88",
      "title": "My friend accidentally sent my partner my text about wanting an open relationship",
-     "text": "He texted me three seconds later. I thought I was about to have the worst conversation of my life. He said: 'Why haven't you just told me this?'",
+     "text": "He texted me three seconds later. 'Why haven't you just told me this?'",
      "upvotes": "31.5k", "comments": "2.1k", "time": "3 days ago",
      "url": "https://reddit.com/r/nonmonogamy", "flair": "Story"},
     {"sub": "r/confessions", "avatar": "W", "user": "wontusemyname",
      "title": "UPDATE: We did it. Here's the honest version.",
-     "text": "The hardest part was the three days before, not the night itself. The morning after we made breakfast and laughed a lot. If someone asked me today whether I'd do it again — yes.",
+     "text": "The hardest part was the three days before, not the night itself.",
      "upvotes": "19.4k", "comments": "1.1k", "time": "2 days ago",
      "url": "https://reddit.com/r/confessions", "flair": "Update"},
     {"sub": "r/sex", "avatar": "N", "user": "nightowl_anon",
      "title": "Most couples don't discuss threesomes because they're scared of the answer",
-     "text": "If they're excited, now you know something. If they're horrified, now you know something else. Either answer changes things. So most people carry the question for years and call it loyalty.",
+     "text": "Either answer changes things. So most people carry the question for years.",
      "upvotes": "8.9k", "comments": "2.3k", "time": "12 hours ago",
      "url": "https://reddit.com/r/sex", "flair": "Discussion"},
 ]
@@ -192,9 +190,7 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 .stButton > button[kind="primary"]:hover {
   background:#ff5590 !important; box-shadow:0 0 20px rgba(255,45,120,0.25) !important;
 }
-.stButton > button:disabled, .stButton > button[disabled] {
-  opacity:0.35 !important; cursor:not-allowed !important;
-}
+.stButton > button:disabled { opacity:0.35 !important; cursor:not-allowed !important; }
 .stProgress > div > div > div { background:var(--magenta) !important; }
 #MainMenu { visibility:hidden; } footer { visibility:hidden; }
 div[data-testid="stRadio"] > label { display:none !important; }
@@ -206,9 +202,7 @@ div[data-testid="stRadio"] > div > label {
   letter-spacing:1px !important; color:var(--soft) !important;
   cursor:pointer !important; transition:all 0.15s !important; width:100% !important;
 }
-div[data-testid="stRadio"] > div > label:hover {
-  border-color:var(--lime) !important; color:var(--lime) !important;
-}
+div[data-testid="stRadio"] > div > label:hover { border-color:var(--lime) !important; color:var(--lime) !important; }
 div[data-testid="stRadio"] > div > label[data-checked="true"] {
   background:var(--magenta) !important; border-color:var(--magenta) !important; color:#fff !important;
 }
@@ -219,8 +213,7 @@ div[data-testid="stRadio"] > div > label[data-checked="true"] {
 .enter-card { animation:card-enter 0.3s cubic-bezier(0.19,1,0.22,1) both; }
 .live-dot {
   display:inline-block; width:6px; height:6px; border-radius:50%;
-  background:var(--magenta); animation:pulse-dot 1.4s infinite;
-  vertical-align:middle; margin-right:6px;
+  background:var(--magenta); animation:pulse-dot 1.4s infinite; vertical-align:middle; margin-right:6px;
 }
 @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
 </style>
@@ -237,8 +230,10 @@ def _get_client():
 
 
 def _uid():
-    u = st.session_state.get("user", {})
-    return u.get("id") if u else None
+    u = st.session_state.get("user")
+    if not u:
+        return None
+    return u.get("id") if isinstance(u, dict) else None
 
 
 def _fmt_num(n):
@@ -398,11 +393,8 @@ def generate_all_questions_parallel(posts, api_key):
     def _gen(idx, post):
         try:
             data = _generate_question_cached(
-                post_url=post["url"],
-                post_title=post["title"],
-                post_text=post["text"],
-                post_sub=post["sub"],
-                api_key=api_key,
+                post_url=post["url"], post_title=post["title"],
+                post_text=post["text"], post_sub=post["sub"], api_key=api_key,
             )
             return idx, data
         except Exception:
@@ -450,8 +442,6 @@ def generate_profile_and_categories(result_type, openness_pct, hd_answers,
     pos_str = "; ".join(pos[:4]) or "none"
     neg_str = "; ".join(neg[:4]) or "none"
 
-    categories_json = json.dumps(ALL_PLATFORM_CATEGORIES)
-
     prompt = f"""You are a desire profile analyst for an 18+ adult platform.
 
 User profile:
@@ -463,8 +453,8 @@ User profile:
 Your tasks — return ONE JSON object with exactly these keys:
 
 1. "ranked_categories": Score EVERY category in this list from 0-10 based on match to this user's profile.
-   Higher = stronger match. Rejected items get 0. Be specific — not everything should score 5.
-   Categories: {categories_json}
+   Higher = stronger match. Rejected items get 0. Be specific.
+   Categories: {json.dumps(ALL_PLATFORM_CATEGORIES)}
 
 2. "recommendations": Write 5 personalised, frank recommendations (1-2 sentences each).
    Weave in their signals. Respect rejected items strictly. Gender-neutral. Non-judgmental.
@@ -493,11 +483,9 @@ Return ONLY valid JSON, no markdown:
         scored.append({"name": cat, "score": score})
     scored.sort(key=lambda x: -x["score"])
 
-    top25 = [c["name"] for c in scored[:25]]
-
     return {
         "ranked_categories": scored,
-        "top25_names":       top25,
+        "top25_names":       [c["name"] for c in scored[:25]],
         "recommendations":   data.get("recommendations", [])[:5],
     }
 
@@ -511,6 +499,7 @@ _DEFAULTS = {
     "wwyd_answers":       [],
     "wwyd_cur":           0,
     "wwyd_error":         "",
+    "wwyd_db_error":      "",   # survives st.rerun() — shows DB errors
     "wwyd_source":        "live",
     "wwyd_hd_cur":        0,
     "wwyd_hd_answers":    {},
@@ -521,6 +510,7 @@ _DEFAULTS = {
     "wwyd_ranked_cats":   [],
     "wwyd_top25":         [],
     "wwyd_selected_cats": [],
+    "wwyd_saved_row_id":  None,  # DB id of the saved row
 }
 
 
@@ -546,20 +536,37 @@ def hard_reset():
 # ─── DB SAVE ──────────────────────────────────────────────────────────────────
 
 def _save_to_db(phase: str):
-    """Insert a full result row. Called at profile_complete."""
+    """
+    Insert a full result row into quiz_results.
+    Errors are stored in wwyd_db_error (survives st.rerun) so they're
+    visible on the next render instead of being silently swallowed.
+    """
     uid = _uid()
     if not uid:
+        st.session_state.wwyd_db_error = "Save failed: user not logged in (uid=None)"
         return
+
     try:
         import database as db
-        db.save_read_between_lines_v4(
+
+        # Strip heavy post metadata from questions — only keep what matters
+        slim_questions = []
+        for q in st.session_state.get("wwyd_questions", []):
+            slim_questions.append({
+                "title":  q.get("title", ""),
+                "sub":    q.get("sub", ""),
+                "prompt": q.get("prompt", ""),
+                "opts":   q.get("opts", []),
+            })
+
+        ok, msg = db.save_read_between_lines_v4(
             user_id=uid,
             phase=phase,
             result_name=st.session_state.get("wwyd_result_type", {}).get("name", ""),
             result_meta=st.session_state.get("wwyd_result_type", {}).get("meta", ""),
             openness_pct=st.session_state.get("wwyd_openness_pct", 0),
             total_pts=st.session_state.get("wwyd_total_pts", 0),
-            questions=st.session_state.get("wwyd_questions", []),
+            questions=slim_questions,
             answers=st.session_state.get("wwyd_hd_answers", {}),
             dim_scores={
                 "ranked_cats": st.session_state.get("wwyd_ranked_cats", [])[:25],
@@ -569,24 +576,34 @@ def _save_to_db(phase: str):
             },
             recommendations=st.session_state.get("wwyd_recs", []),
         )
-    except Exception:
-        pass
+
+        if ok:
+            st.session_state.wwyd_saved_row_id = msg  # msg = row id on success
+            st.session_state.wwyd_db_error     = ""
+        else:
+            st.session_state.wwyd_db_error = f"DB save failed ({phase}): {msg}"
+
+    except Exception as e:
+        st.session_state.wwyd_db_error = f"DB save exception ({phase}): {e}"
 
 
 def _update_selections_in_db(selected_cats: list):
     """
     Update the existing DB row with the user's confirmed category picks.
-    Called when the user clicks 'See My Full Profile →' — after they've
-    toggled categories, so what's stored reflects their actual choices.
+    Called when user clicks 'See My Full Profile →'.
     """
     uid = _uid()
     if not uid:
         return
     try:
         import database as db
-        db.update_rbtl_selected_categories(uid, selected_cats)
-    except Exception:
-        pass
+        ok, msg = db.update_rbtl_selected_categories(uid, selected_cats)
+        if not ok:
+            st.session_state.wwyd_db_error = f"Selection update failed: {msg}"
+        else:
+            st.session_state.wwyd_db_error = ""
+    except Exception as e:
+        st.session_state.wwyd_db_error = f"Selection update exception: {e}"
 
 
 # ─── HEADER ──────────────────────────────────────────────────────────────────
@@ -605,6 +622,11 @@ def _render_header():
   </div>
 </div>
 """)
+
+    # Show any DB error that survived a rerun
+    db_err = st.session_state.get("wwyd_db_error", "")
+    if db_err:
+        st.error(f"⚠️ {db_err}")
 
 
 # ─── PHASE: START ─────────────────────────────────────────────────────────────
@@ -692,13 +714,10 @@ def render_loading():
             st.rerun()
             return
 
-        selected = posts[:POST_COUNT]
-        questions, failed_count = generate_all_questions_parallel(selected, api_key)
+        selected                          = posts[:POST_COUNT]
+        questions, failed_count           = generate_all_questions_parallel(selected, api_key)
 
-        upd(95, "Finalising…")
-        time.sleep(0.1)
         upd(100, "Ready.")
-
         st.session_state.wwyd_questions   = questions
         st.session_state.wwyd_answers     = [None] * len(questions)
         st.session_state.wwyd_cur         = 0
@@ -731,9 +750,9 @@ def render_quiz():
         answers = answers + [None] * (len(questions) - len(answers))
         st.session_state.wwyd_answers = answers
 
-    q        = questions[cur]
-    total    = len(questions)
-    is_last  = (cur == total - 1)
+    q       = questions[cur]
+    total   = len(questions)
+    is_last = (cur == total - 1)
 
     segs = "".join(
         f'<div style="flex:1; height:3px; border-radius:2px; background:'
@@ -792,7 +811,6 @@ def render_quiz():
 """)
 
     opt_labels  = [(opt["t"] if isinstance(opt, dict) else opt) for opt in q["opts"]]
-    radio_key   = f"quiz_radio_{cur}"
     current_sel = answers[cur]
 
     chosen = st.radio(
@@ -800,7 +818,7 @@ def render_quiz():
         options=list(range(len(opt_labels))),
         format_func=lambda i: opt_labels[i],
         index=current_sel,
-        key=radio_key,
+        key=f"quiz_radio_{cur}",
         horizontal=False,
     )
 
@@ -863,13 +881,12 @@ def render_hidden_desires():
 """)
 
     current_idx = HD_OPT_IDS.index(sel_id) if sel_id in HD_OPT_IDS else None
-    radio_key   = f"hd_radio_{cur}"
     chosen_idx  = st.radio(
         label="Resonance",
         options=list(range(len(HD_OPT_LABELS))),
         format_func=lambda i: HD_OPT_LABELS[i],
         index=current_idx,
-        key=radio_key,
+        key=f"hd_radio_{cur}",
         horizontal=False,
     )
 
@@ -937,27 +954,26 @@ def render_generating_profile():
         result_type = next((r for r in RESULT_TYPES if r["min"] <= total_pts <= r["max"]), RESULT_TYPES[-1])
 
         upd(30, "Scoring every platform category against your profile…")
-
         client       = _get_client()
         profile_data = generate_profile_and_categories(
             result_type, pct, hd_ans, questions, answers, client
         )
 
-        upd(100, "Done.")
-        time.sleep(0.15)
-
+        upd(90, "Saving to your profile…")
         st.session_state.wwyd_result_type   = result_type
         st.session_state.wwyd_openness_pct  = pct
         st.session_state.wwyd_total_pts     = total_pts
         st.session_state.wwyd_ranked_cats   = profile_data["ranked_categories"]
         st.session_state.wwyd_top25         = profile_data["top25_names"]
         st.session_state.wwyd_recs          = profile_data["recommendations"]
-        # Pre-select AI top 25 as the starting point
         st.session_state.wwyd_selected_cats = list(profile_data["top25_names"])
-        st.session_state.wwyd_phase         = "category_selector"
 
-        # Save initial result row (selected = AI top 25 defaults at this point)
+        # Save to DB — errors stored in wwyd_db_error, visible after rerun
         _save_to_db("profile_complete")
+
+        upd(100, "Done.")
+        time.sleep(0.1)
+        st.session_state.wwyd_phase = "category_selector"
         st.rerun()
 
     except Exception as e:
@@ -972,7 +988,6 @@ def render_category_selector():
     ranked_cats = st.session_state.wwyd_ranked_cats
     top25_names = set(st.session_state.wwyd_top25)
     selected    = set(st.session_state.wwyd_selected_cats)
-
     pct         = st.session_state.get("wwyd_openness_pct", 0)
     result_type = st.session_state.get("wwyd_result_type", {})
 
@@ -998,22 +1013,19 @@ def render_category_selector():
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); margin-top:12px; line-height:1.7;">
     Every real platform category scored against your signals.
     <span style="color:var(--lime); font-weight:600;">Lime = AI top 25 picks for you.</span>
-    Toggle anything you want — or don't.
+    Toggle anything you want.
   </div>
 </div>
 <div style="display:flex; gap:16px; align-items:center; margin-bottom:14px;">
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--muted);">
-    {len(selected)} selected
-  </div>
+              text-transform:uppercase; color:var(--muted);">{len(selected)} selected</div>
   <div style="display:flex; gap:8px; margin-left:auto;">
     <div style="display:flex; align-items:center; gap:5px;">
       <div style="width:10px; height:10px; border:1px solid var(--lime); border-radius:2px;"></div>
       <span style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">AI top 25</span>
     </div>
     <div style="display:flex; align-items:center; gap:5px;">
-      <div style="width:10px; height:10px; border:1px solid var(--border); border-radius:2px;
-                  background:var(--magenta);"></div>
+      <div style="width:10px; height:10px; background:var(--magenta); border-radius:2px;"></div>
       <span style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">selected</span>
     </div>
   </div>
@@ -1027,20 +1039,11 @@ def render_category_selector():
         is_top25  = cat_name in top25_names
         is_sel    = cat_name in selected
 
-        if is_sel:
-            btn_label = f"✓ {cat_name}"
-        elif is_top25:
-            btn_label = f"◆ {cat_name}"
-        else:
-            btn_label = cat_name
+        btn_label = f"✓ {cat_name}" if is_sel else (f"◆ {cat_name}" if is_top25 else cat_name)
 
         with cols[idx % 3]:
-            if st.button(
-                btn_label,
-                key=f"cat_{idx}",
-                use_container_width=True,
-                type="primary" if is_sel else "secondary",
-            ):
+            if st.button(btn_label, key=f"cat_{idx}", use_container_width=True,
+                         type="primary" if is_sel else "secondary"):
                 new_sel = set(st.session_state.wwyd_selected_cats)
                 if is_sel:
                     new_sel.discard(cat_name)
@@ -1051,22 +1054,17 @@ def render_category_selector():
 
             if cat_score > 0:
                 bar_color = "var(--lime)" if is_top25 else "var(--border)"
-                fill_pct  = min(100, cat_score * 10)
                 st.html(f"""
 <div style="height:2px; background:var(--border); border-radius:1px; margin:-6px 0 8px;">
-  <div style="width:{fill_pct}%; height:100%; background:{bar_color}; border-radius:1px;"></div>
+  <div style="width:{min(100, cat_score * 10)}%; height:100%; background:{bar_color}; border-radius:1px;"></div>
 </div>
 """)
 
     st.html("<br>")
-    sel_count = len(selected)
     if st.button("See My Full Profile →", use_container_width=True, type="primary",
-                 disabled=(sel_count == 0), key="cat_next"):
-        # ── SAVE USER'S ACTUAL SELECTIONS TO DB ──────────────────────────────
-        # This updates the row created at profile_complete so the stored record
-        # reflects what the user actually chose, not just the AI defaults.
+                 disabled=(len(selected) == 0), key="cat_next"):
+        # Save the user's actual selections back to the DB row
         _update_selections_in_db(list(selected))
-        # ─────────────────────────────────────────────────────────────────────
         st.session_state.wwyd_phase = "result"
         st.rerun()
 
@@ -1166,7 +1164,6 @@ def render_result():
   </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:11px; color:var(--muted);
               margin-bottom:14px; line-height:1.6;">
-    Scored against your desire signals and openness tier.
     {len(sel_cats)} categories selected.
   </div>
   {bars_html}
