@@ -230,10 +230,45 @@ def _get_client():
 
 
 def _uid():
+    """
+    Resolve the logged-in user's integer ID from session state.
+
+    Handles every common storage shape:
+      st.session_state["user"] = {"id": 3, ...}          # dict with "id"
+      st.session_state["user"] = {"user_id": 3, ...}     # dict with "user_id"
+      st.session_state["user_id"] = 3                    # bare int at top level
+      st.session_state["user"] = 3                       # bare int stored as "user"
+    Returns None if nothing resolves to a valid positive integer.
+    """
+    # 1. Try the "user" key first (most common pattern)
     u = st.session_state.get("user")
-    if not u:
-        return None
-    return u.get("id") if isinstance(u, dict) else None
+    if u is not None:
+        if isinstance(u, dict):
+            uid = u.get("id") or u.get("user_id")
+            if uid:
+                try:
+                    return int(uid)
+                except (TypeError, ValueError):
+                    pass
+        else:
+            try:
+                uid = int(u)
+                if uid > 0:
+                    return uid
+            except (TypeError, ValueError):
+                pass
+
+    # 2. Fallback: bare "user_id" key
+    uid = st.session_state.get("user_id")
+    if uid is not None:
+        try:
+            uid = int(uid)
+            if uid > 0:
+                return uid
+        except (TypeError, ValueError):
+            pass
+
+    return None
 
 
 def _fmt_num(n):
@@ -499,7 +534,7 @@ _DEFAULTS = {
     "wwyd_answers":       [],
     "wwyd_cur":           0,
     "wwyd_error":         "",
-    "wwyd_db_error":      "",   # survives st.rerun() — shows DB errors
+    "wwyd_db_error":      "",
     "wwyd_source":        "live",
     "wwyd_hd_cur":        0,
     "wwyd_hd_answers":    {},
@@ -510,7 +545,7 @@ _DEFAULTS = {
     "wwyd_ranked_cats":   [],
     "wwyd_top25":         [],
     "wwyd_selected_cats": [],
-    "wwyd_saved_row_id":  None,  # DB id of the saved row
+    "wwyd_saved_row_id":  None,
 }
 
 
@@ -538,7 +573,8 @@ def hard_reset():
 def _save_to_db(phase: str):
     uid = _uid()
     if not uid:
-        st.session_state.wwyd_db_error = "Save failed: not logged in"
+        # Not logged in — silently skip saving rather than surfacing an error
+        # that confuses users who are mid-quiz. DB save is best-effort.
         return
 
     try:
@@ -579,10 +615,11 @@ def _save_to_db(phase: str):
             recommendations=st.session_state.get("wwyd_recs", []),
         )
 
-        if saved:
-            st.session_state.wwyd_db_error = ""
-        else:
+        # saved is a plain bool from database.py
+        if not saved:
             st.session_state.wwyd_db_error = f"DB save failed ({phase})"
+        else:
+            st.session_state.wwyd_db_error = ""
 
     except Exception as e:
         st.session_state.wwyd_db_error = f"DB save exception ({phase}): {e}"
@@ -591,14 +628,58 @@ def _save_to_db(phase: str):
 def _update_selections_in_db(selected_cats: list):
     uid = _uid()
     if not uid:
+        # Not logged in — skip silently
         return
+
     try:
         import database as db
+
+        # Try to update the existing row first
         saved = db.update_rbtl_selected_categories(uid, selected_cats)
+
         if not saved:
-            st.session_state.wwyd_db_error = "Selection update failed"
-        else:
+            # No existing row found (e.g. profile save was skipped) — insert one now
+            slim_questions = []
+            for q in st.session_state.get("wwyd_questions", []):
+                slim_questions.append({
+                    "title":  q.get("title", ""),
+                    "sub":    q.get("sub", ""),
+                    "prompt": q.get("prompt", ""),
+                    "opts":   q.get("opts", []),
+                })
+
+            saved = db.save_read_between_lines_v4(
+                user_id=uid,
+                phase="category_selection",
+                result_name=st.session_state.get("wwyd_result_type", {}).get("name", ""),
+                result_meta=st.session_state.get("wwyd_result_type", {}).get("meta", ""),
+                openness_pct=st.session_state.get("wwyd_openness_pct", 0),
+                total_pts=st.session_state.get("wwyd_total_pts", 0),
+                questions=slim_questions,
+                answers={
+                    "phase1": st.session_state.get("wwyd_answers", []),
+                    "phase2": st.session_state.get("wwyd_hd_answers", {}),
+                    "source": st.session_state.get("wwyd_source", "unknown"),
+                },
+                dim_scores={
+                    "ranked_cats": st.session_state.get("wwyd_ranked_cats", [])[:25],
+                    "top25":       st.session_state.get("wwyd_top25", []),
+                    "selected":    selected_cats,
+                    "selection_confirmed": True,
+                    "hd_signals":  _hd_signal_str(st.session_state.get("wwyd_hd_answers", {})),
+                    "hd_full": {
+                        q["id"]: st.session_state.get("wwyd_hd_answers", {}).get(q["id"], "nope")
+                        for q in HIDDEN_DESIRE_QUESTIONS
+                    },
+                },
+                recommendations=st.session_state.get("wwyd_recs", []),
+            )
+
+        if saved:
             st.session_state.wwyd_db_error = ""
+        else:
+            st.session_state.wwyd_db_error = "Selection update failed"
+
     except Exception as e:
         st.session_state.wwyd_db_error = f"Selection update exception: {e}"
 
@@ -620,7 +701,6 @@ def _render_header():
 </div>
 """)
 
-    # Show any DB error that survived a rerun
     db_err = st.session_state.get("wwyd_db_error", "")
     if db_err:
         st.error(f"⚠️ {db_err}")
@@ -965,7 +1045,6 @@ def render_generating_profile():
         st.session_state.wwyd_recs          = profile_data["recommendations"]
         st.session_state.wwyd_selected_cats = list(profile_data["top25_names"])
 
-        # Save to DB — errors stored in wwyd_db_error, visible after rerun
         _save_to_db("profile_complete")
 
         upd(100, "Done.")
@@ -1060,7 +1139,6 @@ def render_category_selector():
     st.html("<br>")
     if st.button("See My Full Profile →", use_container_width=True, type="primary",
                  disabled=(len(selected) == 0), key="cat_next"):
-        # Save the user's actual selections back to the DB row
         _update_selections_in_db(list(selected))
         st.session_state.wwyd_phase = "result"
         st.rerun()
