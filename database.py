@@ -501,12 +501,13 @@ def save_read_between_lines_result(user_id, profile_name, profile_meta, dim_scor
              json.dumps(recommendations), total_pct,
              json.dumps(questions, default=str), json.dumps(answers))
         )
+        new_id = cur.lastrowid
         conn.commit()
         cur.close()
-        return True
+        return True, new_id
     except Exception as e:
-        st.error(f"Error saving quiz result: {e}")
-        return False
+        st.error(f"Error saving RBTL v4 result: {e}")
+        return False, str(e)
     finally:
         conn.close()
 
