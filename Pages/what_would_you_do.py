@@ -21,7 +21,7 @@ import streamlit as st
 import json
 import random
 import time
-import anthropic
+from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -42,11 +42,10 @@ TABOO_KEYWORDS = [
 
 MIN_SCORE   = 30
 MIN_LENGTH  = 100
-POST_COUNT  = 7   # ← dropped from 10; sweet spot for completion rate
+POST_COUNT  = 7
 TEXT_CUTOFF = 200
 
 # ─── FULL PLATFORM CATEGORY LIST ─────────────────────────────────────────────
-# Every real category from the platform. AI scores these against the user profile.
 
 ALL_PLATFORM_CATEGORIES = [
     "18-25", "60FPS", "AI", "Amateur", "Anal", "Arab", "Asian", "Babe",
@@ -244,7 +243,6 @@ div[data-testid="stRadio"] > div > label[data-checked="true"] {
 }
 @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
 
-/* Category grid */
 .cat-top25 {
   border-color: var(--lime) !important;
   color: var(--lime) !important;
@@ -259,13 +257,10 @@ div[data-testid="stRadio"] > div > label[data-checked="true"] {
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 def _get_client():
-    # FIX: was `st.secrets.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")`
-    # (duplicate lookup — second branch was dead code). Now correctly falls back to
-    # a bare Anthropic() call which reads ANTHROPIC_API_KEY env var if set.
     key = st.secrets.get("OPENAI_API_KEY", "")
     if not key:
         raise RuntimeError("OPENAI_API_KEY not found in Streamlit secrets.")
-    return anthropic.Anthropic(api_key=key)
+    return OpenAI(api_key=key)
 
 
 def _uid():
@@ -384,11 +379,7 @@ def fetch_posts():
 @st.cache_data(ttl=3600, show_spinner=False)
 def _generate_question_cached(post_url: str, post_title: str, post_text: str,
                                 post_sub: str, api_key: str) -> dict:
-    """
-    Cached per post URL — same post never re-generates within an hour.
-    This is the single biggest speed win: repeat visitors get instant loads.
-    """
-    client = anthropic.Anthropic(api_key=api_key)
+    client = OpenAI(api_key=api_key)
     prompt = (
         f'Reddit post from {post_sub}:\n'
         f'TITLE: {post_title}\n'
@@ -402,12 +393,12 @@ def _generate_question_cached(post_url: str, post_title: str, post_text: str,
         f'- Each option should be 1 vivid sentence\n\n'
         f'Return ONLY JSON: {{"prompt":"...","opts":[{{"t":"...","pts":0}},{{"t":"...","pts":2}},{{"t":"...","pts":3}},{{"t":"...","pts":5}}]}}'
     )
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",  # fastest claude model
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
         max_tokens=350,
         messages=[{"role": "user", "content": prompt}],
     )
-    raw  = resp.content[0].text.strip()
+    raw  = resp.choices[0].message.content.strip()
     data = _safe_json(raw)
     if not isinstance(data, dict) or not data.get("prompt") or len(data.get("opts", [])) < 4:
         raise ValueError(f"Bad response: {raw[:80]}")
@@ -429,11 +420,6 @@ def _make_fallback_question(post):
 
 
 def generate_all_questions_parallel(posts, api_key):
-    """
-    ── SPEED FIX: pipeline fetch + generation ──
-    Fire all question generation calls simultaneously.
-    Uses cache: if a post_url was seen in the last hour, returns instantly.
-    """
     results = [None] * len(posts)
 
     def _gen(idx, post):
@@ -476,19 +462,8 @@ def generate_all_questions_parallel(posts, api_key):
 
 def generate_profile_and_categories(result_type, openness_pct, hd_answers,
                                      questions, answers, client) -> dict:
-    """
-    ── BIGGEST SPEED FIX: was 2 separate API calls, now 1 ──
-
-    Returns:
-      {
-        "ranked_categories": [{"name": str, "score": int}, ...],  # all 100+ scored
-        "top25_names": [str, ...],                                 # top 25 by score
-        "recommendations": [str, ...],                             # 5 recs
-      }
-    """
     hd_str = _hd_signal_str(hd_answers)
 
-    # Build quiz context
     pos, neg = [], []
     for qi, ai in enumerate(answers):
         if ai is None or qi >= len(questions): continue
@@ -527,18 +502,17 @@ Return ONLY valid JSON, no markdown:
   "recommendations": ["...", "...", "...", "...", "..."]
 }}"""
 
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
         max_tokens=2000,
         messages=[{"role": "user", "content": prompt}],
     )
-    raw  = resp.content[0].text.strip()
+    raw  = resp.choices[0].message.content.strip()
     data = _safe_json(raw)
 
     if not isinstance(data, dict):
         raise ValueError("Profile generation returned invalid JSON")
 
-    # Process ranked categories
     raw_scores = data.get("ranked_categories", {})
     scored = []
     for cat in ALL_PLATFORM_CATEGORIES:
@@ -571,10 +545,9 @@ _DEFAULTS = {
     "wwyd_openness_pct":     0,
     "wwyd_total_pts":        0,
     "wwyd_recs":             [],
-    # category state
-    "wwyd_ranked_cats":      [],   # all scored categories
-    "wwyd_top25":            [],   # AI-suggested top 25 names
-    "wwyd_selected_cats":    [],   # user's final selection
+    "wwyd_ranked_cats":      [],
+    "wwyd_top25":            [],
+    "wwyd_selected_cats":    [],
 }
 
 
@@ -705,8 +678,6 @@ def render_loading():
 
         selected = posts[:POST_COUNT]
 
-        # ── PIPELINE: all question generation fires simultaneously ──
-        # Cache means returning users see near-instant loads
         questions, failed_count = generate_all_questions_parallel(selected, api_key)
 
         upd(95, "Finalising…")
@@ -926,7 +897,7 @@ def render_hidden_desires():
                 st.rerun()
 
 
-# ─── PHASE: GENERATING PROFILE (single API call) ──────────────────────────────
+# ─── PHASE: GENERATING PROFILE ────────────────────────────────────────────────
 
 def render_generating_profile():
     st.html("""
@@ -945,7 +916,6 @@ def render_generating_profile():
         answers   = st.session_state.wwyd_answers
         hd_ans    = st.session_state.wwyd_hd_answers
 
-        # Score Phase 1
         total_pts = sum(
             (q.get("opts", [])[a].get("pts", 0) if isinstance(q.get("opts", [])[a], dict) else 0)
             for q, a in zip(questions, answers)
@@ -962,7 +932,6 @@ def render_generating_profile():
 
         client = _get_client()
 
-        # ── ONE API CALL for categories + recommendations ──
         profile_data = generate_profile_and_categories(
             result_type, pct, hd_ans, questions, answers, client
         )
@@ -976,7 +945,6 @@ def render_generating_profile():
         st.session_state.wwyd_ranked_cats  = profile_data["ranked_categories"]
         st.session_state.wwyd_top25        = profile_data["top25_names"]
         st.session_state.wwyd_recs         = profile_data["recommendations"]
-        # Pre-select top 25 so user lands with recommendations already highlighted
         st.session_state.wwyd_selected_cats = list(profile_data["top25_names"])
         st.session_state.wwyd_phase         = "category_selector"
 
@@ -992,9 +960,9 @@ def render_generating_profile():
 # ─── PHASE: CATEGORY SELECTOR ────────────────────────────────────────────────
 
 def render_category_selector():
-    ranked_cats = st.session_state.wwyd_ranked_cats          # [{name, score}, ...]
-    top25_names = set(st.session_state.wwyd_top25)           # AI top 25
-    selected    = set(st.session_state.wwyd_selected_cats)   # user's picks
+    ranked_cats = st.session_state.wwyd_ranked_cats
+    top25_names = set(st.session_state.wwyd_top25)
+    selected    = set(st.session_state.wwyd_selected_cats)
 
     pct         = st.session_state.get("wwyd_openness_pct", 0)
     result_type = st.session_state.get("wwyd_result_type", {})
@@ -1044,7 +1012,6 @@ def render_category_selector():
 </div>
 """)
 
-    # Render all categories in ranked order, 3 columns
     cols = st.columns(3)
     for idx, cat_info in enumerate(ranked_cats):
         cat_name  = cat_info["name"]
@@ -1052,7 +1019,6 @@ def render_category_selector():
         is_top25  = cat_name in top25_names
         is_sel    = cat_name in selected
 
-        # Build button label with score indicator
         score_bar = "█" * min(cat_score, 5) + "░" * (5 - min(cat_score, 5))
         if is_sel:
             btn_label = f"✓ {cat_name}"
@@ -1062,7 +1028,6 @@ def render_category_selector():
             btn_label = cat_name
 
         with cols[idx % 3]:
-            # Use primary for selected, custom styling for top25 vs rest
             btn_type = "primary" if is_sel else "secondary"
             if st.button(
                 btn_label,
@@ -1078,7 +1043,6 @@ def render_category_selector():
                 st.session_state.wwyd_selected_cats = list(new_sel)
                 st.rerun()
 
-            # Score bar beneath button
             if cat_score > 0:
                 bar_color = "var(--lime)" if is_top25 else "var(--border)"
                 fill_pct  = min(100, cat_score * 10)
@@ -1141,7 +1105,6 @@ def render_result():
 </div>
 """)
 
-    # Hidden desire signals
     strong = [q for q in HIDDEN_DESIRE_QUESTIONS if hd_ans.get(q["id"]) in ("yes", "strongly")]
     if strong:
         sigs_html = "".join(
@@ -1164,7 +1127,6 @@ def render_result():
 </div>
 """)
 
-    # Top categories — show top 10 with score bars
     if ranked_cats:
         top10     = [c for c in ranked_cats[:10] if c["score"] > 0]
         max_score = ranked_cats[0]["score"] if ranked_cats else 1
@@ -1199,7 +1161,6 @@ def render_result():
 </div>
 """)
 
-    # Recommendations
     if recs:
         recs_html = "".join(
             f'<div style="background:var(--surface); border:1px solid var(--border); '
