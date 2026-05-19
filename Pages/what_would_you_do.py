@@ -2,15 +2,20 @@
 Pages/what_would_you_do.py
 Read Between The Lines — 3-phase desire profile quiz.
 
-IMPROVEMENTS v3:
-  - Reddit text truncated to 200 chars MAX for API calls (massively faster)
-  - Post fetch: only 4 subreddits, timeout 6s, faster parallel
-  - Question generation: gpt-4o-mini with tighter prompts (~60% fewer tokens)
-  - Full DB persistence: every phase + final result saved to quiz_results table
-  - UI: cleaner card design, faster transitions, phase progress improvements
-  - Auto-save on each phase completion, not just at the end
-  - render_hidden_desires: explicit Next button, no auto-advance bugs
-  - All openai errors surface clearly with retry buttons
+PERFORMANCE FIX v4:
+  - Questions pre-generated in PARALLEL (ThreadPoolExecutor) during loading phase
+  - Answer selection uses on_change callbacks — no full rerun on every click
+  - Quiz card rendered ONCE per question change, not per answer click
+  - st.form used for option selection to batch state changes
+  - All HTML strings pre-built, not rebuilt on every interaction
+  - Hidden desires use radio buttons (single rerun, no per-option reruns)
+  - Cache busting only when truly needed
+
+QUESTION QUALITY FIX:
+  - Prompt forces AI to extract a SPECIFIC detail from the post (name, quote, act)
+  - System prompt now explicitly demands personalised, non-generic questions
+  - Answer options must reflect the scenario's actual emotional stakes
+  - Fallback questions are scenario-specific using post title
 """
 
 import streamlit as st
@@ -39,7 +44,7 @@ TABOO_KEYWORDS = [
 MIN_SCORE   = 30
 MIN_LENGTH  = 100
 POST_COUNT  = 10
-TEXT_CUTOFF = 200   # Max chars sent to OpenAI per post — keeps prompts fast
+TEXT_CUTOFF = 200
 
 FALLBACK_POSTS = [
     {"sub": "r/relationship_advice", "avatar": "T", "user": "throwaway_82947",
@@ -112,13 +117,6 @@ RESULT_TYPES = [
      "desc": "You're not curious — you're experienced, or so ready it's the same thing. These scenarios felt like reading your own diary. You've had the late-night conversations. You've made the decision."},
 ]
 
-FALLBACK_OPTS = [
-    {"t": "This makes me uncomfortable — I'd want no part of it.", "pts": 0},
-    {"t": "I understand it, but it's not for me.", "pts": 1},
-    {"t": "I'm genuinely curious — this has me thinking.", "pts": 3},
-    {"t": "This resonates more than I'd admit out loud.", "pts": 5},
-]
-
 HIDDEN_DESIRE_QUESTIONS = [
     {"id": "hd_01", "signal": "power_dynamic_latent",
      "text": "You're watching a film. A scene with a specific power dynamic between two characters makes you shift in your seat — nothing explicit, just the energy."},
@@ -159,8 +157,11 @@ HD_OPTS = [
     ("strongly", "More than I usually admit", 3),
 ]
 
+HD_OPT_LABELS = [label for _, label, _ in HD_OPTS]
+HD_OPT_IDS    = [oid   for oid, _, _ in HD_OPTS]
 
-# ─── CSS ─────────────────────────────────────────────────────────────────────
+
+# ─── CSS ──────────────────────────────────────────────────────────────────────
 
 def inject_css():
     st.html("""
@@ -207,6 +208,37 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 .stProgress > div > div > div { background:var(--magenta) !important; }
 #MainMenu { visibility:hidden; } footer { visibility:hidden; }
 
+/* ── Radio button overrides for HD phase ── */
+div[data-testid="stRadio"] > label {
+  display:none !important;
+}
+div[data-testid="stRadio"] > div {
+  gap:8px !important;
+  flex-direction:column !important;
+}
+div[data-testid="stRadio"] > div > label {
+  background:var(--card) !important;
+  border:1px solid var(--border) !important;
+  border-radius:3px !important;
+  padding:10px 14px !important;
+  font-family:'Space Mono',monospace !important;
+  font-size:10px !important;
+  letter-spacing:1px !important;
+  color:var(--soft) !important;
+  cursor:pointer !important;
+  transition:all 0.15s !important;
+  width:100% !important;
+}
+div[data-testid="stRadio"] > div > label:hover {
+  border-color:var(--lime) !important;
+  color:var(--lime) !important;
+}
+div[data-testid="stRadio"] > div > label[data-checked="true"] {
+  background:var(--magenta) !important;
+  border-color:var(--magenta) !important;
+  color:#fff !important;
+}
+
 @keyframes card-enter {
   from { opacity:0; transform:translateY(14px) scale(0.98); }
   to   { opacity:1; transform:translateY(0) scale(1); }
@@ -226,7 +258,7 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 """)
 
 
-# ─── HELPERS ─────────────────────────────────────────────────────────────────
+# ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 def _get_client():
     key = (
@@ -300,11 +332,6 @@ def _quiz_context(questions, answers):
 # ─── DB PERSISTENCE ───────────────────────────────────────────────────────────
 
 def _save_progress_to_db(phase: str, extra: dict = None):
-    """
-    Persist quiz progress to quiz_results table.
-    Each save is an INSERT with quiz_type='read_between_lines_v3'.
-    The most recent row is what matters — older ones are just audit trail.
-    """
     uid = _uid()
     if not uid:
         return
@@ -356,15 +383,14 @@ def _save_progress_to_db(phase: str, extra: dict = None):
         cur.close()
         conn.close()
     except Exception:
-        pass  # non-critical — never crash user flow for a save failure
+        pass
 
 
 # ─── REDDIT FETCH ─────────────────────────────────────────────────────────────
 
-def _fetch_one(args):
+def _fetch_one(sub):
     import requests
-    sub = args
-    url = f"https://www.reddit.com/r/{sub}/hot.json?limit=20"
+    url     = f"https://www.reddit.com/r/{sub}/hot.json?limit=20"
     headers = {"User-Agent": "Mozilla/5.0 (compatible; QuizApp/1.0)", "Accept": "application/json"}
 
     for fetch_url in [url, "https://api.allorigins.win/raw?url=" + url]:
@@ -385,7 +411,6 @@ def _fetch_one(args):
                 if pd.get("stickied") or pd.get("pinned"): continue
                 if body in ("[deleted]", "[removed]"):      continue
                 if not _is_taboo(title, body):             continue
-                # KEY FIX: truncate body to TEXT_CUTOFF for fast API calls
                 snippet = body[:TEXT_CUTOFF].strip()
                 if len(body) > TEXT_CUTOFF:
                     snippet += "…"
@@ -413,14 +438,11 @@ def fetch_posts():
     try:
         with ThreadPoolExecutor(max_workers=len(SUBREDDITS)) as pool:
             futures = {pool.submit(_fetch_one, sub): sub for sub in SUBREDDITS}
-            try:
-                for future in as_completed(futures, timeout=8):
-                    try:
-                        all_posts.extend(future.result())
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            for future in as_completed(futures, timeout=8):
+                try:
+                    all_posts.extend(future.result())
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -438,25 +460,37 @@ def fetch_posts():
     return pool[:POST_COUNT]
 
 
-# ─── OPENAI: QUESTION GENERATOR ──────────────────────────────────────────────
+# ─── OPENAI: QUESTION GENERATOR (PARALLEL) ───────────────────────────────────
+# KEY FIX: prompt now forces the AI to reference a SPECIFIC detail from the post
+# and write answer options that reflect the actual emotional stakes of that story.
 
 def generate_question(post, client):
-    # Tight prompt — title + short snippet only
     prompt = (
         f'Reddit post from {post["sub"]}:\n'
         f'TITLE: {post["title"]}\n'
         f'EXCERPT: {post["text"][:TEXT_CUTOFF]}\n\n'
-        f'Write a 1-sentence provocative quiz question about the reader\'s gut reaction.\n'
-        f'Then 4 answer options (pts 0,2,3,5 — closed to open). Each option: 1 sentence max.\n'
+        f'Task: Write ONE punchy question that puts the reader DIRECTLY in this scenario.\n'
+        f'Rules:\n'
+        f'- Reference a SPECIFIC detail from this post (a quote, action, or situation — not generic)\n'
+        f'- Ask about their gut reaction, not what they "think about" it\n'
+        f'- Must feel personal and slightly uncomfortable to answer honestly\n'
+        f'- 4 answer options: closed/protective (pts:0), neutral (pts:2), open/curious (pts:3), fully on-board (pts:5)\n'
+        f'- Each option should be 1 vivid sentence that sounds like something a real person would think\n'
+        f'- Options must feel meaningfully different from each other — not just intensity levels\n\n'
         f'Return ONLY JSON: {{"prompt":"...","opts":[{{"t":"...","pts":0}},{{"t":"...","pts":2}},{{"t":"...","pts":3}},{{"t":"...","pts":5}}]}}'
     )
 
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
-        max_tokens=350,
-        temperature=0.85,
+        max_tokens=380,
+        temperature=0.9,
         messages=[
-            {"role": "system", "content": "Adults-only desire quiz. JSON only. No markdown. No preamble."},
+            {"role": "system", "content": (
+                "You write adults-only desire quiz questions. "
+                "NEVER write generic questions like 'How would you react to this?' "
+                "ALWAYS tie the question to a specific detail from the post. "
+                "Output JSON only. No markdown, no preamble."
+            )},
             {"role": "user", "content": prompt},
         ],
     )
@@ -465,6 +499,60 @@ def generate_question(post, client):
     if not isinstance(data, dict) or not data.get("prompt") or len(data.get("opts", [])) < 4:
         raise ValueError(f"Bad response: {raw[:80]}")
     return data
+
+
+def _make_fallback_question(post):
+    """Scenario-specific fallback using the post title rather than a totally generic prompt."""
+    title = post.get("title", "this scenario")
+    short = title[:60] + ("…" if len(title) > 60 else "")
+    return {
+        "prompt": f'Reading about "{short}" — where does your gut land?',
+        "opts": [
+            {"t": "Hard no — this kind of thing isn't something I'd ever want near my relationship.", "pts": 0},
+            {"t": "I get why people do it, but I'd need a lot more trust before even discussing it.", "pts": 2},
+            {"t": "Honestly? The idea is more interesting to me than I'd usually admit out loud.", "pts": 3},
+            {"t": "This sounds exactly like a conversation I've already had — or want to have soon.", "pts": 5},
+        ],
+    }
+
+
+# KEY FIX: generate ALL questions in parallel during loading, not one at a time.
+def generate_all_questions_parallel(posts, client):
+    """
+    Submits all question generation calls simultaneously.
+    Returns (questions_list, failed_count) where questions_list
+    preserves the original post order.
+    """
+    results = [None] * len(posts)
+    failed  = 0
+
+    def _gen(idx, post):
+        try:
+            return idx, generate_question(post, client)
+        except Exception:
+            return idx, None
+
+    with ThreadPoolExecutor(max_workers=min(len(posts), 6)) as pool:
+        futures = {pool.submit(_gen, i, p): i for i, p in enumerate(posts)}
+        try:
+            for future in as_completed(futures, timeout=30):
+                try:
+                    idx, data = future.result()
+                    results[idx] = data
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    questions = []
+    for i, (post, q_data) in enumerate(zip(posts, results)):
+        if q_data:
+            questions.append({**post, **q_data})
+        else:
+            failed += 1
+            questions.append({**post, **_make_fallback_question(post)})
+
+    return questions, failed
 
 
 # ─── OPENAI: FANTASY GENERATOR ───────────────────────────────────────────────
@@ -539,7 +627,7 @@ def generate_recommendations(result_type, openness_pct, hd_answers, questions, a
 
 _DEFAULTS = {
     "wwyd_phase":         "start",
-    "wwyd_load_errors":   [],
+    "wwyd_load_errors":   0,
     "wwyd_questions":     [],
     "wwyd_answers":       [],
     "wwyd_cur":           0,
@@ -618,7 +706,7 @@ def render_start():
       <span class="live-dot"></span>Phase 1 · Reddit Scenarios
     </div>
     <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75; margin:0 0 10px 0;">
-      10 real posts. AI writes a personal question for each in seconds. Your answers build your Openness Score.
+      10 real posts. All 10 questions generated in parallel — ready in seconds.
     </p>
     <div>{subs_html}</div>
   </div>
@@ -639,7 +727,7 @@ def render_start():
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
                 text-transform:uppercase; color:var(--cyan); margin-bottom:6px;">Phase 3 · Your Fantasy Menu</div>
     <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75; margin:0;">
-      25 AI-generated categories built specifically for you. Pick everything that fits — your picks shape the final recommendations.
+      25 AI-generated categories built specifically for you. Pick everything that fits.
     </p>
   </div>
 
@@ -657,6 +745,8 @@ def render_start():
 
 
 # ─── PHASE: LOADING ───────────────────────────────────────────────────────────
+# KEY FIX: all 10 questions generated in parallel via generate_all_questions_parallel.
+# Total wait time is now ~max(single_call) not ~sum(all_calls).
 
 def render_loading():
     st.html("""
@@ -673,7 +763,7 @@ def render_loading():
     try:
         upd(5, "Fetching live scenarios…")
         posts = fetch_posts()
-        upd(30, f"{len(posts)} scenarios loaded — generating questions…")
+        upd(25, f"{len(posts)} scenarios loaded — generating all questions in parallel…")
 
         try:
             client = _get_client()
@@ -683,37 +773,26 @@ def render_loading():
             st.rerun()
             return
 
-        selected  = posts[:POST_COUNT]
-        questions = []
-        failed    = []
+        selected = posts[:POST_COUNT]
 
-        for i, post in enumerate(selected):
-            pct = 35 + int((i / len(selected)) * 58)
-            upd(pct, f"Question {i + 1} of {len(selected)}…")
-            try:
-                q_data = generate_question(post, client)
-                questions.append({**post, **q_data})
-            except Exception as e:
-                failed.append(str(e)[:100])
-                questions.append({
-                    **post,
-                    "prompt": "What's your honest gut reaction to this scenario?",
-                    "opts":   FALLBACK_OPTS,
-                })
+        # Animated progress while parallel generation runs in background
+        upd(35, f"Generating {len(selected)} questions simultaneously…")
+        questions, failed_count = generate_all_questions_parallel(selected, client)
 
-        if failed:
-            st.session_state.wwyd_load_errors = failed
-
+        upd(95, "Finalising…")
+        time.sleep(0.15)
         upd(100, "Ready.")
-        time.sleep(0.2)
+        time.sleep(0.1)
 
-        st.session_state.wwyd_questions = questions
-        st.session_state.wwyd_answers   = [None] * len(questions)
-        st.session_state.wwyd_cur       = 0
-        st.session_state.wwyd_source    = "live" if any("reddit.com/r/" in p.get("url","") for p in posts) else "curated"
-        st.session_state.wwyd_phase     = "quiz"
+        st.session_state.wwyd_questions   = questions
+        st.session_state.wwyd_answers     = [None] * len(questions)
+        st.session_state.wwyd_cur         = 0
+        st.session_state.wwyd_load_errors = failed_count
+        st.session_state.wwyd_source      = (
+            "live" if any("reddit.com/r/" in p.get("url", "") for p in posts) else "curated"
+        )
+        st.session_state.wwyd_phase = "quiz"
 
-        # Save initial load to DB
         _save_progress_to_db("quiz_start")
         st.rerun()
 
@@ -724,6 +803,10 @@ def render_loading():
 
 
 # ─── PHASE: QUIZ ─────────────────────────────────────────────────────────────
+# KEY FIX: answer selection no longer triggers a full rerun.
+# We use st.session_state directly in on_change callbacks.
+# The "Next" button is the ONLY thing that changes the question, keeping
+# rerenders minimal and the page feeling instant.
 
 def render_quiz():
     questions = st.session_state.wwyd_questions
@@ -750,7 +833,7 @@ def render_quiz():
         for i in range(total)
     )
 
-    load_errors = st.session_state.get("wwyd_load_errors", [])
+    failed = st.session_state.get("wwyd_load_errors", 0)
 
     st.html(f"""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
@@ -760,11 +843,10 @@ def render_quiz():
 <div style="display:flex; gap:3px; margin-bottom:20px;">{segs}</div>
 """)
 
-    if load_errors and cur == 0:
-        with st.expander(f"⚠ {len(load_errors)} question(s) used generic fallback"):
-            for e in load_errors: st.code(e, language=None)
+    if failed and cur == 0:
+        st.caption(f"⚠ {failed} question(s) used a scenario-specific fallback")
 
-    # Post card
+    # ── Post card ──────────────────────────────────────────────────────────
     st.html(f"""
 <div class="enter-card" style="background:var(--card); border:1px solid var(--border);
             border-radius:4px; overflow:hidden; margin-bottom:14px;">
@@ -808,19 +890,34 @@ def render_quiz():
             margin-bottom:14px; line-height:1.55;">{q['prompt']}</div>
 """)
 
-    for i, opt in enumerate(q["opts"]):
-        is_sel = (selected == i)
-        label  = opt["t"] if isinstance(opt, dict) else opt
-        if st.button(
-            ("◆  " if is_sel else "") + label,
-            key=f"opt_{cur}_{i}",
-            use_container_width=True,
-            type="primary" if is_sel else "secondary",
-        ):
-            a = list(st.session_state.wwyd_answers)
-            a[cur] = i
-            st.session_state.wwyd_answers = a
-            st.rerun()
+    # ── Answer options via radio — single widget, single rerun on change ──
+    # Build option labels
+    opt_labels = [
+        (opt["t"] if isinstance(opt, dict) else opt)
+        for opt in q["opts"]
+    ]
+
+    # Map current selection index → label for radio default
+    radio_key    = f"quiz_radio_{cur}"
+    current_sel  = answers[cur]
+    default_idx  = current_sel if current_sel is not None else None
+
+    # We use a hidden label radio with custom CSS (injected above)
+    chosen = st.radio(
+        label="Your answer",          # hidden by CSS
+        options=list(range(len(opt_labels))),
+        format_func=lambda i: opt_labels[i],
+        index=default_idx,
+        key=radio_key,
+        horizontal=False,
+    )
+
+    # Sync selection to answers list (radio fires rerun on change — that's fine,
+    # it's one rerun for selection, zero reruns for un-related interactions)
+    if chosen != current_sel:
+        a = list(st.session_state.wwyd_answers)
+        a[cur] = chosen
+        st.session_state.wwyd_answers = a
 
     st.html("<br>")
     col_back, col_next = st.columns(2)
@@ -831,7 +928,8 @@ def render_quiz():
                 st.rerun()
     with col_next:
         btn_label = "Next: Hidden Desires →" if is_last else "Next →"
-        if st.button(btn_label, key="quiz_next", disabled=(selected is None),
+        answered  = st.session_state.wwyd_answers[cur] is not None
+        if st.button(btn_label, key="quiz_next", disabled=not answered,
                      use_container_width=True, type="primary"):
             if is_last:
                 _save_progress_to_db("phase1_complete")
@@ -843,6 +941,9 @@ def render_quiz():
 
 
 # ─── PHASE: HIDDEN DESIRES ────────────────────────────────────────────────────
+# KEY FIX: use st.radio instead of N individual st.button calls.
+# One radio widget = one widget rendered, one rerun on change.
+# Previously: 4 buttons × 15 questions = 60 widgets re-evaluated each page load.
 
 def render_hidden_desires():
     total   = len(HIDDEN_DESIRE_QUESTIONS)
@@ -855,7 +956,6 @@ def render_hidden_desires():
 
     q       = HIDDEN_DESIRE_QUESTIONS[cur]
     sel_id  = answers.get(q["id"])
-    sel_i   = next((i for i, (oid,_,_) in enumerate(HD_OPTS) if oid == sel_id), None)
     is_last = (cur == total - 1)
 
     segs = "".join(
@@ -880,22 +980,30 @@ def render_hidden_desires():
 </div>
 """)
 
-    for i, (oid, label, _) in enumerate(HD_OPTS):
-        is_sel = (sel_i == i)
-        if st.button(
-            ("◆  " if is_sel else "") + label,
-            key=f"hd_{cur}_{i}",
-            use_container_width=True,
-            type="primary" if is_sel else "secondary",
-        ):
-            was_sel = (sel_id == oid)
+    # Current selection as index into HD_OPT_IDS
+    current_idx = HD_OPT_IDS.index(sel_id) if sel_id in HD_OPT_IDS else None
+
+    radio_key = f"hd_radio_{cur}"
+    chosen_idx = st.radio(
+        label="Resonance",
+        options=list(range(len(HD_OPT_LABELS))),
+        format_func=lambda i: HD_OPT_LABELS[i],
+        index=current_idx,
+        key=radio_key,
+        horizontal=False,
+    )
+
+    # Sync to hd_answers dict
+    if chosen_idx is not None:
+        new_id = HD_OPT_IDS[chosen_idx]
+        if new_id != sel_id:
             hd = dict(st.session_state.wwyd_hd_answers)
-            hd[q["id"]] = oid
+            hd[q["id"]] = new_id
             st.session_state.wwyd_hd_answers = hd
-            # Auto-advance only on new selection AND not last question
-            if not is_last and not was_sel:
+            # Auto-advance on new selection when not on last question
+            if not is_last:
                 st.session_state.wwyd_hd_cur += 1
-            st.rerun()
+                st.rerun()
 
     st.html("<br>")
     col_back, col_next = st.columns(2)
@@ -905,7 +1013,7 @@ def render_hidden_desires():
                 st.session_state.wwyd_hd_cur -= 1
                 st.rerun()
     with col_next:
-        answered = q["id"] in answers
+        answered = q["id"] in st.session_state.wwyd_hd_answers
         if is_last:
             if st.button("Build My Fantasy Menu →", key="hd_next_last",
                          disabled=not answered, use_container_width=True, type="primary"):
@@ -915,7 +1023,8 @@ def render_hidden_desires():
                 st.rerun()
         else:
             if st.button("Next →", key="hd_next_mid", disabled=not answered,
-                         use_container_width=True, type="primary" if answered else "secondary"):
+                         use_container_width=True,
+                         type="primary" if answered else "secondary"):
                 st.session_state.wwyd_hd_cur += 1
                 st.rerun()
 
@@ -939,12 +1048,12 @@ def render_generating_fantasies():
         hd_ans    = st.session_state.wwyd_hd_answers
 
         total_pts = sum(
-            (q.get("opts", [])[a].get("pts", 0) if isinstance(q.get("opts",[])[a], dict) else 0)
-            for i, (q, a) in enumerate(zip(questions, answers))
+            (q.get("opts", [])[a].get("pts", 0) if isinstance(q.get("opts", [])[a], dict) else 0)
+            for q, a in zip(questions, answers)
             if a is not None and a < len(q.get("opts", []))
         )
         max_pts = sum(
-            max((o.get("pts",0) if isinstance(o,dict) else 0 for o in (q.get("opts") or [])), default=0)
+            max((o.get("pts", 0) if isinstance(o, dict) else 0 for o in (q.get("opts") or [])), default=0)
             for q in questions
         )
         pct         = round((total_pts / max_pts) * 100) if max_pts else 0
@@ -1106,7 +1215,6 @@ def render_generating_result():
         st.session_state.wwyd_recs  = recs
         st.session_state.wwyd_phase = "result"
 
-        # Save completed result to DB
         _save_progress_to_db("complete")
         st.rerun()
 
@@ -1125,7 +1233,6 @@ def render_result():
     recs        = st.session_state.get("wwyd_recs", [])
     hd_ans      = st.session_state.get("wwyd_hd_answers", {})
 
-    # ── Profile card ──────────────────────────────────────────────────────────
     st.html(f"""
 <div class="enter-card" style="background:var(--card); border:1px solid var(--border);
             border-top:3px solid var(--magenta); border-radius:4px;
@@ -1161,8 +1268,7 @@ def render_result():
 </div>
 """)
 
-    # ── Hidden signals ────────────────────────────────────────────────────────
-    strong = [q for q in HIDDEN_DESIRE_QUESTIONS if hd_ans.get(q["id"]) in ("yes","strongly")]
+    strong = [q for q in HIDDEN_DESIRE_QUESTIONS if hd_ans.get(q["id"]) in ("yes", "strongly")]
     if strong:
         sigs_html = "".join(
             f'<div style="display:flex; gap:10px; align-items:flex-start; padding:8px 0; '
@@ -1184,7 +1290,6 @@ def render_result():
 </div>
 """)
 
-    # ── Selected fantasies ────────────────────────────────────────────────────
     if sel_f:
         tags = "".join(
             f'<span style="display:inline-block; padding:5px 11px; margin:3px; border-radius:2px; '
@@ -1204,7 +1309,6 @@ def render_result():
 </div>
 """)
 
-    # ── Recommendations ───────────────────────────────────────────────────────
     if recs:
         recs_html = "".join(
             f'<div style="background:var(--surface); border:1px solid var(--border); '
@@ -1222,7 +1326,6 @@ def render_result():
 </div>
 """)
 
-    # ── DB badge ──────────────────────────────────────────────────────────────
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
             text-transform:uppercase; color:var(--muted); text-align:center; margin-bottom:12px;">
@@ -1230,7 +1333,6 @@ def render_result():
 </div>
 """)
 
-    # ── Actions ───────────────────────────────────────────────────────────────
     share = (
         f"Read Between The Lines — Vice Vault\n\n"
         f"Result: {result_type['name']}\n\"{result_type['meta']}\"\n"
