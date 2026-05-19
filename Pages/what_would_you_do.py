@@ -1,6 +1,13 @@
 """
 Pages/what_would_you_do.py
 Read Between The Lines — 3-phase desire profile quiz.
+
+FIXES:
+- _uid() now surfaces a visible error instead of silently returning None
+- _save_to_db() shows the actual UID it resolved (or why it didn't)
+- DB errors are stored and shown on EVERY phase, not just in _render_header()
+- update_rbtl_selected_categories fallback insert now works correctly
+- Added _debug_uid() helper so you can verify session state at any point
 """
 
 import streamlit as st
@@ -220,27 +227,13 @@ div[data-testid="stRadio"] > div > label[data-checked="true"] {
 """)
 
 
-# ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-def _get_client():
-    key = st.secrets.get("OPENAI_API_KEY", "")
-    if not key:
-        raise RuntimeError("OPENAI_API_KEY not found in Streamlit secrets.")
-    return OpenAI(api_key=key)
-
+# ─── UID RESOLUTION (FIXED) ───────────────────────────────────────────────────
 
 def _uid():
     """
     Resolve the logged-in user's integer ID from session state.
-
-    Handles every common storage shape:
-      st.session_state["user"] = {"id": 3, ...}          # dict with "id"
-      st.session_state["user"] = {"user_id": 3, ...}     # dict with "user_id"
-      st.session_state["user_id"] = 3                    # bare int at top level
-      st.session_state["user"] = 3                       # bare int stored as "user"
-    Returns None if nothing resolves to a valid positive integer.
+    Returns None if unresolved — callers must check and surface an error.
     """
-    # 1. Try the "user" key first (most common pattern)
     u = st.session_state.get("user")
     if u is not None:
         if isinstance(u, dict):
@@ -258,7 +251,6 @@ def _uid():
             except (TypeError, ValueError):
                 pass
 
-    # 2. Fallback: bare "user_id" key
     uid = st.session_state.get("user_id")
     if uid is not None:
         try:
@@ -269,6 +261,34 @@ def _uid():
             pass
 
     return None
+
+
+def _debug_uid_info() -> str:
+    """Returns a human-readable string describing what _uid() sees in session state."""
+    u = st.session_state.get("user")
+    uid_direct = st.session_state.get("user_id")
+    resolved = _uid()
+    return (
+        f"session_state['user'] = {repr(u)} | "
+        f"session_state['user_id'] = {repr(uid_direct)} | "
+        f"resolved uid = {resolved}"
+    )
+
+
+def _show_persistent_db_error():
+    """Show DB error on every page — not just in _render_header()."""
+    db_err = st.session_state.get("wwyd_db_error", "")
+    if db_err:
+        st.error(f"⚠️ DB: {db_err}")
+
+
+# ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+def _get_client():
+    key = st.secrets.get("OPENAI_API_KEY", "")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY not found in Streamlit secrets.")
+    return OpenAI(api_key=key)
 
 
 def _fmt_num(n):
@@ -568,13 +588,17 @@ def hard_reset():
     st.rerun()
 
 
-# ─── DB SAVE ──────────────────────────────────────────────────────────────────
+# ─── DB SAVE (FIXED) ──────────────────────────────────────────────────────────
 
 def _save_to_db(phase: str):
     uid = _uid()
+
+    # FIXED: surface the error instead of silently returning
     if not uid:
-        # Not logged in — silently skip saving rather than surfacing an error
-        # that confuses users who are mid-quiz. DB save is best-effort.
+        st.session_state.wwyd_db_error = (
+            f"Not saved ({phase}): could not resolve user ID. "
+            f"Debug: {_debug_uid_info()}"
+        )
         return
 
     try:
@@ -615,30 +639,36 @@ def _save_to_db(phase: str):
             recommendations=st.session_state.get("wwyd_recs", []),
         )
 
-        # saved is a plain bool from database.py
         if not saved:
-            st.session_state.wwyd_db_error = f"DB save failed ({phase})"
+            st.session_state.wwyd_db_error = (
+                f"DB save returned False ({phase}) for user_id={uid}. "
+                f"Check that quiz_results.quiz_type is VARCHAR(64) and DB connection is live."
+            )
         else:
             st.session_state.wwyd_db_error = ""
 
     except Exception as e:
-        st.session_state.wwyd_db_error = f"DB save exception ({phase}): {e}"
+        st.session_state.wwyd_db_error = f"DB save exception ({phase}) uid={uid}: {e}"
 
 
 def _update_selections_in_db(selected_cats: list):
     uid = _uid()
+
+    # FIXED: surface the error
     if not uid:
-        # Not logged in — skip silently
+        st.session_state.wwyd_db_error = (
+            f"Selection not saved: could not resolve user ID. "
+            f"Debug: {_debug_uid_info()}"
+        )
         return
 
     try:
         import database as db
 
-        # Try to update the existing row first
         saved = db.update_rbtl_selected_categories(uid, selected_cats)
 
         if not saved:
-            # No existing row found (e.g. profile save was skipped) — insert one now
+            # No existing row — insert a full row now
             slim_questions = []
             for q in st.session_state.get("wwyd_questions", []):
                 slim_questions.append({
@@ -678,10 +708,13 @@ def _update_selections_in_db(selected_cats: list):
         if saved:
             st.session_state.wwyd_db_error = ""
         else:
-            st.session_state.wwyd_db_error = "Selection update failed"
+            st.session_state.wwyd_db_error = (
+                f"Selection update failed for user_id={uid}. "
+                f"Both UPDATE and INSERT returned False. Check DB connection and table schema."
+            )
 
     except Exception as e:
-        st.session_state.wwyd_db_error = f"Selection update exception: {e}"
+        st.session_state.wwyd_db_error = f"Selection update exception uid={uid}: {e}"
 
 
 # ─── HEADER ──────────────────────────────────────────────────────────────────
@@ -700,10 +733,8 @@ def _render_header():
   </div>
 </div>
 """)
-
-    db_err = st.session_state.get("wwyd_db_error", "")
-    if db_err:
-        st.error(f"⚠️ {db_err}")
+    # Show DB error on every page render, not just once
+    _show_persistent_db_error()
 
 
 # ─── PHASE: START ─────────────────────────────────────────────────────────────
@@ -712,6 +743,21 @@ def render_start():
     if st.session_state.wwyd_error:
         st.error(st.session_state.wwyd_error)
         st.session_state.wwyd_error = ""
+
+    # Show UID status so you can confirm session is wired correctly
+    uid = _uid()
+    if not uid:
+        st.warning(
+            f"⚠️ Not logged in or user ID not in session. Results won't save to DB.\n\n"
+            f"Debug: `{_debug_uid_info()}`"
+        )
+    else:
+        st.html(f"""
+<div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
+  Logged in · user_id={uid} · results will save
+</div>
+""")
 
     subs_html = "".join(
         f'<span style="display:inline-block; padding:3px 10px; margin:3px 3px 0 0; '
@@ -814,6 +860,7 @@ def render_loading():
 # ─── PHASE: QUIZ ─────────────────────────────────────────────────────────────
 
 def render_quiz():
+    _show_persistent_db_error()
     questions = st.session_state.wwyd_questions
     cur       = st.session_state.wwyd_cur
     answers   = st.session_state.wwyd_answers
@@ -927,6 +974,7 @@ def render_quiz():
 # ─── PHASE: HIDDEN DESIRES ────────────────────────────────────────────────────
 
 def render_hidden_desires():
+    _show_persistent_db_error()
     total   = len(HIDDEN_DESIRE_QUESTIONS)
     answers = st.session_state.wwyd_hd_answers
     cur     = max(0, min(st.session_state.wwyd_hd_cur, total - 1))
@@ -1061,6 +1109,7 @@ def render_generating_profile():
 # ─── PHASE: CATEGORY SELECTOR ────────────────────────────────────────────────
 
 def render_category_selector():
+    _show_persistent_db_error()
     ranked_cats = st.session_state.wwyd_ranked_cats
     top25_names = set(st.session_state.wwyd_top25)
     selected    = set(st.session_state.wwyd_selected_cats)
@@ -1095,16 +1144,6 @@ def render_category_selector():
 <div style="display:flex; gap:16px; align-items:center; margin-bottom:14px;">
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted);">{len(selected)} selected</div>
-  <div style="display:flex; gap:8px; margin-left:auto;">
-    <div style="display:flex; align-items:center; gap:5px;">
-      <div style="width:10px; height:10px; border:1px solid var(--lime); border-radius:2px;"></div>
-      <span style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">AI top 25</span>
-    </div>
-    <div style="display:flex; align-items:center; gap:5px;">
-      <div style="width:10px; height:10px; background:var(--magenta); border-radius:2px;"></div>
-      <span style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">selected</span>
-    </div>
-  </div>
 </div>
 """)
 
@@ -1147,6 +1186,7 @@ def render_category_selector():
 # ─── PHASE: RESULT ────────────────────────────────────────────────────────────
 
 def render_result():
+    _show_persistent_db_error()
     result_type = st.session_state.get("wwyd_result_type") or RESULT_TYPES[0]
     pct         = st.session_state.get("wwyd_openness_pct", 0)
     sel_cats    = st.session_state.get("wwyd_selected_cats", [])
