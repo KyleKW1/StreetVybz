@@ -536,20 +536,14 @@ def hard_reset():
 # ─── DB SAVE ──────────────────────────────────────────────────────────────────
 
 def _save_to_db(phase: str):
-    """
-    Insert a full result row into quiz_results.
-    Errors are stored in wwyd_db_error (survives st.rerun) so they're
-    visible on the next render instead of being silently swallowed.
-    """
     uid = _uid()
     if not uid:
-        st.session_state.wwyd_db_error = "Save failed: user not logged in (uid=None)"
+        st.session_state.wwyd_db_error = "Save failed: not logged in"
         return
 
     try:
         import database as db
 
-        # Strip heavy post metadata from questions — only keep what matters
         slim_questions = []
         for q in st.session_state.get("wwyd_questions", []):
             slim_questions.append({
@@ -559,7 +553,7 @@ def _save_to_db(phase: str):
                 "opts":   q.get("opts", []),
             })
 
-        ok, msg = db.save_read_between_lines_v4(
+        saved = db.save_read_between_lines_v4(
             user_id=uid,
             phase=phase,
             result_name=st.session_state.get("wwyd_result_type", {}).get("name", ""),
@@ -567,39 +561,42 @@ def _save_to_db(phase: str):
             openness_pct=st.session_state.get("wwyd_openness_pct", 0),
             total_pts=st.session_state.get("wwyd_total_pts", 0),
             questions=slim_questions,
-            answers=st.session_state.get("wwyd_hd_answers", {}),
+            answers={
+                "phase1": st.session_state.get("wwyd_answers", []),
+                "phase2": st.session_state.get("wwyd_hd_answers", {}),
+                "source": st.session_state.get("wwyd_source", "unknown"),
+            },
             dim_scores={
                 "ranked_cats": st.session_state.get("wwyd_ranked_cats", [])[:25],
                 "top25":       st.session_state.get("wwyd_top25", []),
                 "selected":    st.session_state.get("wwyd_selected_cats", []),
                 "hd_signals":  _hd_signal_str(st.session_state.get("wwyd_hd_answers", {})),
+                "hd_full": {
+                    q["id"]: st.session_state.get("wwyd_hd_answers", {}).get(q["id"], "nope")
+                    for q in HIDDEN_DESIRE_QUESTIONS
+                },
             },
             recommendations=st.session_state.get("wwyd_recs", []),
         )
 
-        if ok:
-            st.session_state.wwyd_saved_row_id = msg  # msg = row id on success
-            st.session_state.wwyd_db_error     = ""
+        if saved:
+            st.session_state.wwyd_db_error = ""
         else:
-            st.session_state.wwyd_db_error = f"DB save failed ({phase}): {msg}"
+            st.session_state.wwyd_db_error = f"DB save failed ({phase})"
 
     except Exception as e:
         st.session_state.wwyd_db_error = f"DB save exception ({phase}): {e}"
 
 
 def _update_selections_in_db(selected_cats: list):
-    """
-    Update the existing DB row with the user's confirmed category picks.
-    Called when user clicks 'See My Full Profile →'.
-    """
     uid = _uid()
     if not uid:
         return
     try:
         import database as db
-        ok, msg = db.update_rbtl_selected_categories(uid, selected_cats)
-        if not ok:
-            st.session_state.wwyd_db_error = f"Selection update failed: {msg}"
+        saved = db.update_rbtl_selected_categories(uid, selected_cats)
+        if not saved:
+            st.session_state.wwyd_db_error = "Selection update failed"
         else:
             st.session_state.wwyd_db_error = ""
     except Exception as e:
