@@ -623,9 +623,9 @@ def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> bool:
         )
         conn.commit()
         cur.close()
-        return True
-    except Exception:
-        return False
+        return True, row["id"]
+    except Exception as e:
+        return False, str(e)
     finally:
         conn.close()
 
