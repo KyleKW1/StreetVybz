@@ -485,50 +485,28 @@ def save_vice_goal(user_id: int, vice: str, weekly_limit: int) -> bool:
 
 # ─── QUIZ RESULTS ─────────────────────────────────────────────────────────────
 
-def save_read_between_lines_v4(
-    user_id:         int,
-    phase:           str,
-    result_name:     str,
-    result_meta:     str,
-    openness_pct:    int,
-    total_pts:       int,
-    questions:       list,
-    answers:         list,
-    dim_scores:      dict,
-    recommendations: list,
-) -> tuple:                          # ← was missing tuple annotation
+def save_read_between_lines_result(user_id, profile_name, profile_meta, dim_scores,
+                                    recommendations, total_pct, questions, answers) -> bool:
     conn = create_connection()
     if not conn:
-        return False, "No DB connection"   # ← was: return False
+        return False
     try:
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO quiz_results
-               (user_id, quiz_type,
-                result_name, result_meta,
-                openness_pct, total_pts,
-                questions, answers,
-                dim_scores, recommendations)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (
-                user_id,
-                f"read_between_lines_v4_{phase}",
-                result_name[:128] if result_name else "",
-                result_meta[:255] if result_meta else "",
-                max(0, min(255, openness_pct)),
-                max(0, min(65535, total_pts)),
-                json.dumps(questions,       default=str),
-                json.dumps(answers,         default=str),
-                json.dumps(dim_scores,      default=str),
-                json.dumps(recommendations, default=str),
-            )
+               (user_id, quiz_type, profile_name, profile_meta, dim_scores,
+                recommendations, total_pct, questions, answers)
+               VALUES (%s, 'read_between_lines', %s, %s, %s, %s, %s, %s, %s)""",
+            (user_id, profile_name, profile_meta, json.dumps(dim_scores),
+             json.dumps(recommendations), total_pct,
+             json.dumps(questions, default=str), json.dumps(answers))
         )
-        new_id = cur.lastrowid         # ← capture before commit
         conn.commit()
         cur.close()
-        return True, new_id            # ← was: return True  (bare bool — the bug)
+        return True
     except Exception as e:
-        return False, str(e)           # ← was: st.error + return False
+        st.error(f"Error saving RBTL result: {e}")
+        return False
     finally:
         conn.close()
 
@@ -566,7 +544,7 @@ def save_read_between_lines_v4(
     openness_pct:    int,
     total_pts:       int,
     questions:       list,
-    answers:         list,
+    answers:         dict,
     dim_scores:      dict,
     recommendations: list,
 ) -> bool:
@@ -598,18 +576,17 @@ def save_read_between_lines_v4(
         )
         conn.commit()
         cur.close()
-        return True
-    except Exception as e:
-        st.error(f"Error saving RBTL v4 result: {e}")
+        return True          # plain bool — callers must NOT unpack as tuple
+    except Exception:
         return False
     finally:
         conn.close()
 
 
-def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> tuple:
+def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> bool:
     conn = create_connection()
     if not conn:
-        return False, "No DB connection"   # ← was: return False
+        return False
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
@@ -621,7 +598,7 @@ def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> tuple:
         row = cur.fetchone()
         if not row:
             cur.close()
-            return False, "No existing result row found"   # ← was: return False
+            return False
 
         dim_scores = row.get("dim_scores") or {}
         if isinstance(dim_scores, str):
@@ -639,9 +616,9 @@ def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> tuple:
         )
         conn.commit()
         cur.close()
-        return True, row["id"]       # ← this one was already right, just confirming
-    except Exception as e:
-        return False, str(e)
+        return True          # plain bool — callers must NOT unpack as tuple
+    except Exception:
+        return False
     finally:
         conn.close()
 
