@@ -85,6 +85,7 @@ def ensure_tables():
             recipient_questions JSON,
             sender_answers      JSON,
             status              VARCHAR(16) NOT NULL DEFAULT 'sent',
+            reveal_window_secs  INT NOT NULL DEFAULT 60,
             revealed_at         DATETIME    DEFAULT NULL,
             created_at          DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at          DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -106,6 +107,39 @@ def ensure_tables():
             INDEX idx_sa_dismissed (other_username, dismissed)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
+        """
+        CREATE TABLE IF NOT EXISTS confession_reactions (
+            id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            confession_code VARCHAR(16) NOT NULL,
+            user_id         INT NOT NULL,
+            emoji           VARCHAR(8) NOT NULL,
+            created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_reaction (confession_code, user_id, emoji),
+            INDEX idx_react_code (confession_code)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS vice_goals (
+            id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id     INT NOT NULL,
+            vice        VARCHAR(32) NOT NULL,
+            weekly_limit INT NOT NULL DEFAULT 0,
+            updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_vice_goal (user_id, vice)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS session_tokens (
+            id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id     INT NOT NULL,
+            token       VARCHAR(64) NOT NULL UNIQUE,
+            created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at  DATETIME NOT NULL,
+            invalidated TINYINT(1) NOT NULL DEFAULT 0,
+            INDEX idx_st_user  (user_id),
+            INDEX idx_st_token (token)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
     ]
 
     try:
@@ -114,21 +148,30 @@ def ensure_tables():
             cur.execute(ddl)
         conn.commit()
 
-        # Add revealed_at to existing confessions table if missing
+        # ── Migrations for existing deployments ──────────────────────────────
+
+        # Add revealed_at if missing
         try:
             cur.execute("ALTER TABLE confessions ADD COLUMN revealed_at DATETIME DEFAULT NULL")
             conn.commit()
         except Exception:
-            pass  # column already exists — fine
+            pass
 
-        # Make recipient_id nullable for email-invite confessions
+        # Add reveal_window_secs if missing
+        try:
+            cur.execute("ALTER TABLE confessions ADD COLUMN reveal_window_secs INT NOT NULL DEFAULT 60")
+            conn.commit()
+        except Exception:
+            pass
+
+        # Make recipient_id nullable
         try:
             cur.execute("ALTER TABLE confessions MODIFY COLUMN recipient_id INT DEFAULT NULL")
             conn.commit()
         except Exception:
             pass
 
-        # Add recipient_email column if missing
+        # Add recipient_email if missing
         try:
             cur.execute("ALTER TABLE confessions ADD COLUMN recipient_email VARCHAR(255) DEFAULT NULL")
             conn.commit()
@@ -231,6 +274,87 @@ def update_user_password(user_id: int, new_password_hash: str) -> bool:
         conn.close()
 
 
+# ─── SESSION TOKENS ───────────────────────────────────────────────────────────
+
+def create_session_token(user_id: int, token: str) -> bool:
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO session_tokens (user_id, token, expires_at)
+               VALUES (%s, %s, DATE_ADD(NOW(), INTERVAL 30 DAY))""",
+            (user_id, token)
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def verify_session_token(user_id: int, token: str) -> bool:
+    conn = create_connection()
+    if not conn:
+        return True  # fail open on DB error
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT id FROM session_tokens
+               WHERE user_id = %s AND token = %s
+                 AND invalidated = 0 AND expires_at > NOW()""",
+            (user_id, token)
+        )
+        row = cur.fetchone()
+        cur.close()
+        return row is not None
+    except Exception:
+        return True  # fail open
+    finally:
+        conn.close()
+
+
+def invalidate_session_token(token: str) -> bool:
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE session_tokens SET invalidated = 1 WHERE token = %s",
+            (token,)
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def invalidate_user_sessions(user_id: int) -> None:
+    """Invalidate all active session tokens for a user (e.g. after screenshot logout)."""
+    conn = create_connection()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE session_tokens SET invalidated = 1 WHERE user_id = %s AND invalidated = 0",
+            (user_id,)
+        )
+        conn.commit()
+        cur.close()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
 # ─── VICE LOG ─────────────────────────────────────────────────────────────────
 
 def save_vice_entry(user_id: int, vice: str, logged_at, details: dict):
@@ -305,6 +429,75 @@ def delete_vice_log(user_id: int) -> bool:
         conn.close()
 
 
+# ─── SOCIAL FEED ──────────────────────────────────────────────────────────────
+
+def load_social_feed(limit: int = 20) -> list:
+    """Return recent anonymised vice log entries for the live activity feed."""
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT vice, logged_at
+               FROM vice_log
+               ORDER BY logged_at DESC
+               LIMIT %s""",
+            (limit,)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return [{"vice": r["vice"], "logged_at": r["logged_at"]} for r in rows]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+# ─── VICE GOALS ───────────────────────────────────────────────────────────────
+
+def get_vice_goals(user_id: int) -> dict:
+    """Return {vice: weekly_limit} dict for a user."""
+    conn = create_connection()
+    if not conn:
+        return {}
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT vice, weekly_limit FROM vice_goals WHERE user_id = %s",
+            (user_id,)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return {r["vice"]: r["weekly_limit"] for r in rows}
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+
+
+def save_vice_goal(user_id: int, vice: str, weekly_limit: int) -> bool:
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO vice_goals (user_id, vice, weekly_limit)
+               VALUES (%s, %s, %s)
+               ON DUPLICATE KEY UPDATE weekly_limit = VALUES(weekly_limit)""",
+            (user_id, vice, weekly_limit)
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception as e:
+        st.error(f"Error saving vice goal: {e}")
+        return False
+    finally:
+        conn.close()
+
+
 # ─── QUIZ RESULTS ─────────────────────────────────────────────────────────────
 
 def save_read_between_lines_result(user_id, profile_name, profile_meta, dim_scores,
@@ -365,29 +558,11 @@ def save_read_between_lines_v4(
     result_meta:  str,
     openness_pct: int,
     total_pts:    int,
-    # Full resolved Phase 1: list of dicts with post + question + all options + chosen answer
     questions:    list,
-    # Full resolved Phase 2: list of dicts with statement + signal + answer label + pts
     answers:      list,
-    # Everything else — HD summary, score breakdown, content map, fantasy breakdown, source
     dim_scores:   dict,
-    # GPT recommendations
     recommendations: list,
 ) -> bool:
-    """
-    Full-fidelity save for the Read Between The Lines v4 quiz.
-
-    Column mapping (matches quiz_results schema exactly):
-        result_name     → result tier name  (e.g. "The Open Door")
-        result_meta     → result tagline     (e.g. "You've thought this through.")
-        openness_pct    → 0-100 score
-        total_pts       → raw point total from Phase 1
-        questions       → LONGTEXT — full Phase 1 data (post + AI prompt + all opts + chosen)
-        answers         → JSON    — full Phase 2 HD data (statement + signal + label + pts)
-        dim_scores      → JSON    — hd_summary, score_breakdown, content_map,
-                                    fantasy_breakdown, phase, source
-        recommendations → JSON    — list of 5 recommendation strings
-    """
     conn = create_connection()
     if not conn:
         return False
@@ -407,13 +582,13 @@ def save_read_between_lines_v4(
                        %s, %s)""",
             (
                 user_id,
-                f"read_between_lines_v4_{phase}",  # lets you query by phase easily
+                f"read_between_lines_v4_{phase}",
                 result_name[:128] if result_name else "",
                 result_meta[:255] if result_meta else "",
-                max(0, min(255, openness_pct)),     # TINYINT UNSIGNED safe
-                max(0, min(65535, total_pts)),       # SMALLINT UNSIGNED safe
-                json.dumps(questions, default=str),  # LONGTEXT — no size worry
-                json.dumps(answers,   default=str),  # JSON
+                max(0, min(255, openness_pct)),
+                max(0, min(65535, total_pts)),
+                json.dumps(questions, default=str),
+                json.dumps(answers,   default=str),
                 json.dumps(dim_scores,       default=str),
                 json.dumps(recommendations,  default=str),
             )
@@ -422,7 +597,6 @@ def save_read_between_lines_v4(
         cur.close()
         return True
     except Exception as e:
-        # Surface the real error in dev; silent fail in prod is handled by caller
         st.error(f"Error saving RBTL v4 result: {e}")
         return False
     finally:
@@ -430,10 +604,6 @@ def save_read_between_lines_v4(
 
 
 def load_latest_rbtl_result(user_id: int) -> dict | None:
-    """
-    Returns the most recent completed Read Between The Lines v4 result for a user.
-    Useful for displaying past results or pre-filling a returning user's profile.
-    """
     conn = create_connection()
     if not conn:
         return None
@@ -452,7 +622,6 @@ def load_latest_rbtl_result(user_id: int) -> dict | None:
         cur.close()
         if not row:
             return None
-        # Parse JSON columns
         for col in ("dim_scores", "recommendations", "answers"):
             val = row.get(col)
             if isinstance(val, str):
@@ -460,7 +629,6 @@ def load_latest_rbtl_result(user_id: int) -> dict | None:
                     row[col] = json.loads(val)
                 except Exception:
                     row[col] = {} if col == "dim_scores" else []
-        # questions is LONGTEXT so also parse it
         q = row.get("questions")
         if isinstance(q, str):
             try:
@@ -476,16 +644,18 @@ def load_latest_rbtl_result(user_id: int) -> dict | None:
 
 # ─── CONFESSIONS ──────────────────────────────────────────────────────────────
 
-def save_confession(sender_id: int, recipient_id: int, code: str, questions: list) -> bool:
+def save_confession(sender_id: int, recipient_id: int, code: str,
+                    questions: list, window_seconds: int = 60) -> bool:
     conn = create_connection()
     if not conn:
         return False
     try:
         cur = conn.cursor()
         cur.execute(
-            """INSERT INTO confessions (code, sender_id, recipient_id, sender_questions, status)
-               VALUES (%s, %s, %s, %s, 'sent')""",
-            (code, sender_id, recipient_id, json.dumps(questions))
+            """INSERT INTO confessions
+               (code, sender_id, recipient_id, sender_questions, reveal_window_secs, status)
+               VALUES (%s, %s, %s, %s, %s, 'sent')""",
+            (code, sender_id, recipient_id, json.dumps(questions), window_seconds)
         )
         conn.commit()
         cur.close()
@@ -497,7 +667,8 @@ def save_confession(sender_id: int, recipient_id: int, code: str, questions: lis
         conn.close()
 
 
-def save_confession_invite(sender_id: int, recipient_email: str, code: str, questions: list) -> bool:
+def save_confession_invite(sender_id: int, recipient_email: str, code: str,
+                            questions: list, window_seconds: int = 60) -> bool:
     """Save a confession for a recipient who isn't on the app yet (email invite path)."""
     conn = create_connection()
     if not conn:
@@ -506,9 +677,10 @@ def save_confession_invite(sender_id: int, recipient_email: str, code: str, ques
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO confessions
-               (code, sender_id, recipient_id, recipient_email, sender_questions, status)
-               VALUES (%s, %s, NULL, %s, %s, 'sent')""",
-            (code, sender_id, recipient_email, json.dumps(questions))
+               (code, sender_id, recipient_id, recipient_email,
+                sender_questions, reveal_window_secs, status)
+               VALUES (%s, %s, NULL, %s, %s, %s, 'sent')""",
+            (code, sender_id, recipient_email, json.dumps(questions), window_seconds)
         )
         conn.commit()
         cur.close()
@@ -644,7 +816,7 @@ def confession_recipient_answer(code: str, recipient_answers: list) -> bool:
 
 
 def confession_sender_answer(code: str, sender_answers: list) -> bool:
-    """Final step — sets status=revealed and stamps revealed_at with current server time."""
+    """Final step — sets status=revealed and stamps revealed_at."""
     conn = create_connection()
     if not conn:
         return False
@@ -689,9 +861,8 @@ def delete_confession(code: str) -> bool:
 
 def delete_expired_confessions() -> int:
     """
-    Delete ALL revealed confessions where revealed_at is older than 60 seconds.
-    Called at the top of confessions_page() on every load.
-    Returns count of deleted rows.
+    Delete revealed confessions whose reveal window has elapsed.
+    Uses the per-confession reveal_window_secs column (not a hardcoded value).
     """
     conn = create_connection()
     if not conn:
@@ -702,7 +873,7 @@ def delete_expired_confessions() -> int:
             """DELETE FROM confessions
                WHERE status = 'revealed'
                  AND revealed_at IS NOT NULL
-                 AND revealed_at < DATE_SUB(NOW(), INTERVAL 60 SECOND)"""
+                 AND revealed_at < DATE_SUB(NOW(), INTERVAL reveal_window_secs SECOND)"""
         )
         conn.commit()
         count = cur.rowcount
@@ -728,6 +899,69 @@ def _parse_confession_row(row):
         elif val is None:
             row[col] = []
     return row
+
+
+# ─── CONFESSION REACTIONS ─────────────────────────────────────────────────────
+
+def save_reaction(confession_code: str, user_id: int, emoji: str) -> bool:
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT IGNORE INTO confession_reactions (confession_code, user_id, emoji)
+               VALUES (%s, %s, %s)""",
+            (confession_code, user_id, emoji)
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def load_reactions(confession_code: str, user_id: int) -> list:
+    """Return list of reaction dicts for this user on this confession."""
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT emoji FROM confession_reactions
+               WHERE confession_code = %s AND user_id = %s""",
+            (confession_code, user_id)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+def count_reactions(confession_code: str, emoji: str) -> int:
+    conn = create_connection()
+    if not conn:
+        return 0
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT COUNT(*) FROM confession_reactions
+               WHERE confession_code = %s AND emoji = %s""",
+            (confession_code, emoji)
+        )
+        row = cur.fetchone()
+        cur.close()
+        return row[0] if row else 0
+    except Exception:
+        return 0
+    finally:
+        conn.close()
 
 
 # ─── SCREENSHOT ALERTS ────────────────────────────────────────────────────────
@@ -800,9 +1034,6 @@ def dismiss_screenshot_alert(alert_id: int) -> bool:
     finally:
         conn.close()
 
-
-def invalidate_user_sessions(user_id: int) -> None:
-    pass
 
 # ─── INTERACTIONS TABLE ───────────────────────────────────────────────────────
 
