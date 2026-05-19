@@ -331,7 +331,147 @@ def _quiz_context(questions, answers):
 
 # ─── DB PERSISTENCE ───────────────────────────────────────────────────────────
 
+# ─── CONTENT CATEGORY MAPPING ─────────────────────────────────────────────────
+# Maps HD signals + openness tier → real platform content categories.
+# The "surprise": quiz results translate directly into content recommendations
+# that can be used to personalise what the user sees on the platform.
+
+SIGNAL_TO_CATEGORIES = {
+    "power_dynamic_latent": ["Rough Sex", "Bondage", "Role Play", "Fetish"],
+    "hidden_fantasy_present": ["Role Play", "Fetish", "Cosplay", "Parody"],
+    "archetype_attraction":  ["Casting", "Reality", "Amateur", "Verified Amateurs"],
+    "shame_adjacent_arousal": ["Fetish", "Bondage", "Voyeur", "Pissing"],
+    "desired_intensity":     ["Rough Sex", "Hardcore", "Gangbang", "Bondage"],
+    "dom_latent":            ["Bondage", "Rough Sex", "Fetish", "Role Play"],
+    "sub_latent":            ["Bondage", "Role Play", "Rough Sex", "Fetish"],
+    "exhib_latent":          ["Public", "Webcam", "Verified Amateurs", "Voyeur"],
+    "group_latent":          ["Threesome", "Gangbang", "Orgy", "Cuckold"],
+    "unnamed_fixation":      ["Fetish", "Role Play", "Cosplay", "Squirt"],
+    "taboo_draw":            ["Step Fantasy", "Role Play", "Fetish", "Bondage"],
+    "elaborated_fantasy":    ["Role Play", "Cosplay", "Parody", "Step Fantasy"],
+    "authentic_exposure":    ["Verified Couples", "Amateur", "Romantic", "Verified Amateurs"],
+    "stranger_context":      ["Public", "Casting", "Reality", "POV"],
+    "verbal_latent":         ["Role Play", "ASMR", "POV", "Romantic"],
+}
+
+OPENNESS_TIER_CATEGORIES = {
+    "Closed Garden":          ["Romantic", "Solo Female", "Masturbation", "Verified Couples"],
+    "Quietly Curious":        ["Amateur", "Verified Couples", "POV", "Romantic", "Reality"],
+    "The Open Door":          ["Threesome", "Cuckold", "Swinger", "Verified Amateurs", "POV"],
+    "Already Decided":        ["Threesome", "Gangbang", "Orgy", "Nonmonogamy", "Reality"],
+    "The Third Is Already Picked": ["Gangbang", "Orgy", "Threesome", "Cuckold", "Group"],
+}
+
+
+def _build_content_map(hd_answers: dict, result_type: dict, selected_fantasies: list) -> dict:
+    """
+    Derives a ranked content category map from the user's full quiz profile.
+    Returns: {
+        "ranked": [{"category": str, "score": int, "source": str}, ...],
+        "top10":  [str, ...],   # plain list, ready for platform use
+        "tier_boost": [str, ...]
+    }
+    """
+    scores: dict[str, int] = {}
+
+    # Score from HD signals
+    for q in HIDDEN_DESIRE_QUESTIONS:
+        oid = hd_answers.get(q["id"])
+        if oid not in ("yes", "strongly"):
+            continue
+        weight = 2 if oid == "strongly" else 1
+        for cat in SIGNAL_TO_CATEGORIES.get(q["signal"], []):
+            scores[cat] = scores.get(cat, 0) + weight
+
+    # Boost from openness tier
+    tier_cats = OPENNESS_TIER_CATEGORIES.get(result_type.get("name", ""), [])
+    for cat in tier_cats:
+        scores[cat] = scores.get(cat, 0) + 3
+
+    # Boost from selected fantasy labels (fuzzy match to known categories)
+    known_cats_lower = {c.lower(): c for c in set(
+        cat for cats in SIGNAL_TO_CATEGORIES.values() for cat in cats
+    ) | set(cat for cats in OPENNESS_TIER_CATEGORIES.values() for cat in cats)}
+
+    for fantasy in selected_fantasies:
+        fl = fantasy.lower()
+        for key, canonical in known_cats_lower.items():
+            if key in fl or fl in key:
+                scores[canonical] = scores.get(canonical, 0) + 2
+                break
+
+    ranked = sorted(
+        [{"category": cat, "score": sc} for cat, sc in scores.items()],
+        key=lambda x: -x["score"]
+    )
+    return {
+        "ranked":     ranked,
+        "top10":      [r["category"] for r in ranked[:10]],
+        "tier_boost": tier_cats,
+    }
+
+
+def _resolve_answers(questions: list, answers: list) -> list:
+    """
+    Expands raw answer indices into full objects with question text,
+    chosen option text, points scored, and post metadata.
+    Every piece of Phase 1 data preserved.
+    """
+    resolved = []
+    for i, (q, a) in enumerate(zip(questions, answers)):
+        opts = q.get("opts", [])
+        chosen = opts[a] if (a is not None and a < len(opts)) else None
+        resolved.append({
+            "question_index": i,
+            "sub":            q.get("sub", ""),
+            "post_title":     q.get("title", ""),
+            "post_text":      q.get("text", ""),
+            "post_url":       q.get("url", ""),
+            "post_user":      q.get("user", ""),
+            "post_upvotes":   q.get("upvotes", ""),
+            "ai_prompt":      q.get("prompt", ""),
+            "all_options":    [
+                {"text": (o.get("t","") if isinstance(o,dict) else o),
+                 "pts":  (o.get("pts",0) if isinstance(o,dict) else 0)}
+                for o in opts
+            ],
+            "answer_index":   a,
+            "chosen_text":    (chosen.get("t","") if isinstance(chosen,dict) else chosen) if chosen else None,
+            "chosen_pts":     (chosen.get("pts",0) if isinstance(chosen,dict) else 0) if chosen else 0,
+            "skipped":        a is None,
+        })
+    return resolved
+
+
+def _resolve_hd_answers(hd_answers: dict) -> list:
+    """
+    Expands HD answer IDs into full objects with question text and signal name.
+    Every Phase 2 statement preserved with its exact response.
+    """
+    label_map = {oid: label for oid, label, _ in HD_OPTS}
+    pts_map   = {oid: pts   for oid, _, pts   in HD_OPTS}
+    resolved  = []
+    for q in HIDDEN_DESIRE_QUESTIONS:
+        oid = hd_answers.get(q["id"])
+        resolved.append({
+            "id":            q["id"],
+            "signal":        q["signal"],
+            "statement":     q["text"],
+            "answer_id":     oid,
+            "answer_label":  label_map.get(oid, "unanswered"),
+            "answer_pts":    pts_map.get(oid, 0),
+            "answered":      oid is not None,
+        })
+    return resolved
+
+
 def _save_progress_to_db(phase: str, extra: dict = None):
+    """
+    Full-fidelity save: every question, every option, every answer, every
+    HD statement with its response, all fantasy categories (selected and not),
+    content map, recommendations, and scoring breakdown.
+    Nothing is thrown away.
+    """
     uid = _uid()
     if not uid:
         return
@@ -341,20 +481,52 @@ def _save_progress_to_db(phase: str, extra: dict = None):
         if not conn:
             return
 
-        qs  = st.session_state.get("wwyd_questions", [])
-        ans = st.session_state.get("wwyd_answers", [])
-        hd  = st.session_state.get("wwyd_hd_answers", {})
-        sel = st.session_state.get("wwyd_selected", [])
-        rt  = st.session_state.get("wwyd_result_type", {})
-        pct = st.session_state.get("wwyd_openness_pct", 0)
-        pts = st.session_state.get("wwyd_total_pts", 0)
-        rcs = st.session_state.get("wwyd_recs", [])
+        qs    = st.session_state.get("wwyd_questions", [])
+        ans   = st.session_state.get("wwyd_answers", [])
+        hd    = st.session_state.get("wwyd_hd_answers", {})
+        sel   = st.session_state.get("wwyd_selected", [])
+        all_f = st.session_state.get("wwyd_fantasies", [])   # ALL 25, not just selected
+        rt    = st.session_state.get("wwyd_result_type", {})
+        pct   = st.session_state.get("wwyd_openness_pct", 0)
+        pts   = st.session_state.get("wwyd_total_pts", 0)
+        rcs   = st.session_state.get("wwyd_recs", [])
 
-        payload = {
-            "phase":      phase,
-            "hd_answers": hd,
-            "selected":   sel,
-            "recs":       rcs,
+        # Full resolved data
+        resolved_q   = _resolve_answers(qs, ans)
+        resolved_hd  = _resolve_hd_answers(hd)
+        content_map  = _build_content_map(hd, rt, sel)
+
+        # Per-question scoring breakdown
+        score_breakdown = [
+            {"q": i, "title": q.get("title","")[:60], "pts": r["chosen_pts"],
+             "skipped": r["skipped"]}
+            for i, (q, r) in enumerate(zip(qs, resolved_q))
+        ]
+
+        # Fantasy breakdown: all 25 with selected flag
+        fantasy_breakdown = [
+            {"label": label, "selected": label in sel, "rank": i}
+            for i, label in enumerate(all_f)
+        ]
+
+        # HD scoring summary
+        hd_summary = {
+            "strong_signals": [r["signal"] for r in resolved_hd if r["answer_id"] == "strongly"],
+            "yes_signals":    [r["signal"] for r in resolved_hd if r["answer_id"] == "yes"],
+            "maybe_signals":  [r["signal"] for r in resolved_hd if r["answer_id"] == "maybe"],
+            "nope_signals":   [r["signal"] for r in resolved_hd if r["answer_id"] == "nope"],
+            "unanswered":     [r["signal"] for r in resolved_hd if not r["answered"]],
+            "total_hd_pts":   sum(r["answer_pts"] for r in resolved_hd),
+        }
+
+        dim_scores = {
+            "signals":           _hd_signal_str(hd),
+            "hd_summary":        hd_summary,
+            "score_breakdown":   score_breakdown,
+            "content_map":       content_map,
+            "fantasy_breakdown": fantasy_breakdown,
+            "phase":             phase,
+            "source":            st.session_state.get("wwyd_source", "unknown"),
             **(extra or {}),
         }
 
@@ -367,16 +539,16 @@ def _save_progress_to_db(phase: str, extra: dict = None):
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 uid,
-                "read_between_lines_v3",
+                "read_between_lines_v4",
                 rt.get("name", ""),
                 rt.get("meta", ""),
-                json.dumps({"signals": _hd_signal_str(hd), "payload": payload}),
+                json.dumps(dim_scores),
                 json.dumps(rcs),
                 pct,
                 pct,
                 pts,
-                json.dumps([{"title": q.get("title",""), "sub": q.get("sub","")} for q in qs[:10]]),
-                json.dumps(ans),
+                json.dumps(resolved_q),    # full question + options + post data
+                json.dumps(resolved_hd),   # full HD statements + responses
             )
         )
         conn.commit()
@@ -1326,10 +1498,47 @@ def render_result():
 </div>
 """)
 
+    # ── Content fingerprint — quiz signals mapped to real platform categories ─
+    cmap     = _build_content_map(hd_ans, result_type, sel_f)
+    top_cats = cmap["top10"]
+    ranked   = cmap["ranked"]
+
+    if top_cats:
+        max_sc    = ranked[0]["score"] if ranked else 1
+        bars_html = "".join(
+            f'<div style="display:flex; align-items:center; gap:10px; margin-bottom:7px;">'
+            f'<div style="font-family:\'Space Mono\',monospace; font-size:9px; color:var(--soft); '
+            f'width:140px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; '
+            f'text-transform:uppercase; letter-spacing:1px;">{r["category"]}</div>'
+            f'<div style="flex:1; height:3px; background:var(--border); border-radius:2px;">'
+            f'<div style="width:{min(100, round(r["score"]/max_sc*100))}%; height:100%; '
+            f'background:linear-gradient(90deg,var(--cyan),var(--magenta)); border-radius:2px;"></div>'
+            f'</div>'
+            f'<div style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--muted); '
+            f'width:20px; text-align:right;">{r["score"]}</div>'
+            f'</div>'
+            for r in ranked[:10]
+        )
+        st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:18px; margin-bottom:12px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--cyan); margin-bottom:4px;">
+    Your Content Fingerprint
+  </div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:11px; color:var(--muted);
+              margin-bottom:14px; line-height:1.6;">
+    Derived from your desire signals, openness tier, and fantasy picks —
+    mapped to what actually exists on the platform.
+  </div>
+  {bars_html}
+</div>
+""")
+
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
             text-transform:uppercase; color:var(--muted); text-align:center; margin-bottom:12px;">
-  ✓ Result saved to your profile
+  ✓ Full profile saved · questions · answers · signals · categories
 </div>
 """)
 
@@ -1342,6 +1551,8 @@ def render_result():
         share += "Signals: " + ", ".join(q["signal"] for q in strong[:5]) + "\n\n"
     if sel_f:
         share += "Fantasies: " + ", ".join(sel_f[:8]) + "\n\n"
+    if top_cats:
+        share += "Content categories: " + ", ".join(top_cats[:6]) + "\n\n"
     if recs:
         share += "Recommendations:\n" + "\n".join(f"· {r}" for r in recs[:3])
 
