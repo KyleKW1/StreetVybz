@@ -485,29 +485,50 @@ def save_vice_goal(user_id: int, vice: str, weekly_limit: int) -> bool:
 
 # ─── QUIZ RESULTS ─────────────────────────────────────────────────────────────
 
-def save_read_between_lines_result(user_id, profile_name, profile_meta, dim_scores,
-                                    recommendations, total_pct, questions, answers) -> bool:
+def save_read_between_lines_v4(
+    user_id:         int,
+    phase:           str,
+    result_name:     str,
+    result_meta:     str,
+    openness_pct:    int,
+    total_pts:       int,
+    questions:       list,
+    answers:         list,
+    dim_scores:      dict,
+    recommendations: list,
+) -> tuple:                          # ← was missing tuple annotation
     conn = create_connection()
     if not conn:
-        return False
+        return False, "No DB connection"   # ← was: return False
     try:
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO quiz_results
-               (user_id, quiz_type, profile_name, profile_meta, dim_scores,
-                recommendations, total_pct, questions, answers)
-               VALUES (%s, 'read_between_lines', %s, %s, %s, %s, %s, %s, %s)""",
-            (user_id, profile_name, profile_meta, json.dumps(dim_scores),
-             json.dumps(recommendations), total_pct,
-             json.dumps(questions, default=str), json.dumps(answers))
+               (user_id, quiz_type,
+                result_name, result_meta,
+                openness_pct, total_pts,
+                questions, answers,
+                dim_scores, recommendations)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (
+                user_id,
+                f"read_between_lines_v4_{phase}",
+                result_name[:128] if result_name else "",
+                result_meta[:255] if result_meta else "",
+                max(0, min(255, openness_pct)),
+                max(0, min(65535, total_pts)),
+                json.dumps(questions,       default=str),
+                json.dumps(answers,         default=str),
+                json.dumps(dim_scores,      default=str),
+                json.dumps(recommendations, default=str),
+            )
         )
-        new_id = cur.lastrowid
+        new_id = cur.lastrowid         # ← capture before commit
         conn.commit()
         cur.close()
-        return True, new_id
+        return True, new_id            # ← was: return True  (bare bool — the bug)
     except Exception as e:
-        st.error(f"Error saving RBTL v4 result: {e}")
-        return False, str(e)
+        return False, str(e)           # ← was: st.error + return False
     finally:
         conn.close()
 
@@ -585,15 +606,10 @@ def save_read_between_lines_v4(
         conn.close()
 
 
-def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> bool:
-    """
-    Update the most recent RBTL quiz result row with the user's confirmed
-    category selections. Called after the user clicks 'See My Full Profile →'
-    so what's stored reflects their actual choices, not just the AI defaults.
-    """
+def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> tuple:
     conn = create_connection()
     if not conn:
-        return False
+        return False, "No DB connection"   # ← was: return False
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
@@ -605,7 +621,7 @@ def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> bool:
         row = cur.fetchone()
         if not row:
             cur.close()
-            return False
+            return False, "No existing result row found"   # ← was: return False
 
         dim_scores = row.get("dim_scores") or {}
         if isinstance(dim_scores, str):
@@ -614,8 +630,8 @@ def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> bool:
             except Exception:
                 dim_scores = {}
 
-        dim_scores["selected"]             = selected_cats
-        dim_scores["selection_confirmed"]  = True
+        dim_scores["selected"]            = selected_cats
+        dim_scores["selection_confirmed"] = True
 
         cur.execute(
             "UPDATE quiz_results SET dim_scores = %s WHERE id = %s",
@@ -623,7 +639,7 @@ def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> bool:
         )
         conn.commit()
         cur.close()
-        return True, row["id"]
+        return True, row["id"]       # ← this one was already right, just confirming
     except Exception as e:
         return False, str(e)
     finally:
