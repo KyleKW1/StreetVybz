@@ -142,7 +142,37 @@ def ensure_tables():
             INDEX idx_st_token (token)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
-    ]
+        """
+        CREATE TABLE IF NOT EXISTS public_confessions (
+            id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            author_id   INT NOT NULL,
+            content     TEXT NOT NULL,
+            vice        VARCHAR(32) DEFAULT NULL,
+            reply_count INT NOT NULL DEFAULT 0,
+            created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_pcb_time (created_at),
+            INDEX idx_pcb_vice (vice)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS public_confession_replies (
+            id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            confession_id   BIGINT UNSIGNED NOT NULL,
+            author_id       INT NOT NULL,
+            content         TEXT NOT NULL,
+            created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_pcr_confession (confession_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS community_quiz_answers (
+            question_hash   VARCHAR(64) NOT NULL,
+            opt_index       TINYINT    NOT NULL,
+            tally           INT        NOT NULL DEFAULT 0,
+            PRIMARY KEY (question_hash, opt_index)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
+        ]
 
     try:
         cur = conn.cursor()
@@ -1203,6 +1233,144 @@ def get_shadow_score(user_id: int) -> dict:
         row = cur.fetchone()
         cur.close()
         return row or {}
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+
+def save_public_confession(author_id: int, content: str, vice: str = None) -> int | None:
+    conn = create_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO public_confessions (author_id, content, vice) VALUES (%s, %s, %s)",
+            (author_id, content.strip(), vice),
+        )
+        conn.commit()
+        new_id = cur.lastrowid
+        cur.close()
+        return new_id
+    except Exception as e:
+        st.error(f"Error saving public confession: {e}")
+        return None
+    finally:
+        conn.close()
+ 
+ 
+def load_public_confessions(limit: int = 20, offset: int = 0, vice: str = None) -> list:
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        if vice:
+            cur.execute(
+                """SELECT id, content, vice, reply_count, created_at
+                   FROM public_confessions
+                   WHERE vice = %s
+                   ORDER BY created_at DESC LIMIT %s OFFSET %s""",
+                (vice, limit, offset),
+            )
+        else:
+            cur.execute(
+                """SELECT id, content, vice, reply_count, created_at
+                   FROM public_confessions
+                   ORDER BY created_at DESC LIMIT %s OFFSET %s""",
+                (limit, offset),
+            )
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+    except Exception:
+        return []
+    finally:
+        conn.close()
+ 
+ 
+def save_public_reply(confession_id: int, author_id: int, content: str) -> bool:
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO public_confession_replies (confession_id, author_id, content) VALUES (%s, %s, %s)",
+            (confession_id, author_id, content.strip()),
+        )
+        cur.execute(
+            "UPDATE public_confessions SET reply_count = reply_count + 1 WHERE id = %s",
+            (confession_id,),
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception as e:
+        st.error(f"Error saving reply: {e}")
+        return False
+    finally:
+        conn.close()
+ 
+ 
+def load_public_replies(confession_id: int) -> list:
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT id, author_id, content, created_at
+               FROM public_confession_replies
+               WHERE confession_id = %s
+               ORDER BY created_at ASC""",
+            (confession_id,),
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+    except Exception:
+        return []
+    finally:
+        conn.close()
+ 
+ 
+# ── Community quiz pulse ──────────────────────────────────────────────────────
+ 
+def record_community_answer(question_hash: str, opt_index: int) -> None:
+    conn = create_connection()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO community_quiz_answers (question_hash, opt_index, tally)
+               VALUES (%s, %s, 1)
+               ON DUPLICATE KEY UPDATE tally = tally + 1""",
+            (question_hash, opt_index),
+        )
+        conn.commit()
+        cur.close()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+ 
+ 
+def get_community_answers(question_hash: str) -> dict:
+    """Returns {opt_index: tally, ...}"""
+    conn = create_connection()
+    if not conn:
+        return {}
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT opt_index, tally FROM community_quiz_answers WHERE question_hash = %s",
+            (question_hash,),
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return {r[0]: r[1] for r in rows}
     except Exception:
         return {}
     finally:
