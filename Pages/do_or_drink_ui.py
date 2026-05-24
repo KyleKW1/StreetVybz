@@ -3,10 +3,10 @@ Pages/do_or_drink_ui.py
 All rendering phases for Do or Drink.
 Imported by do_or_drink.py entry point.
 
-Improvements vs original:
-- Dare timer: 30-second JS countdown per card, colour-shifts at 10s.
-- Skip mechanic: surfaced clearly in history as "SKIPPED" with visual indicator.
-- Player card refreshes vice_summary on every setup render (catches new logs).
+Fixes vs previous version:
+- Player card shows vice names with *hidden* counts, not raw numbers
+- Quiz-only players (RBTL done, no vice log) correctly show profile and count as having data
+- Status banner wording updated to match
 """
 
 import random
@@ -30,24 +30,20 @@ _TYPE_ICONS  = {"DO": "⚡", "TRUTH": "💬"}
 # ─── DARE TIMER ──────────────────────────────────────────────────────────────
 
 def _inject_dare_timer(seconds: int = 30):
-    """
-    Injects a floating 30s countdown that turns amber at 15s, magenta at 5s.
-    Purely cosmetic — does NOT auto-resolve the card.
-    """
     st.html(f"""
 <style>
 @keyframes timer-flash {{ 0%,100%{{opacity:1}} 50%{{opacity:0.3}} }}
 #dod-dare-timer {{
-  position: fixed; top: 16px; right: 16px; z-index: 9990;
-  background: var(--card); border: 2px solid var(--lime);
-  border-radius: 50%; width: 56px; height: 56px;
-  display: flex; align-items: center; justify-content: center;
-  font-family: 'Bebas Neue', sans-serif; font-size: 22px;
-  color: var(--lime); letter-spacing: 1px;
-  transition: border-color 0.4s, color 0.4s;
+  position:fixed; top:16px; right:16px; z-index:9990;
+  background:var(--card); border:2px solid var(--lime);
+  border-radius:50%; width:56px; height:56px;
+  display:flex; align-items:center; justify-content:center;
+  font-family:'Bebas Neue',sans-serif; font-size:22px;
+  color:var(--lime); letter-spacing:1px;
+  transition:border-color 0.4s, color 0.4s;
 }}
-#dod-dare-timer.amber {{ border-color: var(--amber); color: var(--amber); }}
-#dod-dare-timer.hot   {{ border-color: var(--magenta); color: var(--magenta); animation: timer-flash 0.5s infinite; }}
+#dod-dare-timer.amber {{ border-color:var(--amber); color:var(--amber); }}
+#dod-dare-timer.hot   {{ border-color:var(--magenta); color:var(--magenta); animation:timer-flash 0.5s infinite; }}
 </style>
 <script>
 (function() {{
@@ -56,15 +52,14 @@ def _inject_dare_timer(seconds: int = 30):
   el.id  = "dod-dare-timer";
   el.textContent = "{seconds}";
   document.body.appendChild(el);
-
   var remaining = {seconds};
   var iv = setInterval(function() {{
     remaining--;
     if (remaining < 0) {{ clearInterval(iv); el.remove(); return; }}
     el.textContent = remaining;
-    if (remaining <= 5)  {{ el.className = "hot"; }}
+    if (remaining <= 5)       {{ el.className = "hot"; }}
     else if (remaining <= 15) {{ el.className = "amber"; }}
-    else {{ el.className = ""; }}
+    else                      {{ el.className = ""; }}
   }}, 1000);
 }})();
 </script>
@@ -80,9 +75,13 @@ def render_setup():
     st.html("""
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Vice Vault · Party Mode</div>
+              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">
+    Vice Vault · Party Mode
+  </div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:56px; color:var(--text);
-              letter-spacing:3px; line-height:0.9;">DO OR<br><span style="color:var(--lime);">DRINK</span></div>
+              letter-spacing:3px; line-height:0.9;">
+    DO OR<br><span style="color:var(--lime);">DRINK</span>
+  </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-top:8px;">
     AI reads your vault. Your habits become the dares. Yuh brave?
   </div>
@@ -93,9 +92,13 @@ def render_setup():
         st.error(st.session_state.dod_error)
         st.session_state.dod_error = ""
 
-    # Mode selector
-    st.html("""<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Choose the vibe</div>""")
+    # ── Mode selector ────────────────────────────────────────────────────────
+    st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
+  Choose the vibe
+</div>
+""")
     mode = st.session_state.dod_mode
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -112,7 +115,7 @@ def render_setup():
             st.session_state.dod_mode = "both"; st.rerun()
 
     mode_descs = {
-        "regular": "Social dares. Mild embarrassment. Caribbean lime energy. Safe(ish) for family gatherings.",
+        "regular": "Social dares. Mild embarrassment. Caribbean lime energy.",
         "kinky":   "Seductive, physical, explicitly adult. Every dare is heat:2 or heat:3. No mild cards.",
         "both":    "Half social, half seductive and explicit. The game builds from funny to charged.",
     }
@@ -125,13 +128,18 @@ def render_setup():
 </div>
 """)
 
-    # Players
-    st.html("""<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:12px; margin-top:4px;">Players</div>""")
+    # ── Players ──────────────────────────────────────────────────────────────
+    st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px; margin-top:4px;">
+  Players
+</div>
+""")
 
     players = st.session_state.dod_players
-    me_already = any(p["username"] == my_name for p in players)
 
+    # Auto-add host if not already in list
+    me_already = any(p["username"] == my_name for p in players)
     if not me_already and my_id:
         players.append({
             "username":     my_name,
@@ -141,44 +149,64 @@ def render_setup():
         })
         st.session_state.dod_players = players
 
-    # Refresh summaries in case new logs were added
+    # Refresh all summaries in case new logs were added since entering setup
     for p in players:
         p["vice_summary"] = _player_vice_summary(p["user_id"]) if p.get("user_id") else {}
 
     for i, p in enumerate(players):
         col_name, col_remove = st.columns([5, 1])
         with col_name:
-            host_badge = " · HOST" if p.get("is_host") else ""
-            vs         = p.get("vice_summary", {})
-            counts     = vs.get("counts", {})
-            vice_parts = [f"{_VICE_LABELS.get(vk, vk)}: {cnt}" for vk, cnt in counts.items()]
-            quiz       = vs.get("quiz", {})
+            vs     = p.get("vice_summary", {})
+            counts = vs.get("counts", {})
+            quiz   = vs.get("quiz", {})
+            has_d  = _has_data(vs)
+
+            # Vice names with hidden counts — never expose raw numbers to other players
+            vice_parts = [
+                f"{_VICE_LABELS.get(vk, vk)}: *hidden*"
+                for vk in counts.keys()
+            ]
+
+            # Quiz profile always shown if present, even with no vice log
             if quiz.get("profile_name"):
                 vice_parts.append(f"profile: {quiz['profile_name']}")
-            has_d    = _has_data(vs)
-            vice_str = "  ·  ".join(vice_parts) if vice_parts else "No data — will use group profile"
-            d_color  = "var(--lime)" if has_d else "var(--muted)"
+
+            if vice_parts:
+                vice_str = "  ·  ".join(vice_parts)
+            else:
+                vice_str = "No vault data — generic dares"
+
+            host_badge = " · HOST" if p.get("is_host") else ""
+            d_color    = "var(--lime)" if has_d else "var(--muted)"
+
             st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:2px solid {'var(--lime)' if p.get('is_host') else 'var(--border)'};
             border-radius:3px; padding:12px 14px; margin-bottom:6px;">
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:18px;
-              color:{'var(--lime)' if p.get('is_host') else 'var(--text)'}; letter-spacing:1px;">
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:1px;
+              color:{'var(--lime)' if p.get('is_host') else 'var(--text)'};">
     {p['username']}{host_badge}
   </div>
-  <div style="font-family:'Space Mono',monospace; font-size:8px;
-              color:{d_color}; letter-spacing:1px; text-transform:uppercase;">{vice_str}</div>
+  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
+              text-transform:uppercase; color:{d_color}; margin-top:4px;">
+    {vice_str}
+  </div>
 </div>
 """)
         with col_remove:
             if not p.get("is_host"):
                 st.html("<div style='height:6px'></div>")
                 if st.button("✕", key=f"remove_{i}"):
-                    st.session_state.dod_players.pop(i); st.rerun()
+                    st.session_state.dod_players.pop(i)
+                    st.rerun()
 
+    # ── Add player ───────────────────────────────────────────────────────────
     st.html("<div style='height:6px'></div>")
     new_username = st.text_input(
-        "Add player by username", placeholder="Their ViceVault username", key="dod_add_input")
+        "Add player by username",
+        placeholder="Their ViceVault username",
+        key="dod_add_input",
+    )
     if st.button("Add Player →", key="dod_add_btn"):
         uname = new_username.strip()
         if not uname:
@@ -200,18 +228,26 @@ def render_setup():
                 st.rerun()
 
     st.html("<div style='height:20px'></div>")
-    n_players = len(players)
 
+    # ── Data status banner ───────────────────────────────────────────────────
+    n_players = len(players)
     if players:
-        any_has  = any(_has_data(p.get("vice_summary", {})) for p in players)
-        all_have = all(_has_data(p.get("vice_summary", {})) for p in players)
+        players_with_data    = [p for p in players if _has_data(p.get("vice_summary", {}))]
+        players_without_data = [p for p in players if not _has_data(p.get("vice_summary", {}))]
+        all_have  = len(players_with_data) == n_players
+        any_have  = len(players_with_data) > 0
+
         if all_have:
-            smsg, scol = "✓ All players have data — fully personalised dares.", "var(--lime)"
-        elif any_has:
-            names       = [p["username"] for p in players if _has_data(p.get("vice_summary", {}))]
-            smsg, scol  = f"◈ {', '.join(names)} have data — shaping the whole game.", "var(--amber)"
+            smsg = "✓ All players have vault data — fully personalised dares."
+            scol = "var(--lime)"
+        elif any_have:
+            names = ", ".join(p["username"] for p in players_with_data)
+            smsg  = f"◈ {names} {'has' if len(players_with_data) == 1 else 'have'} data — shaping the whole game."
+            scol  = "var(--amber)"
         else:
-            smsg, scol  = "◇ No player data found — generating sharp generic Caribbean dares.", "var(--muted)"
+            smsg = "◇ No vault data found — sharp generic Caribbean dares for everyone."
+            scol = "var(--muted)"
+
         st.html(f"""
 <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px;
             padding:10px 14px; margin-bottom:16px;">
@@ -220,16 +256,21 @@ def render_setup():
 </div>
 """)
 
+    # ── Start ────────────────────────────────────────────────────────────────
     if n_players < 2:
-        st.html("""<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+        st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
             text-transform:uppercase; color:var(--muted); text-align:center; padding:12px 0;">
-  Add at least one more player to start.</div>""")
+  Add at least one more player to start.
+</div>
+""")
     else:
         if st.button(
             f"Generate Dares & Start →  ({n_players} players)",
             type="primary", use_container_width=True, key="dod_start",
         ):
-            st.session_state.dod_phase = "generating"; st.rerun()
+            st.session_state.dod_phase = "generating"
+            st.rerun()
 
     st.html("""
 <div style="margin-top:16px; padding:12px 14px; background:var(--surface);
@@ -269,7 +310,11 @@ def render_generating():
     for i, p in enumerate(players):
         pct      = int((i / len(players)) * 90)
         has_d    = _has_data(p.get("vice_summary", {}))
-        strategy = "personalising" if has_d else ("using group profile" if any_has_data else "generating generic")
+        strategy = (
+            "personalising"     if has_d else
+            "using group vibe"  if any_has_data else
+            "generating"
+        )
         ph_title.markdown("**Building dare deck…**")
         ph_bar.progress(pct)
         ph_msg.caption(f"{p['username']} — {strategy}…")
@@ -288,6 +333,7 @@ def render_generating():
     ph_bar.progress(100)
     ph_msg.caption("Shuffling the deck…")
 
+    # Interleave players round by round so no one person dominates the order
     max_dares = max((len(all_dares[p["username"]]) for p in players), default=0)
     deck = []
     for round_idx in range(max_dares):
@@ -300,7 +346,10 @@ def render_generating():
 
     st.session_state.dod_dares    = all_dares
     st.session_state.dod_deck     = deck
-    st.session_state.dod_scores   = {p["username"]: {"drinks": 0, "done": 0, "skipped": 0} for p in players}
+    st.session_state.dod_scores   = {
+        p["username"]: {"drinks": 0, "done": 0, "skipped": 0}
+        for p in players
+    }
     st.session_state.dod_history  = []
     st.session_state.dod_cur_card = None
     st.session_state.dod_timer_start = None
@@ -335,7 +384,7 @@ def render_game():
                 letter-spacing:3px; line-height:1;">DO OR DRINK</div>
     <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
                 text-transform:uppercase; color:{mode_colors.get(mode,'var(--lime)')};
-                ">{mode_label.get(mode,'Regular')} mode · {remaining} cards left</div>
+                margin-top:2px;">{mode_label.get(mode,'Regular')} mode · {remaining} cards left</div>
   </div>
   <div style="text-align:right;">
     <div style="font-family:'Bebas Neue',sans-serif; font-size:28px; color:var(--muted);">
@@ -347,7 +396,7 @@ def render_game():
 </div>
 """)
 
-    # Scoreboard
+    # ── Scoreboard ───────────────────────────────────────────────────────────
     cols = st.columns(len(scores))
     for i, (uname, s) in enumerate(scores.items()):
         with cols[i]:
@@ -380,7 +429,7 @@ def render_game():
 
     st.html("<div style='height:18px'></div>")
 
-    # Current card or draw prompt
+    # ── No card drawn ─────────────────────────────────────────────────────────
     if cur is None:
         if not deck:
             render_game_over()
@@ -401,10 +450,11 @@ def render_game():
                 card_ref = st.session_state.dod_deck.pop(0)
                 player   = card_ref["player"]
                 dare     = dares[player][card_ref["dare_idx"]]
-                st.session_state.dod_cur_card   = {"player": player, "dare": dare}
+                st.session_state.dod_cur_card    = {"player": player, "dare": dare}
                 st.session_state.dod_timer_start = time.time()
             st.rerun()
 
+    # ── Card drawn ────────────────────────────────────────────────────────────
     else:
         player     = cur["player"]
         dare       = cur["dare"]
@@ -414,15 +464,15 @@ def render_game():
         heat_label = _HEAT_LABELS.get(heat, "spicy")
         type_icon  = _TYPE_ICONS.get(dtype, "⚡")
 
-        # Dare timer
         _inject_dare_timer(30)
 
         st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
-            border-top:3px solid {heat_color}; border-radius:4px; padding:28px 26px; margin-bottom:14px;">
+            border-top:3px solid {heat_color}; border-radius:4px;
+            padding:28px 26px; margin-bottom:14px;">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-    <div style="font-family:'Bebas Neue',sans-serif; font-size:32px;
-                letter-spacing:3px; color:{heat_color}; line-height:1;">{player}</div>
+    <div style="font-family:'Bebas Neue',sans-serif; font-size:32px; letter-spacing:3px;
+                color:{heat_color}; line-height:1;">{player}</div>
     <div style="display:flex; gap:8px; align-items:center;">
       <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
                   text-transform:uppercase; color:{heat_color}; border:1px solid {heat_color};
@@ -448,27 +498,25 @@ def render_game():
             if st.button("✓  Did it", type="primary", use_container_width=True, key="btn_done"):
                 st.session_state.dod_scores[player]["done"] += 1
                 st.session_state.dod_history.append({**cur, "result": "done"})
-                st.session_state.dod_cur_card   = None
+                st.session_state.dod_cur_card    = None
                 st.session_state.dod_timer_start = None
                 st.rerun()
         with col_drink:
             if st.button("🍹  Drinking", use_container_width=True, key="btn_drink"):
                 st.session_state.dod_scores[player]["drinks"] += 1
                 st.session_state.dod_history.append({**cur, "result": "drink"})
-                st.session_state.dod_cur_card   = None
+                st.session_state.dod_cur_card    = None
                 st.session_state.dod_timer_start = None
                 st.rerun()
         with col_skip:
             if st.button("Skip", use_container_width=True, key="btn_skip"):
-                # Increment skip counter
-                st.session_state.dod_scores[player]["skipped"] = \
+                st.session_state.dod_scores[player]["skipped"] = (
                     st.session_state.dod_scores[player].get("skipped", 0) + 1
-
-                # Record in history so players know it was skipped
+                )
                 st.session_state.dod_history.append({**cur, "result": "skipped"})
 
-                # Reinsert card in the back third of the remaining deck
-                rem        = len(st.session_state.dod_deck)
+                # Reinsert in back third of remaining deck
+                rem = len(st.session_state.dod_deck)
                 try:
                     dare_idx = dares[player].index(dare)
                 except ValueError:
@@ -477,15 +525,17 @@ def render_game():
                 st.session_state.dod_deck.insert(
                     insert_at, {"player": player, "dare_idx": dare_idx}
                 )
-                st.session_state.dod_cur_card   = None
+                st.session_state.dod_cur_card    = None
                 st.session_state.dod_timer_start = None
                 st.rerun()
 
-    # Recent history
+    # ── Recent history ────────────────────────────────────────────────────────
     if history:
         st.html("<div style='height:20px'></div>")
-        st.html("""<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:10px;">Recent</div>""")
+        st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:10px;">Recent</div>
+""")
         for h in reversed(history[-5:]):
             p      = h["player"]
             d      = h["dare"]["dare"][:80] + ("…" if len(h["dare"]["dare"]) > 80 else "")
@@ -499,7 +549,8 @@ def render_game():
             st.html(f"""
 <div style="display:flex; gap:10px; align-items:flex-start; padding:8px 0;
             border-bottom:1px solid var(--border);">
-  <div style="font-family:'Space Mono',monospace; font-size:14px; color:{r_col}; flex-shrink:0;">{r_icon}</div>
+  <div style="font-family:'Space Mono',monospace; font-size:14px;
+              color:{r_col}; flex-shrink:0;">{r_icon}</div>
   <div>
     <span style="font-family:'Space Mono',monospace; font-size:9px; color:var(--soft);
                  letter-spacing:1px; text-transform:uppercase;">{p}</span>
@@ -523,7 +574,6 @@ def render_game_over():
     scores  = st.session_state.dod_scores
     history = st.session_state.dod_history
 
-    real_history = [h for h in history if h.get("result") != "skipped"]
     winner  = max(scores, key=lambda u: scores[u]["done"])   if scores else "—"
     drinker = max(scores, key=lambda u: scores[u]["drinks"]) if scores else "—"
 
@@ -538,12 +588,16 @@ def render_game_over():
   <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--soft);">
     held it down the most — {scores.get(winner, {}).get('done', 0)} dares completed
   </div>
-  {'<div style="margin-top:12px;font-family:\'DM Sans\',sans-serif;font-size:12px;color:var(--magenta);">🍹 ' + drinker + ' drank the most — ' + str(scores.get(drinker,{}).get("drinks",0)) + ' times</div>' if winner != drinker else ''}
+  {'<div style="margin-top:12px; font-family:\'DM Sans\',sans-serif; font-size:12px; color:var(--magenta);">🍹 ' + drinker + ' drank the most — ' + str(scores.get(drinker, {}).get("drinks", 0)) + ' times</div>' if winner != drinker else ''}
 </div>
 """)
 
-    st.html("""<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Final Standings</div>""")
+    st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
+  Final Standings
+</div>
+""")
 
     for rank, (uname, s) in enumerate(
         sorted(scores.items(), key=lambda x: x[1]["done"], reverse=True), 1
@@ -555,19 +609,24 @@ def render_game_over():
             padding:14px 18px; margin-bottom:8px;
             display:flex; justify-content:space-between; align-items:center;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:22px;
-              color:{rank_color}; letter-spacing:1px; line-height:1;">#{rank}  {uname}</div>
+              color:{rank_color}; letter-spacing:1px; line-height:1;">
+    #{rank}  {uname}
+  </div>
   <div style="display:flex; gap:16px; text-align:center;">
     <div>
       <div style="font-family:'Bebas Neue',sans-serif; font-size:26px; color:var(--lime);">{s['done']}</div>
-      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted); text-transform:uppercase;">did it</div>
+      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+                  text-transform:uppercase;">did it</div>
     </div>
     <div>
       <div style="font-family:'Bebas Neue',sans-serif; font-size:26px; color:var(--magenta);">{s['drinks']}</div>
-      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted); text-transform:uppercase;">drinks</div>
+      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+                  text-transform:uppercase;">drinks</div>
     </div>
     <div>
-      <div style="font-family:'Bebas Neue',sans-serif; font-size:26px; color:var(--muted);">{s.get('skipped',0)}</div>
-      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted); text-transform:uppercase;">skipped</div>
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:26px; color:var(--muted);">{s.get('skipped', 0)}</div>
+      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+                  text-transform:uppercase;">skipped</div>
     </div>
   </div>
 </div>
