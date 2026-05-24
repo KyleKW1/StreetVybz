@@ -1,11 +1,12 @@
 """
-Pages/confession.py — Mutual blind confession exchange.
+Pages/confession.py — Mutual blind confession exchange + anonymous community board.
 
-Changes from v2:
-- Sender can choose a reveal window when composing (1 min / 5 min / 30 min / 1 hr).
-- window duration is stored in DB and used by the server-side cleaner.
-- Countdown banner JS uses the actual window, not a hardcoded 60 s.
-- Email invite failure: show a prominent copyable link, not a buried warning.
+Tabs:
+  Compose  — start a new confession exchange with a specific user or invite by email
+  Inbox    — confessions sent to you
+  Sent     — confessions you started
+  Revealed — exchanges that have unlocked
+  Board    — anonymous public confession board (post without a recipient)
 """
 
 import streamlit as st
@@ -13,6 +14,7 @@ import secrets
 import string
 import re
 import time
+from datetime import datetime
 from styles import inject_page_css
 
 
@@ -21,7 +23,6 @@ from styles import inject_page_css
 def _revealed_at_iso(item: dict) -> str:
     ra = item.get("revealed_at") or item.get("updated_at") or item.get("created_at")
     if ra is None:
-        from datetime import datetime
         return datetime.now().isoformat()
     return ra.isoformat() if hasattr(ra, "isoformat") else str(ra)
 
@@ -53,6 +54,21 @@ def _force_logout():
 
 def _gen_code(n=8):
     return "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(n))
+
+
+def _time_ago(dt) -> str:
+    if dt is None:
+        return ""
+    try:
+        if hasattr(dt, "timestamp"):
+            diff = int((datetime.now() - dt).total_seconds())
+        else:
+            diff = int((datetime.now() - datetime.fromisoformat(str(dt))).total_seconds())
+        if diff < 3600:   return f"{diff // 60}m ago"
+        if diff < 86400:  return f"{diff // 3600}h ago"
+        return f"{diff // 86400}d ago"
+    except Exception:
+        return str(dt)[:10]
 
 
 # ─── COUNTDOWN BANNER ────────────────────────────────────────────────────────
@@ -91,7 +107,7 @@ def inject_countdown_banner(confession_code: str, revealed_at_iso: str, window_s
     var banner = document.createElement("div");
     banner.id  = "vv-countdown-banner";
     banner.style.cssText = "position:fixed;bottom:0;left:0;right:0;background:#0a0a0b;border-top:2px solid #ff2d78;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;z-index:9999;font-family:'Space Mono',monospace;";
-    banner.innerHTML = '<div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#5a5a72;">DELETES IN</div><div id="vv-timer" style="font-size:22px;color:#ff2d78;font-weight:700;letter-spacing:3px;">{initial}</div><div style="font-size:10px;letter-spacing:1px;color:#5a5a72;text-transform:uppercase;">Desktop PrintScreen = logged out</div>';
+    banner.innerHTML = '<div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#5a5a72;">DELETES IN</div><div id="vv-timer" style="font-size:22px;color:#ff2d78;font-weight:700;letter-spacing:3px;">{initial}</div><div style="font-size:10px;letter-spacing:1px;color:#5a5a72;text-transform:uppercase;">PrintScreen = logged out</div>';
     document.body.appendChild(banner);
   }}
 
@@ -115,15 +131,10 @@ def inject_countdown_banner(confession_code: str, revealed_at_iso: str, window_s
       timerEl.textContent = m + ":" + (s < 10 ? "0" + s : s);
     }}
     if (glowEl && bannerEl) {{
-      if (remaining <= 3) {{
-        glowEl.className = "white"; timerEl.style.color = "#ffffff"; bannerEl.style.borderTopColor = "#ffffff";
-      }} else if (remaining <= 5) {{
-        glowEl.className = "lime";  timerEl.style.color = "#c6ff00"; bannerEl.style.borderTopColor = "#c6ff00";
-      }} else if (remaining <= 15) {{
-        glowEl.className = "amber"; timerEl.style.color = "#ffb300"; bannerEl.style.borderTopColor = "#ffb300";
-      }} else {{
-        glowEl.className = "";      timerEl.style.color = "#ff2d78"; bannerEl.style.borderTopColor = "#ff2d78";
-      }}
+      if (remaining <= 3)       {{ glowEl.className = "white"; timerEl.style.color = "#ffffff"; bannerEl.style.borderTopColor = "#ffffff"; }}
+      else if (remaining <= 5)  {{ glowEl.className = "lime";  timerEl.style.color = "#c6ff00"; bannerEl.style.borderTopColor = "#c6ff00"; }}
+      else if (remaining <= 15) {{ glowEl.className = "amber"; timerEl.style.color = "#ffb300"; bannerEl.style.borderTopColor = "#ffb300"; }}
+      else                      {{ glowEl.className = "";      timerEl.style.color = "#ff2d78"; bannerEl.style.borderTopColor = "#ff2d78"; }}
     }}
     if (remaining <= 0) {{ clearInterval(iv); window.location.reload(); }}
   }}, 500);
@@ -184,7 +195,7 @@ def _validate_questions(questions: list) -> list:
     return errors
 
 
-# ─── SCREENSHOT ALERTS ───────────────────────────────────────────────────────
+# ─── SCREENSHOT HANDLING ──────────────────────────────────────────────────────
 
 def _render_screenshot_alerts():
     alerts = _db("load_screenshot_alerts", _uid(), default=[])
@@ -193,13 +204,16 @@ def _render_screenshot_alerts():
         ts            = str(alert.get("created_at", ""))[:16]
         alert_id      = alert.get("id")
         st.html(f"""
-<div style="background:#1a0a0e;border:1px solid var(--magenta);border-left:4px solid var(--magenta);
-            border-radius:4px;padding:14px 18px;margin-bottom:10px;">
-  <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
-              text-transform:uppercase;color:var(--magenta);margin-bottom:4px;">⚠  Screenshot Alert</div>
-  <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text);line-height:1.6;">
+<div style="background:#1a0a0e; border:1px solid var(--magenta);
+            border-left:4px solid var(--magenta); border-radius:4px;
+            padding:14px 18px; margin-bottom:10px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--magenta); margin-bottom:4px;">
+    ⚠  Screenshot Alert
+  </div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--text); line-height:1.6;">
     <strong style="color:var(--magenta);">{screenshotter}</strong> pressed PrintScreen during your exchange.
-    <span style="color:var(--muted);font-size:11px;margin-left:8px;">{ts}</span>
+    <span style="color:var(--muted); font-size:11px; margin-left:8px;">{ts}</span>
   </div>
 </div>
 """)
@@ -236,7 +250,7 @@ def _handle_query_params():
             _db("save_screenshot_alert", ss_code, uid, username, other)
 
         st.query_params.clear()
-        st.error(f"⚠️  Screenshot detected. You've been logged out. {other or 'The other person'} has been notified.")
+        st.error(f"⚠️ Screenshot detected. You've been logged out. {other or 'The other person'} has been notified.")
         time.sleep(2)
         _force_logout()
 
@@ -244,35 +258,47 @@ def _handle_query_params():
 # ─── UI HELPERS ──────────────────────────────────────────────────────────────
 
 def _section_label(text):
-    st.html(f'<div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:12px;">{text}</div>')
+    st.html(
+        f'<div style="font-family:\'Space Mono\',monospace; font-size:9px; letter-spacing:3px;'
+        f' text-transform:uppercase; color:var(--muted); margin-bottom:12px;">{text}</div>'
+    )
 
 
 def _status_badge(status, sender, recipient, is_sender):
     cfg = {
-        "sent":        {True:  ("var(--amber)", "WAITING",   f"Waiting for {recipient} to send their questions first"),
-                        False: ("var(--magenta)", "YOUR MOVE", f"Write your questions before you can see {sender}'s")},
-        "questioning": {True:  ("var(--amber)", "WAITING",   f"{recipient} sent their questions — waiting for them to answer yours"),
-                        False: ("var(--cyan)",   "YOUR TURN", f"Your questions are locked in — now answer {sender}'s")},
-        "responded":   {True:  ("var(--cyan)",  "YOUR TURN", f"{recipient} answered — now answer their questions to reveal"),
-                        False: ("var(--amber)", "WAITING",   f"Waiting for {sender} to answer your questions")},
-        "revealed":    {True:  ("var(--lime)",  "REVEALED",  "Exchange unlocked — auto-deletes soon"),
-                        False: ("var(--lime)",  "REVEALED",  "Exchange unlocked — auto-deletes soon")},
+        "sent":        {
+            True:  ("var(--amber)",   "WAITING",    f"Waiting for {recipient} to send their questions first"),
+            False: ("var(--magenta)", "YOUR MOVE",  f"Write your questions before you can see {sender}'s"),
+        },
+        "questioning": {
+            True:  ("var(--amber)",   "WAITING",    f"{recipient} sent their questions — waiting for them to answer yours"),
+            False: ("var(--cyan)",    "YOUR TURN",  f"Your questions are locked in — now answer {sender}'s"),
+        },
+        "responded":   {
+            True:  ("var(--cyan)",    "YOUR TURN",  f"{recipient} answered — now answer their questions to reveal"),
+            False: ("var(--amber)",   "WAITING",    f"Waiting for {sender} to answer your questions"),
+        },
+        "revealed":    {
+            True:  ("var(--lime)",    "REVEALED",   "Exchange unlocked — auto-deletes soon"),
+            False: ("var(--lime)",    "REVEALED",   "Exchange unlocked — auto-deletes soon"),
+        },
     }
     color, label, detail = cfg.get(status, {}).get(is_sender, ("var(--muted)", status.upper(), ""))
     st.html(f"""
-<div style="display:inline-flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
-  <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;
-              color:{color};border:1px solid {color};border-radius:2px;padding:4px 10px;">{label}</div>
-  <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--muted);">{detail}</div>
+<div style="display:inline-flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:{color}; border:1px solid {color};
+              border-radius:2px; padding:4px 10px;">{label}</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);">{detail}</div>
 </div>
 """)
 
 
 def _typing_indicator(name: str):
     st.html(f"""
-<div style="display:flex;align-items:center;gap:10px;padding:10px 0 14px 0;">
-  <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
-               text-transform:uppercase;color:var(--muted);">{name} is writing</span>
+<div style="display:flex; align-items:center; gap:10px; padding:10px 0 14px 0;">
+  <span style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+               text-transform:uppercase; color:var(--muted);">{name} is writing</span>
   <span class="typing-dot"></span>
   <span class="typing-dot"></span>
   <span class="typing-dot"></span>
@@ -282,38 +308,47 @@ def _typing_indicator(name: str):
 
 def _question_fields(prefix, count, sender_name=None):
     ph = f"Ask {sender_name} something real…" if sender_name else "Ask them something you actually want to know…"
-    return [st.text_area(f"Question {i+1}", placeholder=ph, key=f"{prefix}_{i}", height=80) for i in range(count)]
+    return [
+        st.text_area(f"Question {i + 1}", placeholder=ph, key=f"{prefix}_{i}", height=80)
+        for i in range(count)
+    ]
 
 
 def _exchange_card(label, color, questions, answers, delay_base=0):
-    st.html(f'<div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:{color};margin-bottom:8px;">{label}</div>')
+    st.html(
+        f'<div style="font-family:\'Space Mono\',monospace; font-size:9px; letter-spacing:2px;'
+        f' text-transform:uppercase; color:{color}; margin-bottom:8px;">{label}</div>'
+    )
     for i, (q, a) in enumerate(zip(questions, answers)):
         delay = delay_base + i * 0.12
         st.html(f"""
-<div class="reveal-card" style="animation-delay:{delay}s;background:var(--card);border:1px solid var(--border);
-            border-left:2px solid {color};border-radius:4px;padding:16px 18px;margin-bottom:10px;">
-  <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);
-              letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Q{i+1}</div>
-  <div style="font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text);
-              line-height:1.6;margin-bottom:10px;">{q}</div>
-  <div style="height:1px;background:var(--border);margin-bottom:10px;"></div>
-  <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);
-              letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Answer</div>
-  <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:{color};
-              line-height:1.7;font-style:italic;">"{a}"</div>
+<div class="reveal-card" style="animation-delay:{delay}s; background:var(--card);
+            border:1px solid var(--border); border-left:2px solid {color};
+            border-radius:4px; padding:16px 18px; margin-bottom:10px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
+              letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Q{i + 1}</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text);
+              line-height:1.6; margin-bottom:10px;">{q}</div>
+  <div style="height:1px; background:var(--border); margin-bottom:10px;"></div>
+  <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
+              letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Answer</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:{color};
+              line-height:1.7; font-style:italic;">"{a}"</div>
 </div>
 """)
 
 
 def _reaction_stamps(confession_code: str):
     EMOJIS = ["😳", "👀", "💀", "🫣"]
-    st.html("""<div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
-            text-transform:uppercase;color:var(--muted);margin-bottom:10px;">React</div>""")
-    cols    = st.columns(len(EMOJIS))
+    st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:10px;">React</div>
+""")
+    cols     = st.columns(len(EMOJIS))
     existing = _db("load_reactions", confession_code, _uid(), default=[])
     reacted  = {r.get("emoji") for r in (existing or [])}
     for i, emoji in enumerate(EMOJIS):
-        count  = _db("count_reactions", confession_code, emoji, default=0) or 0
+        count = _db("count_reactions", confession_code, emoji, default=0) or 0
         with cols[i]:
             label = f"{emoji}  {count}" if count else emoji
             if st.button(label, key=f"react_{confession_code}_{emoji}"):
@@ -325,20 +360,27 @@ def _reaction_stamps(confession_code: str):
 # ─── EMAIL INVITE ────────────────────────────────────────────────────────────
 
 def _send_invite_email(sender_username: str, recipient_email: str, confession_code: str) -> bool:
-    base_url = st.secrets.get("APP_URL", "https://yourvicevault.app")
-    link     = f"{base_url}/?invite={confession_code}"
+    base_url  = st.secrets.get("APP_URL", "https://yourvicevault.app")
+    link      = f"{base_url}/?invite={confession_code}"
     html_body = f"""
-<div style="background:#0a0a0b;color:#f0f0f5;font-family:'DM Sans',sans-serif;max-width:520px;margin:0 auto;padding:32px;">
-  <div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#5a5a72;margin-bottom:8px;">Vice Vault</div>
-  <div style="font-size:36px;font-weight:900;letter-spacing:2px;color:#fff;margin-bottom:20px;">CONFESSIONS</div>
-  <div style="font-size:15px;color:#9090aa;line-height:1.8;margin-bottom:28px;">
+<div style="background:#0a0a0b; color:#f0f0f5; font-family:'DM Sans',sans-serif;
+            max-width:520px; margin:0 auto; padding:32px;">
+  <div style="font-size:11px; letter-spacing:3px; text-transform:uppercase;
+              color:#5a5a72; margin-bottom:8px;">Vice Vault</div>
+  <div style="font-size:36px; font-weight:900; letter-spacing:2px;
+              color:#fff; margin-bottom:20px;">CONFESSIONS</div>
+  <div style="font-size:15px; color:#9090aa; line-height:1.8; margin-bottom:28px;">
     <strong style="color:#f0f0f5;">{sender_username}</strong> wants to exchange confessions with you.
     Blind. Mutual. Auto-deletes after reveal.
   </div>
-  <a href="{link}" style="display:inline-block;background:#ff2d78;color:#fff;text-decoration:none;
-     font-family:'Space Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;
-     padding:14px 28px;border-radius:3px;">Accept &amp; Write Back →</a>
-  <div style="margin-top:24px;font-size:11px;color:#5a5a72;">This link is one-time use. Don't share it.</div>
+  <a href="{link}" style="display:inline-block; background:#ff2d78; color:#fff;
+     text-decoration:none; font-family:'Space Mono',monospace; font-size:11px;
+     letter-spacing:2px; text-transform:uppercase; padding:14px 28px; border-radius:3px;">
+    Accept &amp; Write Back →
+  </a>
+  <div style="margin-top:24px; font-size:11px; color:#5a5a72;">
+    This link is one-time use. Don't share it.
+  </div>
 </div>"""
     try:
         import email_service
@@ -352,16 +394,18 @@ def _send_invite_email(sender_username: str, recipient_email: str, confession_co
 
 
 def _show_invite_link(confession_code: str):
-    """Prominently show the shareable invite link when email fails."""
     base_url = st.secrets.get("APP_URL", "https://yourvicevault.app")
     link     = f"{base_url}/?invite={confession_code}"
     st.html(f"""
-<div style="background:#0f1a10;border:1px solid var(--lime);border-radius:4px;padding:16px 18px;margin-top:12px;">
-  <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
-              text-transform:uppercase;color:var(--lime);margin-bottom:8px;">📋  Share this link instead</div>
-  <div style="font-family:'Space Mono',monospace;font-size:11px;color:var(--text);
-              word-break:break-all;margin-bottom:10px;">{link}</div>
-  <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--muted);">
+<div style="background:#0f1a10; border:1px solid var(--lime); border-radius:4px;
+            padding:16px 18px; margin-top:12px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--lime); margin-bottom:8px;">
+    📋  Share this link instead
+  </div>
+  <div style="font-family:'Space Mono',monospace; font-size:11px; color:var(--text);
+              word-break:break-all; margin-bottom:10px;">{link}</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);">
     Send it manually — they land straight in the exchange after signing up.
   </div>
 </div>
@@ -369,17 +413,27 @@ def _show_invite_link(confession_code: str):
     st.code(link)
 
 
-# ─── WINDOW OPTIONS ──────────────────────────────────────────────────────────
+# ─── WINDOW OPTIONS ───────────────────────────────────────────────────────────
 
 _WINDOW_OPTIONS = {
-    "1 minute":  60,
-    "5 minutes": 300,
+    "1 minute":   60,
+    "5 minutes":  300,
     "30 minutes": 1800,
-    "1 hour":    3600,
+    "1 hour":     3600,
 }
 
 
-# ─── COMPOSE ────────────────────────────────────────────────────────────────
+def _window_label(secs: int) -> str:
+    for label, s in _WINDOW_OPTIONS.items():
+        if s == secs:
+            return label
+    if secs < 60:
+        return f"{secs} seconds"
+    m = secs // 60
+    return f"{m} minute{'s' if m != 1 else ''}"
+
+
+# ─── COMPOSE ─────────────────────────────────────────────────────────────────
 
 def _render_compose():
     inject_page_css()
@@ -395,11 +449,17 @@ def _render_compose():
         st.session_state.conf_sent_to = None
 
     st.html("""
-<div style="background:var(--card);border:1px solid var(--border);border-top:2px solid var(--magenta);
-            border-radius:4px;padding:20px 22px;margin-bottom:24px;">
-  <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--soft);line-height:1.9;">
+<div style="background:var(--card); border:1px solid var(--border);
+            border-top:2px solid var(--magenta); border-radius:4px;
+            padding:20px 22px; margin-bottom:24px;">
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.9;">
     Write questions for someone. Before they can see a single one, they write their own back — blind.
     Then they answer yours. Then you answer theirs. Everything reveals at once.
+    <br><br>
+    <span style="color:var(--muted); font-size:12px;">
+      Don't have someone specific in mind? Use the <strong style="color:var(--lime);">Board</strong>
+      tab to post anonymously — anyone can reply.
+    </span>
   </div>
 </div>
 """)
@@ -412,21 +472,26 @@ def _render_compose():
     st.session_state.conf_invite_mode = invite_mode
 
     if invite_mode:
-        recipient_email    = st.text_input("Recipient email", placeholder="their@email.com", key=f"conf_email_{gen}")
+        recipient_email    = st.text_input(
+            "Recipient email", placeholder="their@email.com", key=f"conf_email_{gen}"
+        )
         recipient_username = None
         st.html("""
-<div style="background:#0f1a10;border:1px solid #1e3a20;border-radius:4px;padding:12px 16px;margin-bottom:16px;">
-  <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:#5a7a5a;line-height:1.7;">
+<div style="background:#0f1a10; border:1px solid #1e3a20; border-radius:4px;
+            padding:12px 16px; margin-bottom:16px;">
+  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:#5a7a5a; line-height:1.7;">
     They'll get a one-time link. If they don't have an account, they sign up first.
   </div>
 </div>
 """)
     else:
         recipient_username = st.text_input(
-            "Send to (username)", placeholder="Their ViceVault username", key=f"conf_recipient_{gen}")
+            "Send to (username)",
+            placeholder="Their ViceVault username",
+            key=f"conf_recipient_{gen}",
+        )
         recipient_email = None
 
-    # Reveal window selector
     window_label  = st.selectbox(
         "Auto-delete after reveal",
         list(_WINDOW_OPTIONS.keys()),
@@ -436,7 +501,12 @@ def _render_compose():
     )
     window_seconds = _WINDOW_OPTIONS[window_label]
 
-    n = int(st.number_input("Number of questions", min_value=1, max_value=10, value=3, step=1, key=f"conf_n_{gen}"))
+    n = int(
+        st.number_input(
+            "Number of questions", min_value=1, max_value=10, value=3, step=1,
+            key=f"conf_n_{gen}",
+        )
+    )
     st.html("<div style='height:8px'></div>")
     _section_label(f"Your {n} question{'s' if n != 1 else ''}")
     questions = _question_fields(f"conf_q_{gen}", n)
@@ -484,7 +554,11 @@ def _render_compose():
                 return
             recipient = _db("get_user_by_username", rname)
             if not recipient:
-                st.error(f"No user found: '{rname}'. Use the email invite toggle if they're not on the app.")
+                st.error(
+                    f"No user found: '{rname}'. "
+                    f"Use the email invite toggle if they're not on the app, "
+                    f"or post on the Board tab to reach anyone anonymously."
+                )
                 return
             if _db("save_confession", uid, recipient["id"], code, questions, window_seconds):
                 st.session_state.conf_form_gen += 1
@@ -494,14 +568,20 @@ def _render_compose():
                 st.error("Something went wrong.")
 
 
-# ─── INBOX ──────────────────────────────────────────────────────────────────
+# ─── INBOX ───────────────────────────────────────────────────────────────────
 
 def _render_inbox():
     inject_page_css()
     _section_label("Inbox — Confessions sent to you")
     items = _db("load_confessions_inbox", _uid(), default=[])
     if not items:
-        st.html('<div style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:60px;text-align:center;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:28px;letter-spacing:3px;color:var(--muted);">NOTHING YET</div></div>')
+        st.html("""
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:60px; text-align:center;">
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:3px;
+              color:var(--muted);">NOTHING YET</div>
+</div>
+""")
         return
     for item in items:
         _render_inbox_item(item)
@@ -518,13 +598,16 @@ def _render_inbox_item(item):
     inject_printscreen_guard(code)
 
     st.html(f"""
-<div style="background:var(--card);border:1px solid var(--border);border-left:3px solid var(--magenta);
-            border-radius:4px;padding:18px 20px;margin-bottom:4px;">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--text);">From {sender_name}</div>
-    <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);">{ts}</div>
+<div style="background:var(--card); border:1px solid var(--border);
+            border-left:3px solid var(--magenta); border-radius:4px;
+            padding:18px 20px; margin-bottom:4px;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+    <div style="font-family:'Bebas Neue',sans-serif; font-size:20px; color:var(--text);">
+      From {sender_name}
+    </div>
+    <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);">{ts}</div>
   </div>
-  <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--soft);">
+  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft);">
     {num_q} question{'s' if num_q != 1 else ''} — hidden until you write yours
   </div>
 </div>
@@ -532,9 +615,15 @@ def _render_inbox_item(item):
     _status_badge(status, sender_name, _username(), is_sender=False)
 
     if status == "sent":
-        with st.expander(f"Your move — write your {num_q} question{'s' if num_q != 1 else ''} for {sender_name}", expanded=True):
+        with st.expander(
+            f"Your move — write your {num_q} question{'s' if num_q != 1 else ''} for {sender_name}",
+            expanded=True,
+        ):
             rqs = _question_fields(f"inbox_rq_{code}", num_q, sender_name=sender_name)
-            if st.button(f"Lock in — now see {sender_name}'s questions →", key=f"inbox_step1_{code}", type="primary", use_container_width=True):
+            if st.button(
+                f"Lock in — now see {sender_name}'s questions →",
+                key=f"inbox_step1_{code}", type="primary", use_container_width=True,
+            ):
                 errs = _validate_questions(rqs)
                 if errs:
                     for e in errs:
@@ -550,12 +639,30 @@ def _render_inbox_item(item):
         with st.expander(f"They showed their hand — answer {sender_name}'s questions", expanded=True):
             recipient_answers = []
             for i, q in enumerate(sender_questions):
-                st.html(f'<div style="font-family:\'DM Sans\',sans-serif;font-size:14px;color:var(--text);padding:10px 14px;background:var(--surface);border-left:2px solid var(--magenta);border-radius:0 3px 3px 0;margin-bottom:6px;line-height:1.6;">{q}</div>')
-                recipient_answers.append(st.text_area("Your answer", placeholder="Be honest…", key=f"inbox_ans_{code}_{i}", height=80, label_visibility="collapsed"))
-            if st.button("Submit answers — trigger the reveal →", key=f"inbox_step2_{code}", type="primary", use_container_width=True):
-                blank = [i+1 for i, a in enumerate(recipient_answers) if not a.strip()]
+                st.html(
+                    f'<div style="font-family:\'DM Sans\',sans-serif; font-size:14px;'
+                    f' color:var(--text); padding:10px 14px; background:var(--surface);'
+                    f' border-left:2px solid var(--magenta); border-radius:0 3px 3px 0;'
+                    f' margin-bottom:6px; line-height:1.6;">{q}</div>'
+                )
+                recipient_answers.append(
+                    st.text_area(
+                        "Your answer", placeholder="Be honest…",
+                        key=f"inbox_ans_{code}_{i}", height=80,
+                        label_visibility="collapsed",
+                    )
+                )
+            if st.button(
+                "Submit answers — trigger the reveal →",
+                key=f"inbox_step2_{code}", type="primary", use_container_width=True,
+            ):
+                blank = [i + 1 for i, a in enumerate(recipient_answers) if not a.strip()]
                 if blank:
-                    st.error(f"Answer{'s' if len(blank)>1 else ''} {', '.join(map(str,blank))} {'are' if len(blank)>1 else 'is'} empty.")
+                    st.error(
+                        f"Answer{'s' if len(blank) > 1 else ''} "
+                        f"{', '.join(map(str, blank))} "
+                        f"{'are' if len(blank) > 1 else 'is'} empty."
+                    )
                 elif _db("confession_recipient_answer", code, recipient_answers):
                     st.success("Done. Waiting for them to answer your questions.")
                     st.rerun()
@@ -573,14 +680,20 @@ def _render_inbox_item(item):
     st.html("<div style='height:12px'></div>")
 
 
-# ─── OUTBOX ─────────────────────────────────────────────────────────────────
+# ─── OUTBOX ──────────────────────────────────────────────────────────────────
 
 def _render_outbox():
     inject_page_css()
     _section_label("Sent — Confessions you started")
     items = _db("load_confessions_outbox", _uid(), default=[])
     if not items:
-        st.html('<div style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:60px;text-align:center;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:28px;letter-spacing:3px;color:var(--muted);">NOTHING SENT YET</div></div>')
+        st.html("""
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:60px; text-align:center;">
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:3px;
+              color:var(--muted);">NOTHING SENT YET</div>
+</div>
+""")
         return
     for item in items:
         _render_outbox_item(item)
@@ -597,13 +710,16 @@ def _render_outbox_item(item):
     inject_printscreen_guard(code)
 
     st.html(f"""
-<div style="background:var(--card);border:1px solid var(--border);border-left:3px solid var(--lime);
-            border-radius:4px;padding:18px 20px;margin-bottom:4px;">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--text);">To {recipient_name}</div>
-    <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);">{ts}</div>
+<div style="background:var(--card); border:1px solid var(--border);
+            border-left:3px solid var(--lime); border-radius:4px;
+            padding:18px 20px; margin-bottom:4px;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+    <div style="font-family:'Bebas Neue',sans-serif; font-size:20px; color:var(--text);">
+      To {recipient_name}
+    </div>
+    <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);">{ts}</div>
   </div>
-  <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--soft);">
+  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft);">
     {num_q} question{'s' if num_q != 1 else ''} sent
   </div>
 </div>
@@ -615,22 +731,44 @@ def _render_outbox_item(item):
 
     elif status == "responded":
         recipient_questions = item.get("recipient_questions", [])
-        with st.expander(f"They answered. Seal the deal — answer {recipient_name}'s questions", expanded=True):
+        with st.expander(
+            f"They answered. Seal the deal — answer {recipient_name}'s questions",
+            expanded=True,
+        ):
             st.html(f"""
-<div style="padding:14px 16px;background:var(--surface);border-radius:4px;margin-bottom:16px;
-            font-family:'DM Sans',sans-serif;font-size:13px;color:var(--soft);line-height:1.7;">
+<div style="padding:14px 16px; background:var(--surface); border-radius:4px;
+            margin-bottom:16px; font-family:'DM Sans',sans-serif;
+            font-size:13px; color:var(--soft); line-height:1.7;">
   {recipient_name} answered your questions. The moment you submit, both sides reveal simultaneously.
   <strong style="color:var(--magenta);">Auto-deletes {_window_label(window_secs)} after reveal.</strong>
 </div>
 """)
             sender_answers = []
             for i, q in enumerate(recipient_questions):
-                st.html(f'<div style="font-family:\'DM Sans\',sans-serif;font-size:14px;color:var(--text);padding:10px 14px;background:var(--surface);border-left:2px solid var(--lime);border-radius:0 3px 3px 0;margin-bottom:6px;line-height:1.6;">{q}</div>')
-                sender_answers.append(st.text_area("Your answer", placeholder="Be honest…", key=f"outbox_ans_{code}_{i}", height=80, label_visibility="collapsed"))
-            if st.button("Submit — reveal everything →", key=f"outbox_submit_{code}", type="primary", use_container_width=True):
-                blank = [i+1 for i, a in enumerate(sender_answers) if not a.strip()]
+                st.html(
+                    f'<div style="font-family:\'DM Sans\',sans-serif; font-size:14px;'
+                    f' color:var(--text); padding:10px 14px; background:var(--surface);'
+                    f' border-left:2px solid var(--lime); border-radius:0 3px 3px 0;'
+                    f' margin-bottom:6px; line-height:1.6;">{q}</div>'
+                )
+                sender_answers.append(
+                    st.text_area(
+                        "Your answer", placeholder="Be honest…",
+                        key=f"outbox_ans_{code}_{i}", height=80,
+                        label_visibility="collapsed",
+                    )
+                )
+            if st.button(
+                "Submit — reveal everything →",
+                key=f"outbox_submit_{code}", type="primary", use_container_width=True,
+            ):
+                blank = [i + 1 for i, a in enumerate(sender_answers) if not a.strip()]
                 if blank:
-                    st.error(f"Answer{'s' if len(blank)>1 else ''} {', '.join(map(str,blank))} {'are' if len(blank)>1 else 'is'} empty.")
+                    st.error(
+                        f"Answer{'s' if len(blank) > 1 else ''} "
+                        f"{', '.join(map(str, blank))} "
+                        f"{'are' if len(blank) > 1 else 'is'} empty."
+                    )
                 elif _db("confession_sender_answer", code, sender_answers):
                     st.success(f"Revealed. Auto-deletes in {_window_label(window_secs)}.")
                     st.rerun()
@@ -645,17 +783,7 @@ def _render_outbox_item(item):
     st.html("<div style='height:12px'></div>")
 
 
-def _window_label(secs: int) -> str:
-    for label, s in _WINDOW_OPTIONS.items():
-        if s == secs:
-            return label
-    if secs < 60:
-        return f"{secs} seconds"
-    m = secs // 60
-    return f"{m} minute{'s' if m != 1 else ''}"
-
-
-# ─── REVEALED VIEW ──────────────────────────────────────────────────────────
+# ─── REVEALED VIEW ───────────────────────────────────────────────────────────
 
 def _render_revealed(item, is_sender: bool):
     sender_name    = item.get("sender_username", "Sender")
@@ -663,16 +791,16 @@ def _render_revealed(item, is_sender: bool):
     window_secs    = item.get("reveal_window_secs", 60)
 
     st.html(f"""
-<div style="background:var(--card);border:1px solid var(--border);border-top:2px solid var(--lime);
-            border-radius:4px;padding:16px 20px;margin-bottom:16px;text-align:center;">
-  <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--lime);
-              letter-spacing:2px;margin-bottom:4px;">EXCHANGE REVEALED</div>
-  <div style="font-family:'Space Mono',monospace;font-size:10px;color:var(--magenta);">
+<div style="background:var(--card); border:1px solid var(--border);
+            border-top:2px solid var(--lime); border-radius:4px;
+            padding:16px 20px; margin-bottom:16px; text-align:center;">
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--lime);
+              letter-spacing:2px; margin-bottom:4px;">EXCHANGE REVEALED</div>
+  <div style="font-family:'Space Mono',monospace; font-size:10px; color:var(--magenta);">
     ⏱  Auto-deletes in {_window_label(window_secs)}
   </div>
 </div>
 """)
-
     sq = item.get("sender_questions", [])
     ra = item.get("recipient_answers", [])
     rq = item.get("recipient_questions", [])
@@ -688,212 +816,33 @@ def _render_revealed(item, is_sender: bool):
         _exchange_card(f"Your questions → {sender_name}'s answers", "#c6ff00", rq, sa, delay_base=len(sq) * 0.12)
 
 
-# ─── ENTRY POINT ────────────────────────────────────────────────────────────
+# ─── COMMUNITY BOARD ─────────────────────────────────────────────────────────
 
-def confessions_page():
+BOARD_VICE_META = {
+    "weed":    {"label": "Weed",    "icon": "🌿", "color": "#c6ff00"},
+    "alcohol": {"label": "Alcohol", "icon": "🥃", "color": "#ffb300"},
+    "sex":     {"label": "Sex",     "icon": "🔥", "color": "#ff2d78"},
+    "other":   {"label": "Other",   "icon": "💊", "color": "#00e5ff"},
+}
+BOARD_VICE_NONE = {"label": "General", "icon": "◈", "color": "#9090aa"}
+
+
+def _render_board_post_form():
     inject_page_css()
-    st.html("""
-<style>
-@keyframes glitch-clip {
-  0%   { clip-path:inset(0 0 95% 0); transform:translate(-3px,0); }
-  10%  { clip-path:inset(30% 0 55% 0); transform:translate(3px,0); }
-  20%  { clip-path:inset(60% 0 15% 0); transform:translate(-2px,0); }
-  30%  { clip-path:inset(80% 0 5% 0);  transform:translate(2px,0); }
-  40%  { clip-path:inset(10% 0 80% 0); transform:translate(-3px,0); }
-  50%  { clip-path:inset(0 0 0 0);     transform:translate(0,0); opacity:0; }
-  100% { clip-path:inset(0 0 0 0);     transform:translate(0,0); opacity:0; }
-}
-.glitch-wrap { position:relative; display:inline-block; }
-.glitch-wrap::before, .glitch-wrap::after {
-  content: attr(data-text); position:absolute; top:0; left:0;
-  font-family:'Bebas Neue',sans-serif; font-size:48px; letter-spacing:3px; line-height:0.95; pointer-events:none;
-}
-.glitch-wrap::before { color:var(--cyan);    animation: glitch-clip 4s infinite linear; animation-delay:0.5s; }
-.glitch-wrap::after  { color:var(--magenta); animation: glitch-clip 4s infinite linear; animation-delay:1.2s; }
-@keyframes card-enter { from{opacity:0;transform:translateY(18px) scale(0.97)} to{opacity:1;transform:translateY(0) scale(1)} }
-.reveal-card { animation: card-enter 0.45s cubic-bezier(0.19,1,0.22,1) both; }
-@keyframes typing-pulse { 0%,80%,100%{opacity:0.2;transform:scale(0.8)} 40%{opacity:1;transform:scale(1)} }
-.typing-dot { display:inline-block; width:6px; height:6px; border-radius:50%;
-               background:var(--magenta); animation:typing-pulse 1.4s infinite ease-in-out; }
-.typing-dot:nth-child(2){animation-delay:0.2s} .typing-dot:nth-child(3){animation-delay:0.4s}
-</style>
-""")
-
-    try:
-        import database as db
-        db.delete_expired_confessions()
-    except Exception:
-        pass
-
-    _handle_query_params()
-
-    st.html("""
-<div style="border-bottom:1px solid var(--border);padding-bottom:20px;margin-bottom:28px;">
-  <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:4px;
-              text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Vice Vault</div>
-  <div class="glitch-wrap" data-text="CONFESSIONS"
-       style="font-family:'Bebas Neue',sans-serif;font-size:48px;color:var(--text);
-              letter-spacing:3px;line-height:0.95;">CONFESSIONS</div>
-  <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--muted);margin-top:6px;">
-    Mutual. Blind. Nobody blinks first — because neither of you can.
-  </div>
-</div>
-""")
-
-    uid = _uid()
-    if not uid:
-        st.error("Log in to use Confessions.")
-        return
-
-    _render_screenshot_alerts()
-
-    st.session_state.setdefault("conf_tab", "compose")
-
-    inbox_items  = _db("load_confessions_inbox",  uid, default=[])
-    outbox_items = _db("load_confessions_outbox", uid, default=[])
-
-    inbox_action  = sum(1 for i in inbox_items  if i["status"] in ("sent", "questioning"))
-    outbox_action = sum(1 for i in outbox_items if i["status"] == "responded")
-    revealed_all  = [i for i in inbox_items + outbox_items if i["status"] == "revealed"]
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        if st.button("◈  Compose", use_container_width=True,
-                     type="primary" if st.session_state.conf_tab == "compose" else "secondary", key="tab_compose"):
-            st.session_state.conf_tab = "compose"; st.rerun()
-    with col2:
-        b2 = f" ({inbox_action})" if inbox_action else ""
-        if st.button(f"↓  Inbox{b2}", use_container_width=True,
-                     type="primary" if st.session_state.conf_tab == "inbox" else "secondary", key="tab_inbox"):
-            st.session_state.conf_tab = "inbox"; st.rerun()
-    with col3:
-        b3 = f" ({outbox_action})" if outbox_action else ""
-        if st.button(f"↑  Sent{b3}", use_container_width=True,
-                     type="primary" if st.session_state.conf_tab == "sent" else "secondary", key="tab_sent"):
-            st.session_state.conf_tab = "sent"; st.rerun()
-    with col4:
-        b4 = f" ({len(revealed_all)})" if revealed_all else ""
-        if st.button(f"⚡  Revealed{b4}", use_container_width=True,
-                     type="primary" if st.session_state.conf_tab == "revealed" else "secondary", key="tab_revealed"):
-            st.session_state.conf_tab = "revealed"; st.rerun()
-
-    st.html("<div style='height:1.5rem'></div>")
-
-    tab = st.session_state.conf_tab
-    if   tab == "compose":  _render_compose()
-    elif tab == "inbox":    _render_inbox()
-    elif tab == "sent":     _render_outbox()
-    elif tab == "revealed":
-        inject_page_css()
-        _section_label("Revealed exchanges")
-        if not revealed_all:
-            st.html('<div style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:60px;text-align:center;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:24px;letter-spacing:3px;color:var(--muted);">NOTHING REVEALED YET</div></div>')
-        else:
-            seen, unique = set(), []
-            for item in revealed_all:
-                if item["code"] not in seen:
-                    seen.add(item["code"])
-                    unique.append(item)
-            for item in unique:
-                is_s  = item.get("sender_id") == uid
-                other = (item.get("recipient_username") or item.get("recipient_email")) if is_s else item.get("sender_username")
-                ts    = str(item.get("created_at", ""))[:16]
-                inject_countdown_banner(item["code"], _revealed_at_iso(item), item.get("reveal_window_secs", 60))
-                with st.expander(f"Exchange with {other} · {ts}", expanded=False):
-                    _render_revealed(item, is_sender=is_s)
-                    _reaction_stamps(item["code"])
-
-
-
-
-
-
-# ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-VICE_META = {
-    "weed":    {"label": "Weed",     "icon": "🌿", "color": "#c6ff00"},
-    "alcohol": {"label": "Alcohol",  "icon": "🥃", "color": "#ffb300"},
-    "sex":     {"label": "Sex",      "icon": "🔥", "color": "#ff2d78"},
-    "other":   {"label": "Other",    "icon": "💊", "color": "#00e5ff"},
-    None:      {"label": "General",  "icon": "◈",  "color": "#9090aa"},
-}
-
-
-def _uid():
-    u = st.session_state.get("user", {})
-    return u.get("id") if u else None
-
-
-def _db(fn, *args, default=None, **kwargs):
-    try:
-        import database as db
-        return getattr(db, fn)(*args, **kwargs)
-    except Exception:
-        return default
-
-
-def _ts_short(dt) -> str:
-    if dt is None:
-        return ""
-    s = str(dt)[:16]
-    return s
-
-
-def _time_ago(dt) -> str:
-    if dt is None:
-        return ""
-    try:
-        from datetime import datetime
-        if hasattr(dt, "timestamp"):
-            diff = int((datetime.now() - dt).total_seconds())
-        else:
-            diff = int((datetime.now() - datetime.fromisoformat(str(dt))).total_seconds())
-        if diff < 3600:
-            return f"{diff // 60}m ago"
-        if diff < 86400:
-            return f"{diff // 3600}h ago"
-        return f"{diff // 86400}d ago"
-    except Exception:
-        return str(dt)[:10]
-
-
-def _section_label(text):
-    st.html(
-        f'<div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:3px;'
-        f'text-transform:uppercase;color:var(--muted);margin-bottom:12px;">{text}</div>'
-    )
-
-
-# ─── POST FORM ────────────────────────────────────────────────────────────────
-
-def _render_post_form():
-    """Form to post a new anonymous confession to the public board."""
-    inject_page_css()
-
-    st.html("""
-<div style="background:var(--card); border:1px solid var(--border);
-            border-top:2px solid var(--magenta); border-radius:4px;
-            padding:18px 20px; margin-bottom:20px;">
-  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.85;">
-    Post anonymously. Nobody sees who wrote it — just what you wrote.
-    Others can reply the same way. Good for when you need to say something
-    out loud without saying it to anyone in particular.
-  </div>
-</div>
-""")
-
     st.session_state.setdefault("pcb_gen", 0)
     gen = st.session_state.pcb_gen
 
-    vice = st.selectbox(
+    vice_choice = st.selectbox(
         "Tag it (optional)",
         ["None", "Weed 🌿", "Alcohol 🥃", "Sex 🔥", "Other 💊"],
         key=f"pcb_vice_{gen}",
         index=0,
     )
-    vice_map = {"None": None, "Weed 🌿": "weed", "Alcohol 🥃": "alcohol",
-                "Sex 🔥": "sex", "Other 💊": "other"}
-    vice_key = vice_map[vice]
+    vice_map = {
+        "None": None, "Weed 🌿": "weed",
+        "Alcohol 🥃": "alcohol", "Sex 🔥": "sex", "Other 💊": "other",
+    }
+    vice_key = vice_map[vice_choice]
 
     content = st.text_area(
         "Your confession",
@@ -903,9 +852,11 @@ def _render_post_form():
         max_chars=1000,
     )
 
-    if st.button("Post anonymously →", type="primary", use_container_width=True,
-                 key=f"pcb_submit_{gen}"):
-        uid = _uid()
+    if st.button(
+        "Post anonymously →", type="primary", use_container_width=True,
+        key=f"pcb_submit_{gen}",
+    ):
+        uid  = _uid()
         if not uid:
             st.error("Log in to post.")
             return
@@ -916,22 +867,19 @@ def _render_post_form():
         result = _db("save_public_confession", uid, text, vice_key)
         if result:
             st.session_state.pcb_gen += 1
-            st.success("Posted. It's out there.")
+            st.success("Posted.")
             st.rerun()
         else:
             st.error("Something went wrong — try again.")
 
 
-# ─── BOARD VIEW ───────────────────────────────────────────────────────────────
-
-def _render_confession_card(item: dict, expand_replies: bool = False):
-    """Single board post with inline reply thread."""
-    cid      = item["id"]
-    content  = item.get("content", "")
-    vice     = item.get("vice")
-    replies  = item.get("reply_count", 0)
-    meta     = VICE_META.get(vice, VICE_META[None])
-    ago      = _time_ago(item.get("created_at"))
+def _render_board_card(item: dict):
+    cid     = item["id"]
+    content = item.get("content", "")
+    vice    = item.get("vice")
+    replies = item.get("reply_count", 0)
+    meta    = BOARD_VICE_META.get(vice, BOARD_VICE_NONE)
+    ago     = _time_ago(item.get("created_at"))
 
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
@@ -953,9 +901,9 @@ def _render_confession_card(item: dict, expand_replies: bool = False):
 </div>
 """)
 
-    # Reply thread
     with st.expander(
-        f"{'▸ Read replies' if replies else '▸ Be the first to reply'}", expanded=expand_replies
+        f"{'Read & reply' if replies else 'Be the first to reply'} →",
+        expanded=False,
     ):
         thread = _db("load_public_replies", cid, default=[])
 
@@ -976,17 +924,14 @@ def _render_confession_card(item: dict, expand_replies: bool = False):
         else:
             st.html("""
 <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);
-            padding:8px 0 4px; font-style:italic;">
-  No replies yet. Be the first.
-</div>
+            padding:8px 0 4px; font-style:italic;">No replies yet. Be the first.</div>
 """)
 
-        # Reply input
         uid = _uid()
         if uid:
             reply_text = st.text_area(
-                "Your reply",
-                placeholder="Reply anonymously…",
+                "Reply anonymously",
+                placeholder="Say something…",
                 key=f"pcb_reply_text_{cid}",
                 height=72,
                 label_visibility="collapsed",
@@ -1005,36 +950,45 @@ def _render_confession_card(item: dict, expand_replies: bool = False):
     st.html("<div style='height:8px'></div>")
 
 
-# ─── MAIN BOARD RENDERER ──────────────────────────────────────────────────────
-
-def render_public_board():
+def _render_board():
     inject_page_css()
     _section_label("Community Board — anonymous confessions")
 
     st.html("""
 <div style="background:var(--card); border:1px solid var(--border);
-            border-radius:4px; padding:12px 16px; margin-bottom:20px;">
-  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); line-height:1.75;">
-    Everyone here is anonymous. No usernames. No receipts.
-    Post something you'd never say with your name on it.
-    Reply to anything that resonates.
+            border-top:2px solid var(--magenta); border-radius:4px;
+            padding:16px 20px; margin-bottom:20px;">
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.85;">
+    No usernames. No receipts. Post something you'd never say with your name on it.
+    Reply to anything that resonates. Everyone here is anonymous.
+    <br><br>
+    <span style="color:var(--muted); font-size:12px;">
+      Want a direct exchange? Use the <strong style="color:var(--lime);">Compose</strong> tab
+      to send questions to a specific person.
+    </span>
   </div>
 </div>
 """)
 
-    # ── Filter bar ────────────────────────────────────────────────────────────
-    st.html("""<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:8px;">Filter by</div>""")
-    filter_options = {"All": None, "🌿 Weed": "weed", "🥃 Alcohol": "alcohol",
-                      "🔥 Sex": "sex", "💊 Other": "other"}
+    # ── Filter ────────────────────────────────────────────────────────────────
+    st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:8px;">Filter</div>
+""")
+    filter_options = {
+        "All": None, "🌿 Weed": "weed",
+        "🥃 Alcohol": "alcohol", "🔥 Sex": "sex", "💊 Other": "other",
+    }
     st.session_state.setdefault("pcb_filter", None)
 
     fcols = st.columns(len(filter_options))
     for i, (label, val) in enumerate(filter_options.items()):
         with fcols[i]:
             active = st.session_state.pcb_filter == val
-            if st.button(label, key=f"pcb_f_{i}", use_container_width=True,
-                         type="primary" if active else "secondary"):
+            if st.button(
+                label, key=f"pcb_f_{i}", use_container_width=True,
+                type="primary" if active else "secondary",
+            ):
                 st.session_state.pcb_filter = val
                 st.rerun()
 
@@ -1042,14 +996,14 @@ def render_public_board():
 
     # ── Post form ─────────────────────────────────────────────────────────────
     with st.expander("◈  Post something", expanded=False):
-        _render_post_form()
+        _render_board_post_form()
 
-    st.html("<div style='height:0.5rem'></div>")
-    st.html("""<div style="height:1px; background:var(--border); margin-bottom:20px;"></div>""")
+    st.html("<div style='height:1px; background:var(--border); margin:16px 0;'></div>")
 
     # ── Feed ──────────────────────────────────────────────────────────────────
-    active_filter = st.session_state.pcb_filter
-    posts = _db("load_public_confessions", 30, 0, active_filter, default=[])
+    posts = _db(
+        "load_public_confessions", 30, 0, st.session_state.pcb_filter, default=[]
+    )
 
     if not posts:
         st.html("""
@@ -1058,11 +1012,169 @@ def render_public_board():
   <div style="font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:3px;
               color:var(--muted); margin-bottom:8px;">NOTHING YET</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted);">
-    Be the first. Post something.
+    Be the first. Post something above.
   </div>
 </div>
 """)
         return
 
     for item in posts:
-        _render_confession_card(item)
+        _render_board_card(item)
+
+
+# ─── ENTRY POINT ─────────────────────────────────────────────────────────────
+
+def confessions_page():
+    inject_page_css()
+
+    st.html("""
+<style>
+@keyframes glitch-clip {
+  0%   { clip-path:inset(0 0 95% 0); transform:translate(-3px,0); }
+  10%  { clip-path:inset(30% 0 55% 0); transform:translate(3px,0); }
+  20%  { clip-path:inset(60% 0 15% 0); transform:translate(-2px,0); }
+  30%  { clip-path:inset(80% 0 5% 0);  transform:translate(2px,0); }
+  40%  { clip-path:inset(10% 0 80% 0); transform:translate(-3px,0); }
+  50%  { clip-path:inset(0 0 0 0);     transform:translate(0,0); opacity:0; }
+  100% { clip-path:inset(0 0 0 0);     transform:translate(0,0); opacity:0; }
+}
+.glitch-wrap { position:relative; display:inline-block; }
+.glitch-wrap::before, .glitch-wrap::after {
+  content:attr(data-text); position:absolute; top:0; left:0;
+  font-family:'Bebas Neue',sans-serif; font-size:48px;
+  letter-spacing:3px; line-height:0.95; pointer-events:none;
+}
+.glitch-wrap::before { color:var(--cyan);    animation:glitch-clip 4s infinite linear; animation-delay:0.5s; }
+.glitch-wrap::after  { color:var(--magenta); animation:glitch-clip 4s infinite linear; animation-delay:1.2s; }
+@keyframes card-enter { from{opacity:0;transform:translateY(18px) scale(0.97)} to{opacity:1;transform:translateY(0) scale(1)} }
+.reveal-card { animation:card-enter 0.45s cubic-bezier(0.19,1,0.22,1) both; }
+@keyframes typing-pulse { 0%,80%,100%{opacity:0.2;transform:scale(0.8)} 40%{opacity:1;transform:scale(1)} }
+.typing-dot {
+  display:inline-block; width:6px; height:6px; border-radius:50%;
+  background:var(--magenta); animation:typing-pulse 1.4s infinite ease-in-out;
+}
+.typing-dot:nth-child(2){animation-delay:0.2s}
+.typing-dot:nth-child(3){animation-delay:0.4s}
+</style>
+""")
+
+    try:
+        import database as db
+        db.delete_expired_confessions()
+    except Exception:
+        pass
+
+    _handle_query_params()
+
+    st.html("""
+<div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
+              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Vice Vault</div>
+  <div class="glitch-wrap" data-text="CONFESSIONS"
+       style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:var(--text);
+              letter-spacing:3px; line-height:0.95;">CONFESSIONS</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-top:6px;">
+    Mutual. Blind. Nobody blinks first — because neither of you can.
+  </div>
+</div>
+""")
+
+    uid = _uid()
+    if not uid:
+        st.error("Log in to use Confessions.")
+        return
+
+    _render_screenshot_alerts()
+
+    st.session_state.setdefault("conf_tab", "compose")
+
+    inbox_items  = _db("load_confessions_inbox",  uid, default=[])
+    outbox_items = _db("load_confessions_outbox", uid, default=[])
+
+    inbox_action  = sum(1 for i in inbox_items  if i["status"] in ("sent", "questioning"))
+    outbox_action = sum(1 for i in outbox_items if i["status"] == "responded")
+    revealed_all  = [i for i in inbox_items + outbox_items if i["status"] == "revealed"]
+
+    # ── Tab bar ───────────────────────────────────────────────────────────────
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        if st.button(
+            "◈  Compose", use_container_width=True, key="tab_compose",
+            type="primary" if st.session_state.conf_tab == "compose" else "secondary",
+        ):
+            st.session_state.conf_tab = "compose"; st.rerun()
+    with col2:
+        b2 = f" ({inbox_action})" if inbox_action else ""
+        if st.button(
+            f"↓  Inbox{b2}", use_container_width=True, key="tab_inbox",
+            type="primary" if st.session_state.conf_tab == "inbox" else "secondary",
+        ):
+            st.session_state.conf_tab = "inbox"; st.rerun()
+    with col3:
+        b3 = f" ({outbox_action})" if outbox_action else ""
+        if st.button(
+            f"↑  Sent{b3}", use_container_width=True, key="tab_sent",
+            type="primary" if st.session_state.conf_tab == "sent" else "secondary",
+        ):
+            st.session_state.conf_tab = "sent"; st.rerun()
+    with col4:
+        b4 = f" ({len(revealed_all)})" if revealed_all else ""
+        if st.button(
+            f"⚡  Revealed{b4}", use_container_width=True, key="tab_revealed",
+            type="primary" if st.session_state.conf_tab == "revealed" else "secondary",
+        ):
+            st.session_state.conf_tab = "revealed"; st.rerun()
+    with col5:
+        if st.button(
+            "◉  Board", use_container_width=True, key="tab_board",
+            type="primary" if st.session_state.conf_tab == "board" else "secondary",
+        ):
+            st.session_state.conf_tab = "board"; st.rerun()
+
+    st.html("<div style='height:1.5rem'></div>")
+
+    # ── Router ────────────────────────────────────────────────────────────────
+    tab = st.session_state.conf_tab
+
+    if tab == "compose":
+        _render_compose()
+
+    elif tab == "inbox":
+        _render_inbox()
+
+    elif tab == "sent":
+        _render_outbox()
+
+    elif tab == "board":
+        _render_board()
+
+    elif tab == "revealed":
+        inject_page_css()
+        _section_label("Revealed exchanges")
+        if not revealed_all:
+            st.html("""
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:60px; text-align:center;">
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:24px; letter-spacing:3px;
+              color:var(--muted);">NOTHING REVEALED YET</div>
+</div>
+""")
+        else:
+            seen, unique = set(), []
+            for item in revealed_all:
+                if item["code"] not in seen:
+                    seen.add(item["code"])
+                    unique.append(item)
+            for item in unique:
+                is_s  = item.get("sender_id") == uid
+                other = (
+                    (item.get("recipient_username") or item.get("recipient_email"))
+                    if is_s else item.get("sender_username")
+                )
+                ts = str(item.get("created_at", ""))[:16]
+                inject_countdown_banner(
+                    item["code"], _revealed_at_iso(item), item.get("reveal_window_secs", 60)
+                )
+                with st.expander(f"Exchange with {other} · {ts}", expanded=False):
+                    _render_revealed(item, is_sender=is_s)
+                    _reaction_stamps(item["code"])
