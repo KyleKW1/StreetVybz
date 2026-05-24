@@ -18,6 +18,37 @@ _VICE_LABELS = {
     "other":   "other substances",
 }
 
+# ─── HIDDEN DESIRE SIGNAL MAPS ────────────────────────────────────────────────
+# Maps hd_01…hd_15 IDs (stored in quiz_results.dim_scores → hd_full)
+# to the signal names used in prompts.
+
+HD_ID_TO_SIGNAL = {
+    "hd_01": "power_dynamic_latent",
+    "hd_02": "hidden_fantasy_present",
+    "hd_03": "archetype_attraction",
+    "hd_04": "shame_adjacent_arousal",
+    "hd_05": "desired_intensity",
+    "hd_06": "dom_latent",
+    "hd_07": "sub_latent",
+    "hd_08": "exhib_latent",
+    "hd_09": "group_latent",
+    "hd_10": "unnamed_fixation",
+    "hd_11": "taboo_draw",
+    "hd_12": "elaborated_fantasy",
+    "hd_13": "authentic_exposure",
+    "hd_14": "stranger_context",
+    "hd_15": "verbal_latent",
+}
+
+# Maps the string answer stored in hd_full → numeric weight for ranking.
+HD_SCORE_MAP = {
+    "strongly": 3,
+    "yes":      2,
+    "maybe":    1,
+    "nope":     0,
+}
+
+
 # ─── DB WRAPPER ───────────────────────────────────────────────────────────────
 
 def _db(fn, *args, default=None, **kwargs):
@@ -52,30 +83,48 @@ def _player_vice_summary(user_id: int) -> dict:
         if conn:
             try:
                 cur = conn.cursor(dictionary=True)
+                # quiz_type is now 'rbtl_v4_*'
+                # profile identity lives in result_name / result_meta
                 cur.execute(
-                    """SELECT profile_name, profile_meta, dim_scores
+                    """SELECT result_name, result_meta, dim_scores
                        FROM quiz_results
-                       WHERE user_id = %s AND quiz_type = 'read_between_lines'
+                       WHERE user_id = %s AND quiz_type LIKE 'rbtl_v4_%'
                        ORDER BY completed_at DESC LIMIT 1""",
                     (user_id,)
                 )
                 row = cur.fetchone()
                 cur.close()
+
                 if row:
-                    dim_scores = row.get("dim_scores")
-                    if isinstance(dim_scores, str):
+                    raw_dim = row.get("dim_scores") or {}
+                    if isinstance(raw_dim, str):
                         try:
-                            dim_scores = json.loads(dim_scores)
+                            raw_dim = json.loads(raw_dim)
                         except Exception:
-                            dim_scores = {}
+                            raw_dim = {}
+
+                    # hd_full: {"hd_01": "yes", "hd_06": "strongly", ...}
+                    hd_full = raw_dim.get("hd_full", {})
+
+                    # Convert to {signal_name: numeric_score}, drop scores of 0
+                    signal_scores = {}
+                    for hd_id, answer in hd_full.items():
+                        signal = HD_ID_TO_SIGNAL.get(hd_id)
+                        score  = HD_SCORE_MAP.get(answer, 0)
+                        if signal and score > 0:
+                            signal_scores[signal] = score
+
                     summary["quiz"] = {
-                        "profile_name": row.get("profile_name", ""),
-                        "profile_meta": row.get("profile_meta", ""),
-                        "dim_scores":   dim_scores or {},
+                        "profile_name": row.get("result_name", ""),
+                        "profile_meta": row.get("result_meta", ""),
+                        "dim_scores":   signal_scores,
+                        "hd_signals":   raw_dim.get("hd_signals", ""),
                     }
             finally:
                 conn.close()
+
         return summary
+
     except Exception:
         return {}
 
@@ -108,6 +157,7 @@ def build_group_profile(players: list) -> dict:
             quiz_profiles.append(quiz)
     group = {"counts": combined_counts, "sample_details": combined_details}
     if quiz_profiles:
+        # Pick the profile with the most signal data
         group["quiz"] = max(quiz_profiles, key=lambda q: len(q.get("dim_scores", {})))
     return group
 
@@ -129,118 +179,162 @@ def get_openai_client():
     return OpenAI(api_key=api_key)
 
 
-# ─── PROMPT HELPERS ───────────────────────────────────────────────────────────
+# ─── PROFILE TEXT ─────────────────────────────────────────────────────────────
 
 def _profile_text(vice_summary: dict) -> str:
     counts  = vice_summary.get("counts", {})
     details = vice_summary.get("sample_details", {})
     quiz    = vice_summary.get("quiz", {})
     lines   = []
+
+    # Vice counts + one detail per vice
     for vk, cnt in counts.items():
         label = _VICE_LABELS.get(vk, vk)
         d     = details.get(vk, {})
         extra = ""
-        if vk == "weed"    and d.get("method"):       extra = f", usually {d['method']}"
+        if vk == "weed"    and d.get("method"):        extra = f", usually {d['method']}"
         elif vk == "alcohol" and d.get("drink_type"):  extra = f", drinks {d['drink_type']}"
         elif vk == "sex"    and d.get("partner_type"): extra = f", partner type: {d['partner_type']}"
         elif vk == "other"  and d.get("substance"):    extra = f" ({d['substance']})"
-        lines.append(f"- {label} ({cnt} sessions{extra})")
+        lines.append(f"- {label} ({cnt} session{'s' if cnt != 1 else ''}{extra})")
+
+    # Desire profile from RBTL quiz — result_name / result_meta + signal scores
     if quiz.get("profile_name"):
-        dim_scores = quiz.get("dim_scores", {})
-        top_dims   = sorted(dim_scores.items(), key=lambda x: -float(x[1]))[:2]
-        dim_str    = ", ".join(f"{d}: {v}%" for d, v in top_dims)
+        signal_scores = quiz.get("dim_scores", {})   # {signal_name: 1–3}
+
+        # Show signals the user said yes/strongly to (score >= 2), ranked strongest first
+        top_signals = sorted(
+            ((s, v) for s, v in signal_scores.items() if v >= 2),
+            key=lambda x: -x[1],
+        )[:3]
+
+        if top_signals:
+            sig_str = ", ".join(
+                f"{s.replace('_latent', '').replace('_', ' ')}:"
+                f"{'strong' if v == 3 else 'yes'}"
+                for s, v in top_signals
+            )
+        else:
+            # Fall back to the pre-formatted hd_signals string if no strong signals
+            sig_str = quiz.get("hd_signals", "") or "none surfaced"
+
         lines.append(
             f"- Desire profile: {quiz['profile_name']} — "
-            f"{quiz.get('profile_meta', '')} (top dims: {dim_str})"
+            f"{quiz.get('profile_meta', '')} "
+            f"(signals: {sig_str})"
         )
+
     return "\n".join(lines) if lines else ""
 
 
+# ─── MODE LINE ────────────────────────────────────────────────────────────────
+
 def _mode_line(mode: str) -> str:
     if mode == "regular":
-        return "Regular mode — social, funny, mildly embarrassing. No explicit content. Caribbean lime vibes."
+        return (
+            "Regular mode — social, funny, mildly embarrassing. "
+            "No explicit content. Caribbean lime vibes."
+        )
     if mode == "kinky":
         return (
-            "Kinky mode — ADULTS ONLY. Every single dare must be seductive, physically charged, or explicitly sexual. "
+            "Kinky mode — ADULTS ONLY. Every single dare must be seductive, "
+            "physically charged, or explicitly sexual. "
             "STRICTLY NO heat:1 cards — every card must be heat:2 or heat:3. "
-            "Dares should involve: slow touching of another player, whispering something sexually explicit in someone's ear, "
-            "a lap sit that lasts 30 seconds, tracing fingers down someone's neck or back, kissing someone's neck or shoulder, "
+            "Dares should involve: slow touching of another player, whispering something "
+            "sexually explicit in someone's ear, a lap sit that lasts 30 seconds, "
+            "tracing fingers down someone's neck or back, kissing someone's neck or shoulder, "
             "describing out loud what you'd do to someone if you had them alone, "
             "demonstrating how you kiss on a willing player, removing an item of clothing, "
-            "giving a slow sensual shoulder or back massage, or doing something that starts innocent and escalates into foreplay. "
+            "giving a slow sensual shoulder or back massage, or doing something that starts "
+            "innocent and escalates into foreplay. "
             "The tone is seductive, slow-burning, Caribbean heat. "
             "No euphemisms. No softening. No mild social dares hiding in this mode."
         )
     return (
-        "Mixed mode — roughly half social/funny Caribbean energy, half explicitly seductive and sexual. "
-        "The kinky half must involve real physical contact or explicit confessions — no heat:1 in those cards. "
-        "Alternate the energy so the game builds from fun into something charged."
+        "Mixed mode — roughly half social/funny Caribbean energy, half explicitly seductive "
+        "and sexual. The kinky half must involve real physical contact or explicit confessions "
+        "— no heat:1 in those cards. Alternate the energy so the game builds from fun into "
+        "something charged."
     )
 
+
+# ─── DARE JSON SCHEMA ─────────────────────────────────────────────────────────
 
 def _dare_json_schema(mode: str) -> str:
     if mode == "kinky":
         heat3_label = "explicit sexual act or forced confession"
         heat2_label = "seductive physical contact or charged dare"
-        schema_note = "IMPORTANT: For kinky mode, heat:1 is FORBIDDEN. Every card must be heat:2 or heat:3."
+        schema_note = (
+            "IMPORTANT: For kinky mode, heat:1 is FORBIDDEN. "
+            "Every card must be heat:2 or heat:3."
+        )
     else:
         heat3_label = "maximum chaos or explicit"
         heat2_label = "spicy/awkward"
         schema_note = ""
-    return f"""Return ONLY valid JSON — no markdown, no preamble.
-[
-  {{
-    "type": "DO" or "TRUTH",
-    "dare": "The dare or question.",
-    "drink": "What they drink if they refuse — one short punishing sentence.",
-    "heat": 2
-  }}
-]
-heat: 1=mild/funny  2={heat2_label}  3={heat3_label}
-{schema_note}"""
 
+    return (
+        f"Return ONLY valid JSON — no markdown, no preamble.\n"
+        f"[\n"
+        f"  {{\n"
+        f'    "type": "DO" or "TRUTH",\n'
+        f'    "dare": "The dare or question.",\n'
+        f'    "drink": "What they drink if they refuse — one short punishing sentence.",\n'
+        f'    "heat": 2\n'
+        f"  }}\n"
+        f"]\n"
+        f"heat: 1=mild/funny  2={heat2_label}  3={heat3_label}\n"
+        f"{schema_note}"
+    )
+
+
+# ─── PROMPTS ──────────────────────────────────────────────────────────────────
 
 def _prompt_personalised(player_name: str, vice_summary: dict, mode: str, n: int = 12) -> str:
-    return f"""You write dare cards for ViceVault "Do or Drink" — a Caribbean party game (Jamaica/English Caribbean).
-Tone: direct, seductive where needed, a little savage, real. Natural Caribbean cadence where it fits — not forced patois.
-
-Player: {player_name}
-Their personal profile (use for subtle personalisation — a nod, not a direct callout):
-{_profile_text(vice_summary)}
-
-{_mode_line(mode)}
-Write exactly {n} dare cards. Each is a DO (action) or TRUTH (question said out loud).
-Include a DRINK alternative if they refuse — make it sting a little.
-{_dare_json_schema(mode)}"""
+    return (
+        f"You write dare cards for ViceVault 'Do or Drink' — a Caribbean party game "
+        f"(Jamaica/English Caribbean).\n"
+        f"Tone: direct, seductive where needed, a little savage, real. "
+        f"Natural Caribbean cadence where it fits — not forced patois.\n\n"
+        f"Player: {player_name}\n"
+        f"Their personal profile (use for subtle personalisation — a nod, not a direct callout):\n"
+        f"{_profile_text(vice_summary)}\n\n"
+        f"{_mode_line(mode)}\n"
+        f"Write exactly {n} dare cards. Each is a DO (action) or TRUTH (question said out loud).\n"
+        f"Include a DRINK alternative if they refuse — make it sting a little.\n"
+        f"{_dare_json_schema(mode)}"
+    )
 
 
 def _prompt_group_shaped(player_name: str, group_profile: dict, mode: str, n: int = 12) -> str:
-    return f"""You write dare cards for ViceVault "Do or Drink" — a Caribbean party game (Jamaica/English Caribbean).
-Tone: direct, seductive where needed, a little savage, real.
-
-Player: {player_name}
-No personal data. Use the group profile below to match the game's energy so {player_name}'s cards belong.
-
-Group profile:
-{_profile_text(group_profile)}
-
-{_mode_line(mode)}
-Write exactly {n} dare cards for {player_name}.
-Include a DRINK alternative if they refuse.
-{_dare_json_schema(mode)}"""
+    return (
+        f"You write dare cards for ViceVault 'Do or Drink' — a Caribbean party game "
+        f"(Jamaica/English Caribbean).\n"
+        f"Tone: direct, seductive where needed, a little savage, real.\n\n"
+        f"Player: {player_name}\n"
+        f"No personal data. Use the group profile below to match the game's energy "
+        f"so {player_name}'s cards belong.\n\n"
+        f"Group profile:\n"
+        f"{_profile_text(group_profile)}\n\n"
+        f"{_mode_line(mode)}\n"
+        f"Write exactly {n} dare cards for {player_name}.\n"
+        f"Include a DRINK alternative if they refuse.\n"
+        f"{_dare_json_schema(mode)}"
+    )
 
 
 def _prompt_generic(player_name: str, mode: str, n: int = 12) -> str:
-    return f"""You write dare cards for ViceVault "Do or Drink" — a Caribbean party game (Jamaica/English Caribbean).
-Tone: direct, seductive where needed, a little savage, real.
-
-Player: {player_name}
-No profile data. Write sharp, charged, chaotic Caribbean party dares.
-
-{_mode_line(mode)}
-Write exactly {n} dare cards.
-Include a DRINK alternative if they refuse.
-{_dare_json_schema(mode)}"""
+    return (
+        f"You write dare cards for ViceVault 'Do or Drink' — a Caribbean party game "
+        f"(Jamaica/English Caribbean).\n"
+        f"Tone: direct, seductive where needed, a little savage, real.\n\n"
+        f"Player: {player_name}\n"
+        f"No profile data. Write sharp, charged, chaotic Caribbean party dares.\n\n"
+        f"{_mode_line(mode)}\n"
+        f"Write exactly {n} dare cards.\n"
+        f"Include a DRINK alternative if they refuse.\n"
+        f"{_dare_json_schema(mode)}"
+    )
 
 
 # ─── DARE GENERATION ──────────────────────────────────────────────────────────
@@ -259,25 +353,106 @@ def _parse_dares(raw: str) -> list:
 
 def _fallback_dares(player_name: str, mode: str) -> list:
     regular = [
-        {"type": "DO",    "dare": f"Text the last person in your contacts and tell them {player_name} says hi — send it now, no editing.", "drink": "Two fingers if you mek excuses.", "heat": 1},
-        {"type": "TRUTH", "dare": "What's the most embarrassing thing you've done while under the influence? 30 seconds.", "drink": "Drink and stay quiet — same thing really.", "heat": 1},
-        {"type": "DO",    "dare": "Do your best impression of the person to your left. They rate it. Under 5/10 means you drink anyway.", "drink": "Drink for being afraid of embarrassment.", "heat": 2},
-        {"type": "TRUTH", "dare": "Who in this room would you call first if you were in real trouble? Say the name out loud.", "drink": "Drink and keep your secrets then.", "heat": 1},
-        {"type": "DO",    "dare": "Set your phone screen brightness to max and show the last photo in your camera roll. No skipping.", "drink": "Drink and delete it, coward.", "heat": 2},
-        {"type": "TRUTH", "dare": "On a scale of 1-10, how messy were you last weekend? The real number, not the polite one.", "drink": "Drink for lying to yourself.", "heat": 1},
+        {
+            "type": "DO",
+            "dare": f"Text the last person in your contacts and tell them {player_name} says hi — send it now, no editing.",
+            "drink": "Two fingers if you mek excuses.",
+            "heat": 1,
+        },
+        {
+            "type": "TRUTH",
+            "dare": "What's the most embarrassing thing you've done while under the influence? 30 seconds.",
+            "drink": "Drink and stay quiet — same thing really.",
+            "heat": 1,
+        },
+        {
+            "type": "DO",
+            "dare": "Do your best impression of the person to your left. They rate it. Under 5/10 means you drink anyway.",
+            "drink": "Drink for being afraid of embarrassment.",
+            "heat": 2,
+        },
+        {
+            "type": "TRUTH",
+            "dare": "Who in this room would you call first if you were in real trouble? Say the name out loud.",
+            "drink": "Drink and keep your secrets then.",
+            "heat": 1,
+        },
+        {
+            "type": "DO",
+            "dare": "Set your phone screen brightness to max and show the last photo in your camera roll. No skipping.",
+            "drink": "Drink and delete it, coward.",
+            "heat": 2,
+        },
+        {
+            "type": "TRUTH",
+            "dare": "On a scale of 1-10, how messy were you last weekend? The real number, not the polite one.",
+            "drink": "Drink for lying to yourself.",
+            "heat": 1,
+        },
     ]
     kinky = [
-        {"type": "DO",    "dare": "Sit in someone's lap — your choice who — and stay there for the next two turns.", "drink": "Drink twice and sit on the floor alone.", "heat": 2},
-        {"type": "DO",    "dare": "Whisper something you'd actually do to someone in this room into their ear. They can't repeat it.", "drink": "Drink three fingers and live with the curiosity.", "heat": 3},
-        {"type": "DO",    "dare": "Give the person to your right a slow neck massage for 30 seconds. Make it count.", "drink": "Drink and let them know you're scared of your own hands.", "heat": 2},
-        {"type": "TRUTH", "dare": "Describe out loud, in detail, what you'd do to the most attractive person in this room if you had them alone tonight.", "drink": "Drink four fingers and keep that fantasy to yourself then.", "heat": 3},
-        {"type": "DO",    "dare": "Trace one finger slowly from the back of someone's neck down to their shoulder blade. They pick who does it to them.", "drink": "Drink and admit you're too scared to touch anyone.", "heat": 2},
-        {"type": "TRUTH", "dare": "What's the most explicit thing you've ever done with someone you just met? Say it out loud.", "drink": "Drink four fingers and keep lying to yourself that you're innocent.", "heat": 3},
-        {"type": "DO",    "dare": "Show the group how you actually kiss — demonstrate on a willing player. No peck. Do it properly.", "drink": "Drink and let everyone wonder what you're hiding.", "heat": 3},
-        {"type": "DO",    "dare": "Remove one item of clothing. Your choice what. It stays off for the next three turns.", "drink": "Drink three fingers and stay fully dressed like a coward.", "heat": 2},
-        {"type": "TRUTH", "dare": "Who in this room do you think about sexually? Say the name. No deflecting, no jokes.", "drink": "Drink five fingers and let us all guess.", "heat": 3},
-        {"type": "DO",    "dare": "Give someone in the room a compliment — but make it explicitly about their body. Say it slowly.", "drink": "Drink and admit you can't handle a little heat.", "heat": 2},
+        {
+            "type": "DO",
+            "dare": "Sit in someone's lap — your choice who — and stay there for the next two turns.",
+            "drink": "Drink twice and sit on the floor alone.",
+            "heat": 2,
+        },
+        {
+            "type": "DO",
+            "dare": "Whisper something you'd actually do to someone in this room into their ear. They can't repeat it.",
+            "drink": "Drink three fingers and live with the curiosity.",
+            "heat": 3,
+        },
+        {
+            "type": "DO",
+            "dare": "Give the person to your right a slow neck massage for 30 seconds. Make it count.",
+            "drink": "Drink and let them know you're scared of your own hands.",
+            "heat": 2,
+        },
+        {
+            "type": "TRUTH",
+            "dare": "Describe out loud, in detail, what you'd do to the most attractive person in this room if you had them alone tonight.",
+            "drink": "Drink four fingers and keep that fantasy to yourself then.",
+            "heat": 3,
+        },
+        {
+            "type": "DO",
+            "dare": "Trace one finger slowly from the back of someone's neck down to their shoulder blade. They pick who does it to them.",
+            "drink": "Drink and admit you're too scared to touch anyone.",
+            "heat": 2,
+        },
+        {
+            "type": "TRUTH",
+            "dare": "What's the most explicit thing you've ever done with someone you just met? Say it out loud.",
+            "drink": "Drink four fingers and keep lying to yourself that you're innocent.",
+            "heat": 3,
+        },
+        {
+            "type": "DO",
+            "dare": "Show the group how you actually kiss — demonstrate on a willing player. No peck. Do it properly.",
+            "drink": "Drink and let everyone wonder what you're hiding.",
+            "heat": 3,
+        },
+        {
+            "type": "DO",
+            "dare": "Remove one item of clothing. Your choice what. It stays off for the next three turns.",
+            "drink": "Drink three fingers and stay fully dressed like a coward.",
+            "heat": 2,
+        },
+        {
+            "type": "TRUTH",
+            "dare": "Who in this room do you think about sexually? Say the name. No deflecting, no jokes.",
+            "drink": "Drink five fingers and let us all guess.",
+            "heat": 3,
+        },
+        {
+            "type": "DO",
+            "dare": "Give someone in the room a compliment — but make it explicitly about their body. Say it slowly.",
+            "drink": "Drink and admit you can't handle a little heat.",
+            "heat": 2,
+        },
     ]
+
     if mode == "regular":
         return random.sample(regular, min(12, len(regular)))
     if mode == "kinky":
@@ -287,9 +462,16 @@ def _fallback_dares(player_name: str, mode: str) -> list:
     return pool
 
 
-def generate_dares_for_player(player_name, vice_summary, group_profile,
-                               any_group_has_data, mode, client) -> list:
+def generate_dares_for_player(
+    player_name: str,
+    vice_summary: dict,
+    group_profile: dict,
+    any_group_has_data: bool,
+    mode: str,
+    client,
+) -> list:
     has_own = _has_data(vice_summary)
+
     if has_own:
         prompt   = _prompt_personalised(player_name, vice_summary, mode)
         strategy = "personalised"
@@ -313,7 +495,9 @@ def generate_dares_for_player(player_name, vice_summary, group_profile,
         raise ValueError("Parsed 0 valid dares.")
     except Exception as e:
         existing = st.session_state.get("dod_error", "")
-        st.session_state.dod_error = f"{existing}\n[{player_name} · {strategy}] {e}".strip()
+        st.session_state.dod_error = (
+            f"{existing}\n[{player_name} · {strategy}] {e}".strip()
+        )
         return _fallback_dares(player_name, mode)
 
 
@@ -321,16 +505,16 @@ def generate_dares_for_player(player_name, vice_summary, group_profile,
 
 def init_state():
     defaults = {
-        "dod_phase":    "setup",
-        "dod_mode":     "regular",
-        "dod_players":  [],
-        "dod_dares":    {},
-        "dod_deck":     [],
-        "dod_cur_card": None,
-        "dod_scores":   {},
-        "dod_history":  [],
-        "dod_error":    "",
-        "dod_timer_start": None,   # timestamp when current card was drawn
+        "dod_phase":       "setup",
+        "dod_mode":        "regular",
+        "dod_players":     [],
+        "dod_dares":       {},
+        "dod_deck":        [],
+        "dod_cur_card":    None,
+        "dod_scores":      {},
+        "dod_history":     [],
+        "dod_error":       "",
+        "dod_timer_start": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
