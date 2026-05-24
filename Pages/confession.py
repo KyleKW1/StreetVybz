@@ -802,3 +802,267 @@ def confessions_page():
                 with st.expander(f"Exchange with {other} · {ts}", expanded=False):
                     _render_revealed(item, is_sender=is_s)
                     _reaction_stamps(item["code"])
+
+
+
+
+
+
+# ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+VICE_META = {
+    "weed":    {"label": "Weed",     "icon": "🌿", "color": "#c6ff00"},
+    "alcohol": {"label": "Alcohol",  "icon": "🥃", "color": "#ffb300"},
+    "sex":     {"label": "Sex",      "icon": "🔥", "color": "#ff2d78"},
+    "other":   {"label": "Other",    "icon": "💊", "color": "#00e5ff"},
+    None:      {"label": "General",  "icon": "◈",  "color": "#9090aa"},
+}
+
+
+def _uid():
+    u = st.session_state.get("user", {})
+    return u.get("id") if u else None
+
+
+def _db(fn, *args, default=None, **kwargs):
+    try:
+        import database as db
+        return getattr(db, fn)(*args, **kwargs)
+    except Exception:
+        return default
+
+
+def _ts_short(dt) -> str:
+    if dt is None:
+        return ""
+    s = str(dt)[:16]
+    return s
+
+
+def _time_ago(dt) -> str:
+    if dt is None:
+        return ""
+    try:
+        from datetime import datetime
+        if hasattr(dt, "timestamp"):
+            diff = int((datetime.now() - dt).total_seconds())
+        else:
+            diff = int((datetime.now() - datetime.fromisoformat(str(dt))).total_seconds())
+        if diff < 3600:
+            return f"{diff // 60}m ago"
+        if diff < 86400:
+            return f"{diff // 3600}h ago"
+        return f"{diff // 86400}d ago"
+    except Exception:
+        return str(dt)[:10]
+
+
+def _section_label(text):
+    st.html(
+        f'<div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:3px;'
+        f'text-transform:uppercase;color:var(--muted);margin-bottom:12px;">{text}</div>'
+    )
+
+
+# ─── POST FORM ────────────────────────────────────────────────────────────────
+
+def _render_post_form():
+    """Form to post a new anonymous confession to the public board."""
+    inject_page_css()
+
+    st.html("""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-top:2px solid var(--magenta); border-radius:4px;
+            padding:18px 20px; margin-bottom:20px;">
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.85;">
+    Post anonymously. Nobody sees who wrote it — just what you wrote.
+    Others can reply the same way. Good for when you need to say something
+    out loud without saying it to anyone in particular.
+  </div>
+</div>
+""")
+
+    st.session_state.setdefault("pcb_gen", 0)
+    gen = st.session_state.pcb_gen
+
+    vice = st.selectbox(
+        "Tag it (optional)",
+        ["None", "Weed 🌿", "Alcohol 🥃", "Sex 🔥", "Other 💊"],
+        key=f"pcb_vice_{gen}",
+        index=0,
+    )
+    vice_map = {"None": None, "Weed 🌿": "weed", "Alcohol 🥃": "alcohol",
+                "Sex 🔥": "sex", "Other 💊": "other"}
+    vice_key = vice_map[vice]
+
+    content = st.text_area(
+        "Your confession",
+        placeholder="Say it. Nobody knows it's you.",
+        key=f"pcb_content_{gen}",
+        height=120,
+        max_chars=1000,
+    )
+
+    if st.button("Post anonymously →", type="primary", use_container_width=True,
+                 key=f"pcb_submit_{gen}"):
+        uid = _uid()
+        if not uid:
+            st.error("Log in to post.")
+            return
+        text = (content or "").strip()
+        if len(text) < 10:
+            st.error("Write at least 10 characters.")
+            return
+        result = _db("save_public_confession", uid, text, vice_key)
+        if result:
+            st.session_state.pcb_gen += 1
+            st.success("Posted. It's out there.")
+            st.rerun()
+        else:
+            st.error("Something went wrong — try again.")
+
+
+# ─── BOARD VIEW ───────────────────────────────────────────────────────────────
+
+def _render_confession_card(item: dict, expand_replies: bool = False):
+    """Single board post with inline reply thread."""
+    cid      = item["id"]
+    content  = item.get("content", "")
+    vice     = item.get("vice")
+    replies  = item.get("reply_count", 0)
+    meta     = VICE_META.get(vice, VICE_META[None])
+    ago      = _time_ago(item.get("created_at"))
+
+    st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-left:3px solid {meta['color']}; border-radius:4px;
+            padding:16px 18px; margin-bottom:4px;">
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:1px;
+                text-transform:uppercase; color:{meta['color']};">
+      {meta['icon']} {meta['label']}
+    </div>
+    <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">{ago}</div>
+  </div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text);
+              line-height:1.7; margin-bottom:10px; font-style:italic;">"{content}"</div>
+  <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);
+              letter-spacing:1px; text-transform:uppercase;">
+    Anonymous · {replies} {'reply' if replies == 1 else 'replies'}
+  </div>
+</div>
+""")
+
+    # Reply thread
+    with st.expander(
+        f"{'▸ Read replies' if replies else '▸ Be the first to reply'}", expanded=expand_replies
+    ):
+        thread = _db("load_public_replies", cid, default=[])
+
+        if thread:
+            for reply in thread:
+                reply_ago = _time_ago(reply.get("created_at"))
+                st.html(f"""
+<div style="background:var(--surface); border-left:2px solid var(--border);
+            border-radius:0 3px 3px 0; padding:10px 14px; margin-bottom:8px;">
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
+              line-height:1.6; font-style:italic;">"{reply['content']}"</div>
+  <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);
+              margin-top:4px; letter-spacing:1px; text-transform:uppercase;">
+    Anonymous · {reply_ago}
+  </div>
+</div>
+""")
+        else:
+            st.html("""
+<div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);
+            padding:8px 0 4px; font-style:italic;">
+  No replies yet. Be the first.
+</div>
+""")
+
+        # Reply input
+        uid = _uid()
+        if uid:
+            reply_text = st.text_area(
+                "Your reply",
+                placeholder="Reply anonymously…",
+                key=f"pcb_reply_text_{cid}",
+                height=72,
+                label_visibility="collapsed",
+            )
+            if st.button("Reply →", key=f"pcb_reply_btn_{cid}", use_container_width=True):
+                text = (reply_text or "").strip()
+                if len(text) < 5:
+                    st.error("Write at least 5 characters.")
+                elif _db("save_public_reply", cid, uid, text):
+                    st.rerun()
+                else:
+                    st.error("Couldn't post reply.")
+        else:
+            st.info("Log in to reply.")
+
+    st.html("<div style='height:8px'></div>")
+
+
+# ─── MAIN BOARD RENDERER ──────────────────────────────────────────────────────
+
+def render_public_board():
+    inject_page_css()
+    _section_label("Community Board — anonymous confessions")
+
+    st.html("""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-radius:4px; padding:12px 16px; margin-bottom:20px;">
+  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); line-height:1.75;">
+    Everyone here is anonymous. No usernames. No receipts.
+    Post something you'd never say with your name on it.
+    Reply to anything that resonates.
+  </div>
+</div>
+""")
+
+    # ── Filter bar ────────────────────────────────────────────────────────────
+    st.html("""<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:8px;">Filter by</div>""")
+    filter_options = {"All": None, "🌿 Weed": "weed", "🥃 Alcohol": "alcohol",
+                      "🔥 Sex": "sex", "💊 Other": "other"}
+    st.session_state.setdefault("pcb_filter", None)
+
+    fcols = st.columns(len(filter_options))
+    for i, (label, val) in enumerate(filter_options.items()):
+        with fcols[i]:
+            active = st.session_state.pcb_filter == val
+            if st.button(label, key=f"pcb_f_{i}", use_container_width=True,
+                         type="primary" if active else "secondary"):
+                st.session_state.pcb_filter = val
+                st.rerun()
+
+    st.html("<div style='height:1rem'></div>")
+
+    # ── Post form ─────────────────────────────────────────────────────────────
+    with st.expander("◈  Post something", expanded=False):
+        _render_post_form()
+
+    st.html("<div style='height:0.5rem'></div>")
+    st.html("""<div style="height:1px; background:var(--border); margin-bottom:20px;"></div>""")
+
+    # ── Feed ──────────────────────────────────────────────────────────────────
+    active_filter = st.session_state.pcb_filter
+    posts = _db("load_public_confessions", 30, 0, active_filter, default=[])
+
+    if not posts:
+        st.html("""
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:60px; text-align:center;">
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:3px;
+              color:var(--muted); margin-bottom:8px;">NOTHING YET</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted);">
+    Be the first. Post something.
+  </div>
+</div>
+""")
+        return
+
+    for item in posts:
+        _render_confession_card(item)
