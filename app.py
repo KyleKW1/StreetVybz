@@ -221,8 +221,8 @@ def _render_feature(feature: str):
         elif phase == "gameover":   render_game_over()
 
     elif feature == "confess":
-        from Pages.confession import confession_page
-        confession_page()
+         from Pages.confession import confessions_page
+         confessions_page()
 
     elif feature == "profile":
         from Pages.profile import profile_page
