@@ -1,7 +1,10 @@
 """
 Pages/do_or_drink_core.py
 Prompt building, OpenAI generation, fallback dares, and session-state helpers.
-Imported by do_or_drink_ui.py and do_or_drink.py.
+
+Performance improvement: _player_vice_summary results are cached in session_state
+with a 5-minute TTL. The DoD setup screen no longer hits the DB on every render
+for players whose data hasn't changed.
 """
 
 import json
@@ -19,8 +22,6 @@ _VICE_LABELS = {
 }
 
 # ─── HIDDEN DESIRE SIGNAL MAPS ────────────────────────────────────────────────
-# Maps hd_01…hd_15 IDs (stored in quiz_results.dim_scores → hd_full)
-# to the signal names used in prompts.
 
 HD_ID_TO_SIGNAL = {
     "hd_01": "power_dynamic_latent",
@@ -40,13 +41,15 @@ HD_ID_TO_SIGNAL = {
     "hd_15": "verbal_latent",
 }
 
-# Maps the string answer stored in hd_full → numeric weight for ranking.
 HD_SCORE_MAP = {
     "strongly": 3,
     "yes":      2,
     "maybe":    1,
     "nope":     0,
 }
+
+# TTL for player summary cache (seconds)
+_SUMMARY_CACHE_TTL = 300  # 5 minutes
 
 
 # ─── DB WRAPPER ───────────────────────────────────────────────────────────────
@@ -68,6 +71,27 @@ def _me():
 
 
 def _player_vice_summary(user_id: int) -> dict:
+    """
+    Load vice log + quiz profile for a player.
+    Results are cached in session_state for _SUMMARY_CACHE_TTL seconds
+    so the DoD setup screen doesn't hit the DB on every button click.
+    """
+    cache_key  = f"_dod_vs_{user_id}"
+    cache_time = f"_dod_vs_ts_{user_id}"
+
+    cached_at = st.session_state.get(cache_time, 0)
+    if st.session_state.get(cache_key) and (time.time() - cached_at) < _SUMMARY_CACHE_TTL:
+        return st.session_state[cache_key]
+
+    # Cache miss — fetch from DB
+    result = _fetch_player_summary(user_id)
+    st.session_state[cache_key]  = result
+    st.session_state[cache_time] = time.time()
+    return result
+
+
+def _fetch_player_summary(user_id: int) -> dict:
+    """Actual DB fetch — called only on cache miss."""
     try:
         import database as db
         entries = db.load_vice_log(user_id)
@@ -83,8 +107,6 @@ def _player_vice_summary(user_id: int) -> dict:
         if conn:
             try:
                 cur = conn.cursor(dictionary=True)
-                # quiz_type is now 'rbtl_v4_*'
-                # profile identity lives in result_name / result_meta
                 cur.execute(
                     """SELECT result_name, result_meta, dim_scores
                        FROM quiz_results
@@ -103,10 +125,7 @@ def _player_vice_summary(user_id: int) -> dict:
                         except Exception:
                             raw_dim = {}
 
-                    # hd_full: {"hd_01": "yes", "hd_06": "strongly", ...}
                     hd_full = raw_dim.get("hd_full", {})
-
-                    # Convert to {signal_name: numeric_score}, drop scores of 0
                     signal_scores = {}
                     for hd_id, answer in hd_full.items():
                         signal = HD_ID_TO_SIGNAL.get(hd_id)
@@ -127,6 +146,12 @@ def _player_vice_summary(user_id: int) -> dict:
 
     except Exception:
         return {}
+
+
+def invalidate_player_summary_cache(user_id: int):
+    """Call after a new vice log entry to force fresh data on next DoD setup render."""
+    st.session_state.pop(f"_dod_vs_{user_id}", None)
+    st.session_state.pop(f"_dod_vs_ts_{user_id}", None)
 
 
 def _has_data(vice_summary: dict) -> bool:
@@ -157,7 +182,6 @@ def build_group_profile(players: list) -> dict:
             quiz_profiles.append(quiz)
     group = {"counts": combined_counts, "sample_details": combined_details}
     if quiz_profiles:
-        # Pick the profile with the most signal data
         group["quiz"] = max(quiz_profiles, key=lambda q: len(q.get("dim_scores", {})))
     return group
 
@@ -187,7 +211,6 @@ def _profile_text(vice_summary: dict) -> str:
     quiz    = vice_summary.get("quiz", {})
     lines   = []
 
-    # Vice counts + one detail per vice
     for vk, cnt in counts.items():
         label = _VICE_LABELS.get(vk, vk)
         d     = details.get(vk, {})
@@ -198,11 +221,8 @@ def _profile_text(vice_summary: dict) -> str:
         elif vk == "other"  and d.get("substance"):    extra = f" ({d['substance']})"
         lines.append(f"- {label} ({cnt} session{'s' if cnt != 1 else ''}{extra})")
 
-    # Desire profile from RBTL quiz — result_name / result_meta + signal scores
     if quiz.get("profile_name"):
-        signal_scores = quiz.get("dim_scores", {})   # {signal_name: 1–3}
-
-        # Show signals the user said yes/strongly to (score >= 2), ranked strongest first
+        signal_scores = quiz.get("dim_scores", {})
         top_signals = sorted(
             ((s, v) for s, v in signal_scores.items() if v >= 2),
             key=lambda x: -x[1],
@@ -215,7 +235,6 @@ def _profile_text(vice_summary: dict) -> str:
                 for s, v in top_signals
             )
         else:
-            # Fall back to the pre-formatted hd_signals string if no strong signals
             sig_str = quiz.get("hd_signals", "") or "none surfaced"
 
         lines.append(
