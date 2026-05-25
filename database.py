@@ -1368,3 +1368,400 @@ def save_read_between_lines_result(user_id, profile_name, profile_meta, dim_scor
         return False
     finally:
         conn.close()
+
+# ── DDL to add inside ensure_tables() ────────────────────────────────────────
+
+NEW_DDL = [
+    """
+    CREATE TABLE IF NOT EXISTS dod_rooms (
+        room_code       VARCHAR(6) NOT NULL PRIMARY KEY,
+        host_id         INT NOT NULL,
+        host_username   VARCHAR(128) NOT NULL,
+        players         JSON NOT NULL DEFAULT ('[]'),
+        mode            VARCHAR(16) NOT NULL DEFAULT 'regular',
+        status          VARCHAR(16) NOT NULL DEFAULT 'waiting',
+        created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_dod_host   (host_id),
+        INDEX idx_dod_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+]
+
+# ─── VICE LOG — single entry delete ──────────────────────────────────────────
+
+def delete_vice_entry(entry_id: int, user_id: int) -> bool:
+    """Delete a single vice log entry. user_id guard prevents cross-user deletion."""
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM vice_log WHERE id = %s AND user_id = %s",
+            (entry_id, user_id)
+        )
+        conn.commit()
+        deleted = cur.rowcount > 0
+        cur.close()
+        return deleted
+    except Exception as e:
+        st.error(f"Error deleting entry: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+# ─── CLEAN DAYS PER VICE ──────────────────────────────────────────────────────
+
+def get_last_logged_per_vice(user_id: int) -> dict:
+    """
+    Returns {vice: last_logged_at datetime} for each vice the user has logged.
+    Used to compute "days clean" per vice on the goals page.
+    """
+    conn = create_connection()
+    if not conn:
+        return {}
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT vice, MAX(logged_at) AS last_logged
+               FROM vice_log
+               WHERE user_id = %s
+               GROUP BY vice""",
+            (user_id,)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return {r["vice"]: r["last_logged"] for r in rows}
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+
+
+# ─── DATA EXPORT ──────────────────────────────────────────────────────────────
+
+def export_user_data(user_id: int) -> dict:
+    """
+    Returns all user data as a serialisable dict for JSON download.
+    Covers vice log, quiz results, goals, hot takes.
+    """
+    conn = create_connection()
+    if not conn:
+        return {}
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        cur.execute("SELECT username, email, created_at FROM users WHERE id = %s", (user_id,))
+        user = cur.fetchone() or {}
+        if user.get("created_at"):
+            user["created_at"] = str(user["created_at"])
+
+        cur.execute(
+            "SELECT vice, logged_at, details FROM vice_log WHERE user_id = %s ORDER BY logged_at DESC",
+            (user_id,)
+        )
+        vice_log = []
+        for row in cur.fetchall():
+            d = row.get("details") or {}
+            if isinstance(d, str):
+                try:
+                    d = json.loads(d)
+                except Exception:
+                    d = {}
+            vice_log.append({
+                "vice": row["vice"],
+                "logged_at": str(row["logged_at"]),
+                "details": d,
+            })
+
+        cur.execute(
+            """SELECT quiz_type, completed_at, result_name, openness_pct, dim_scores
+               FROM quiz_results WHERE user_id = %s ORDER BY completed_at DESC""",
+            (user_id,)
+        )
+        quiz_results = []
+        for row in cur.fetchall():
+            ds = row.get("dim_scores") or {}
+            if isinstance(ds, str):
+                try:
+                    ds = json.loads(ds)
+                except Exception:
+                    ds = {}
+            quiz_results.append({
+                "quiz_type":    row["quiz_type"],
+                "completed_at": str(row["completed_at"]),
+                "result_name":  row["result_name"],
+                "openness_pct": row["openness_pct"],
+                "dim_scores":   ds,
+            })
+
+        cur.execute(
+            "SELECT vice, weekly_limit FROM vice_goals WHERE user_id = %s",
+            (user_id,)
+        )
+        goals = {r["vice"]: r["weekly_limit"] for r in cur.fetchall()}
+
+        cur.execute(
+            "SELECT interaction_type, created_at, payload FROM interactions WHERE user_id = %s ORDER BY created_at DESC",
+            (user_id,)
+        )
+        interactions = []
+        for row in cur.fetchall():
+            p = row.get("payload") or {}
+            if isinstance(p, str):
+                try:
+                    p = json.loads(p)
+                except Exception:
+                    p = {}
+            interactions.append({
+                "type":       row["interaction_type"],
+                "created_at": str(row["created_at"]),
+                "payload":    p,
+            })
+
+        cur.close()
+        return {
+            "user":         user,
+            "vice_log":     vice_log,
+            "quiz_results": quiz_results,
+            "goals":        goals,
+            "interactions": interactions,
+            "exported_at":  __import__("datetime").datetime.now().isoformat(),
+        }
+    except Exception as e:
+        st.error(f"Export error: {e}")
+        return {}
+    finally:
+        conn.close()
+
+
+# ─── ACCOUNT DELETION ─────────────────────────────────────────────────────────
+
+def delete_user_account(user_id: int) -> bool:
+    """
+    Hard delete everything for a user.
+    Cascades: vice_log, quiz_results, goals, interactions,
+    shadow_scores, session_tokens, confessions, public_confessions.
+    """
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        tables = [
+            "vice_log",
+            "quiz_results",
+            "vice_goals",
+            "interactions",
+            "shadow_scores",
+            "session_tokens",
+        ]
+        for table in tables:
+            try:
+                cur.execute(f"DELETE FROM {table} WHERE user_id = %s", (user_id,))
+            except Exception:
+                pass
+
+        # Confessions — anonymise rather than delete (keeps exchange integrity)
+        try:
+            cur.execute(
+                "DELETE FROM confessions WHERE sender_id = %s AND status = 'sent'",
+                (user_id,)
+            )
+        except Exception:
+            pass
+
+        # Public confessions — leave content, mark author anonymous
+        try:
+            cur.execute(
+                "UPDATE public_confessions SET author_id = 0 WHERE author_id = %s",
+                (user_id,)
+            )
+        except Exception:
+            pass
+
+        cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+        conn.commit()
+        cur.close()
+        return True
+    except Exception as e:
+        st.error(f"Account deletion error: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+# ─── DO OR DRINK ROOMS ────────────────────────────────────────────────────────
+
+def create_dod_room(host_id: int, host_username: str, mode: str) -> str | None:
+    """Create a room and return the 6-char code, or None on failure."""
+    import secrets
+    import string
+    conn = create_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor()
+        for _ in range(10):  # retry until unique code found
+            code = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
+            host_player = json.dumps([{"username": host_username, "user_id": host_id, "is_host": True}])
+            try:
+                cur.execute(
+                    """INSERT INTO dod_rooms (room_code, host_id, host_username, players, mode)
+                       VALUES (%s, %s, %s, %s, %s)""",
+                    (code, host_id, host_username, host_player, mode)
+                )
+                conn.commit()
+                cur.close()
+                return code
+            except mysql.connector.IntegrityError:
+                continue  # code collision, retry
+        cur.close()
+        return None
+    except Exception as e:
+        st.error(f"Room creation error: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def join_dod_room(room_code: str, user_id: int, username: str) -> dict | None:
+    """
+    Add a player to a room. Returns the room dict on success, None on failure.
+    Returns the string 'already_in' if player is already in the room.
+    Returns the string 'not_found' if room doesn't exist.
+    """
+    conn = create_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT * FROM dod_rooms WHERE room_code = %s AND status = 'waiting'",
+            (room_code.upper(),)
+        )
+        room = cur.fetchone()
+        if not room:
+            cur.close()
+            return "not_found"
+
+        players = room.get("players") or []
+        if isinstance(players, str):
+            try:
+                players = json.loads(players)
+            except Exception:
+                players = []
+
+        if any(p.get("user_id") == user_id for p in players):
+            cur.close()
+            return "already_in"
+
+        players.append({"username": username, "user_id": user_id, "is_host": False})
+        cur.execute(
+            "UPDATE dod_rooms SET players = %s WHERE room_code = %s",
+            (json.dumps(players), room_code.upper())
+        )
+        conn.commit()
+        room["players"] = players
+        cur.close()
+        return room
+    except Exception as e:
+        st.error(f"Room join error: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def get_dod_room(room_code: str) -> dict | None:
+    conn = create_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM dod_rooms WHERE room_code = %s", (room_code.upper(),))
+        room = cur.fetchone()
+        cur.close()
+        if room:
+            players = room.get("players") or []
+            if isinstance(players, str):
+                try:
+                    room["players"] = json.loads(players)
+                except Exception:
+                    room["players"] = []
+        return room
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+def close_dod_room(room_code: str) -> None:
+    conn = create_connection()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE dod_rooms SET status = 'closed' WHERE room_code = %s",
+            (room_code,)
+        )
+        conn.commit()
+        cur.close()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
+def cleanup_old_dod_rooms() -> None:
+    """Delete rooms older than 24 hours."""
+    conn = create_connection()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM dod_rooms WHERE created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)"
+        )
+        conn.commit()
+        cur.close()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
+# ─── RBTL RESULT HISTORY ──────────────────────────────────────────────────────
+
+def load_rbtl_history(user_id: int, limit: int = 5) -> list:
+    """Load past RBTL quiz completions for the profile / history view."""
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT result_name, result_meta, openness_pct, total_pts, completed_at, dim_scores
+               FROM quiz_results
+               WHERE user_id = %s AND quiz_type = 'rbtl_v4_profile_complete'
+               ORDER BY completed_at DESC
+               LIMIT %s""",
+            (user_id, limit)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        for row in rows:
+            row["completed_at"] = str(row.get("completed_at", ""))[:16]
+            ds = row.get("dim_scores") or {}
+            if isinstance(ds, str):
+                try:
+                    ds = json.loads(ds)
+                except Exception:
+                    ds = {}
+            row["dim_scores"] = ds
+        return rows
+    except Exception:
+        return []
+    finally:
+        conn.close()
