@@ -1591,30 +1591,110 @@ def export_user_data(user_id: int) -> dict:
  
 def delete_user_account(user_id: int) -> bool:
     """
-    Hard delete everything for a user.
-    Cascades: vice_log, quiz_results, goals, interactions,
-    shadow_scores, session_tokens, confessions, public_confessions.
+    Archives all user data to deleted_user_archive, then hard-deletes.
+    The archive is permanent and not exposed anywhere in the app.
     """
     conn = create_connection()
     if not conn:
         return False
     try:
+        cur = conn.cursor(dictionary=True)
+
+        # ── 1. Collect everything before touching a single row ────────────────
+        cur.execute("SELECT username, email FROM users WHERE id = %s", (user_id,))
+        user_row = cur.fetchone() or {}
+
+        cur.execute(
+            "SELECT vice, logged_at, details FROM vice_log WHERE user_id = %s",
+            (user_id,)
+        )
+        vice_log_rows = []
+        for r in cur.fetchall():
+            d = r.get("details") or {}
+            if isinstance(d, str):
+                try: d = json.loads(d)
+                except Exception: d = {}
+            vice_log_rows.append({
+                "vice": r["vice"],
+                "logged_at": str(r["logged_at"]),
+                "details": d,
+            })
+
+        cur.execute(
+            """SELECT quiz_type, completed_at, result_name, openness_pct,
+                      dim_scores, recommendations, answers
+               FROM quiz_results WHERE user_id = %s""",
+            (user_id,)
+        )
+        quiz_rows = []
+        for r in cur.fetchall():
+            for col in ("dim_scores", "recommendations", "answers"):
+                v = r.get(col)
+                if isinstance(v, str):
+                    try: r[col] = json.loads(v)
+                    except Exception: r[col] = {}
+            r["completed_at"] = str(r.get("completed_at", ""))
+            quiz_rows.append(r)
+
+        cur.execute(
+            "SELECT vice, weekly_limit FROM vice_goals WHERE user_id = %s",
+            (user_id,)
+        )
+        goals_rows = {r["vice"]: r["weekly_limit"] for r in cur.fetchall()}
+
+        cur.execute(
+            "SELECT interaction_type, created_at, payload FROM interactions WHERE user_id = %s",
+            (user_id,)
+        )
+        interaction_rows = []
+        for r in cur.fetchall():
+            p = r.get("payload") or {}
+            if isinstance(p, str):
+                try: p = json.loads(p)
+                except Exception: p = {}
+            interaction_rows.append({
+                "type": r["interaction_type"],
+                "created_at": str(r["created_at"]),
+                "payload": p,
+            })
+
+        cur.execute(
+            "SELECT * FROM shadow_scores WHERE user_id = %s", (user_id,)
+        )
+        shadow_row = cur.fetchone() or {}
+
+        # ── 2. Write archive row ──────────────────────────────────────────────
+        # Use a regular (non-dict) cursor for the INSERT
+        cur.close()
         cur = conn.cursor()
-        tables = [
-            "vice_log",
-            "quiz_results",
-            "vice_goals",
-            "interactions",
-            "shadow_scores",
-            "session_tokens",
-        ]
-        for table in tables:
+        cur.execute(
+            """INSERT INTO deleted_user_archive
+               (original_user_id, username, email,
+                vice_log, quiz_results, goals, interactions, shadow_scores)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            (
+                user_id,
+                user_row.get("username", ""),
+                user_row.get("email", ""),
+                json.dumps(vice_log_rows,    default=str),
+                json.dumps(quiz_rows,        default=str),
+                json.dumps(goals_rows,       default=str),
+                json.dumps(interaction_rows, default=str),
+                json.dumps(shadow_row,       default=str),
+            )
+        )
+
+        # ── 3. Delete live data ───────────────────────────────────────────────
+        for table in [
+            "vice_log", "quiz_results", "vice_goals",
+            "interactions", "shadow_scores", "session_tokens",
+        ]:
             try:
                 cur.execute(f"DELETE FROM {table} WHERE user_id = %s", (user_id,))
             except Exception:
                 pass
- 
-        # Confessions — anonymise rather than delete (keeps exchange integrity)
+
+        # Confessions — remove unsent ones, leave revealed exchanges intact
         try:
             cur.execute(
                 "DELETE FROM confessions WHERE sender_id = %s AND status = 'sent'",
@@ -1622,8 +1702,8 @@ def delete_user_account(user_id: int) -> bool:
             )
         except Exception:
             pass
- 
-        # Public confessions — leave content, mark author anonymous
+
+        # Public confessions — anonymise rather than delete
         try:
             cur.execute(
                 "UPDATE public_confessions SET author_id = 0 WHERE author_id = %s",
@@ -1631,13 +1711,18 @@ def delete_user_account(user_id: int) -> bool:
             )
         except Exception:
             pass
- 
+
         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
         conn.commit()
         cur.close()
         return True
+
     except Exception as e:
         st.error(f"Account deletion error: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return False
     finally:
         conn.close()
