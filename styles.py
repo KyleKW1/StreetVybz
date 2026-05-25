@@ -13,6 +13,9 @@ _BASE_CSS = """
   --border:#2a2a35; --lime:#c6ff00; --magenta:#ff2d78;
   --cyan:#00e5ff; --amber:#ffb300;
   --text:#f0f0f5; --muted:#5a5a72; --soft:#9090aa;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-lg: 16px;
 }
 
 * { box-sizing: border-box; }
@@ -48,7 +51,7 @@ section[data-testid="stSidebar"] .stButton > button {
   background: transparent !important;
   border: 1px solid var(--border) !important;
   color: #c8c8d8 !important;
-  border-radius: 4px !important;
+  border-radius: var(--radius-sm) !important;
   font-family: 'Space Mono', monospace !important;
   font-size: 11px !important;
   letter-spacing: 1px !important;
@@ -58,7 +61,7 @@ section[data-testid="stSidebar"] .stButton > button {
   box-shadow: none !important;
 }
 section[data-testid="stSidebar"] .stButton > button:hover {
-  background: #1a1a20 !important;
+  background: rgba(198,255,0,0.06) !important;
   border-color: var(--lime) !important;
   color: var(--lime) !important;
   box-shadow: none !important;
@@ -66,31 +69,32 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 }
 /* Active sidebar item (primary type) */
 section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
-  background: #1a1a20 !important;
+  background: rgba(198,255,0,0.10) !important;
   border-color: var(--lime) !important;
   color: var(--lime) !important;
   font-weight: 700 !important;
 }
 
-/* ── Global buttons — must beat Streamlit's theme ────────────── */
+/* ── Global buttons ───────────────────────────────────────────── */
 .stButton > button,
 button[kind="secondary"],
 button[data-testid="baseButton-secondary"] {
   background: var(--card) !important;
   color: var(--soft) !important;
   border: 1px solid var(--border) !important;
-  border-radius: 3px !important;
+  border-radius: var(--radius-sm) !important;
   font-family: 'Space Mono', monospace !important;
   font-size: 10px !important;
   letter-spacing: 1.5px !important;
   text-transform: uppercase !important;
-  transition: all 0.15s !important;
+  transition: all 0.18s ease !important;
   box-shadow: none !important;
 }
 .stButton > button:hover {
   border-color: var(--lime) !important;
   color: var(--lime) !important;
-  box-shadow: none !important;
+  background: rgba(198,255,0,0.05) !important;
+  box-shadow: 0 2px 12px rgba(198,255,0,0.08) !important;
   transform: none !important;
 }
 
@@ -101,19 +105,20 @@ button[data-testid="baseButton-primary"] {
   background: var(--lime) !important;
   color: #0a0a0b !important;
   border: 1px solid var(--lime) !important;
-  border-radius: 3px !important;
+  border-radius: var(--radius-sm) !important;
   font-family: 'Space Mono', monospace !important;
   font-size: 10px !important;
   letter-spacing: 1.5px !important;
   text-transform: uppercase !important;
   font-weight: 700 !important;
-  box-shadow: none !important;
+  box-shadow: 0 2px 14px rgba(198,255,0,0.18) !important;
+  transition: all 0.18s ease !important;
 }
 .stButton > button[kind="primary"]:hover {
   background: #d4ff1a !important;
   border-color: #d4ff1a !important;
   color: #0a0a0b !important;
-  box-shadow: 0 0 20px rgba(198,255,0,0.2) !important;
+  box-shadow: 0 4px 24px rgba(198,255,0,0.28) !important;
   transform: none !important;
 }
 .stButton > button[kind="primary"]:disabled,
@@ -122,6 +127,7 @@ button[data-testid="baseButton-primary"] {
   color: var(--muted) !important;
   border-color: var(--border) !important;
   opacity: 0.5 !important;
+  box-shadow: none !important;
 }
 
 /* ── Inputs ───────────────────────────────────────────────────── */
@@ -133,15 +139,17 @@ input[type="password"],
 textarea {
   background: var(--card) !important;
   border: 1px solid var(--border) !important;
-  border-radius: 3px !important;
+  border-radius: var(--radius-sm) !important;
   color: var(--text) !important;
   font-family: 'DM Sans', sans-serif !important;
+  transition: border-color 0.15s, box-shadow 0.15s !important;
 }
 .stTextInput > div > div > input:focus,
 .stNumberInput > div > div > input:focus,
 .stTextArea > div > div > textarea:focus {
   border-color: var(--lime) !important;
-  box-shadow: 0 0 0 2px rgba(198,255,0,0.12) !important;
+  box-shadow: 0 0 0 3px rgba(198,255,0,0.10) !important;
+  outline: none !important;
 }
 .stTextInput label,
 .stNumberInput label,
@@ -163,12 +171,13 @@ textarea {
 .stSelectbox > div > div > div {
   background: var(--card) !important;
   border: 1px solid var(--border) !important;
-  border-radius: 3px !important;
+  border-radius: var(--radius-sm) !important;
   color: var(--text) !important;
 }
 div[data-baseweb="select"] > div {
   background: var(--card) !important;
   border-color: var(--border) !important;
+  border-radius: var(--radius-sm) !important;
   color: var(--text) !important;
 }
 
@@ -176,15 +185,20 @@ div[data-baseweb="select"] > div {
 div[data-testid="stRadio"] > div > label {
   background: var(--card) !important;
   border: 1px solid var(--border) !important;
-  border-radius: 3px !important;
+  border-radius: var(--radius-sm) !important;
   color: var(--soft) !important;
   font-family: 'Space Mono', monospace !important;
   font-size: 10px !important;
+  transition: all 0.15s !important;
+}
+div[data-testid="stRadio"] > div > label:hover {
+  border-color: var(--lime) !important;
+  color: var(--lime) !important;
 }
 div[data-testid="stRadio"] > div > label[data-checked="true"] {
-  background: var(--lime) !important;
+  background: rgba(198,255,0,0.12) !important;
   border-color: var(--lime) !important;
-  color: #0a0a0b !important;
+  color: var(--lime) !important;
 }
 
 /* ── Expander ─────────────────────────────────────────────────── */
@@ -192,7 +206,8 @@ details[data-testid="stExpander"],
 div[data-testid="stExpander"] {
   background: var(--card) !important;
   border: 1px solid var(--border) !important;
-  border-radius: 3px !important;
+  border-radius: var(--radius) !important;
+  overflow: hidden !important;
 }
 details summary,
 div[data-testid="stExpander"] summary {
@@ -201,6 +216,7 @@ div[data-testid="stExpander"] summary {
   font-size: 10px !important;
   letter-spacing: 1px !important;
   text-transform: uppercase !important;
+  border-radius: var(--radius) !important;
 }
 
 /* ── Toggle ───────────────────────────────────────────────────── */
@@ -213,7 +229,7 @@ div[data-testid="stToggle"] label {
 /* ── Alerts / info boxes ──────────────────────────────────────── */
 .stAlert,
 div[data-testid="stAlert"] {
-  border-radius: 3px !important;
+  border-radius: var(--radius-sm) !important;
   font-family: 'DM Sans', sans-serif !important;
   font-size: 13px !important;
   background: var(--card) !important;
@@ -225,18 +241,22 @@ div[data-testid="stAlert"] {
 .stProgress > div > div > div,
 div[data-testid="stProgressBar"] > div {
   background: var(--lime) !important;
+  border-radius: 99px !important;
 }
 .stProgress > div > div {
   background: var(--border) !important;
+  border-radius: 99px !important;
 }
 
 /* ── Toast ────────────────────────────────────────────────────── */
 div[data-testid="stToast"] {
   background: var(--card) !important;
   border: 1px solid var(--lime) !important;
+  border-radius: var(--radius-sm) !important;
   color: var(--text) !important;
   font-family: 'Space Mono', monospace !important;
   font-size: 10px !important;
+  box-shadow: 0 4px 20px rgba(198,255,0,0.12) !important;
 }
 
 /* ── Download button ──────────────────────────────────────────── */
@@ -244,7 +264,7 @@ div[data-testid="stToast"] {
   background: transparent !important;
   color: var(--soft) !important;
   border: 1px solid var(--border) !important;
-  border-radius: 3px !important;
+  border-radius: var(--radius-sm) !important;
   font-family: 'Space Mono', monospace !important;
   font-size: 10px !important;
   letter-spacing: 1.5px !important;
@@ -253,6 +273,7 @@ div[data-testid="stToast"] {
 .stDownloadButton > button:hover {
   border-color: var(--lime) !important;
   color: var(--lime) !important;
+  background: rgba(198,255,0,0.05) !important;
 }
 
 /* ── Markdown / text ──────────────────────────────────────────── */
@@ -263,9 +284,12 @@ div[data-testid="stMarkdownContainer"] p {
 }
 
 /* ── Scrollbar ────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 99px;
+}
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
 /* ── Hide Streamlit chrome ────────────────────────────────────── */
@@ -277,7 +301,22 @@ header[data-testid="stHeader"] { background: transparent !important; }
 .stNumberInput button {
   background: var(--card) !important;
   border-color: var(--border) !important;
+  border-radius: var(--radius-sm) !important;
   color: var(--muted) !important;
+}
+
+/* ── Card-like containers in st.html ─────────────────────────── */
+/* Rounded corners applied globally to any inline card divs       */
+[style*="border-radius:4px"] { border-radius: var(--radius) !important; }
+[style*="border-radius: 4px"] { border-radius: var(--radius) !important; }
+[style*="border-radius:3px"] { border-radius: var(--radius-sm) !important; }
+[style*="border-radius: 3px"] { border-radius: var(--radius-sm) !important; }
+
+/* ── Soft glow on lime-bordered elements ──────────────────────── */
+[style*="border-color:var(--lime)"],
+[style*="border:1px solid var(--lime)"],
+[style*="border-top:2px solid var(--lime)"] {
+  box-shadow: 0 2px 18px rgba(198,255,0,0.06) !important;
 }
 </style>
 """
@@ -287,9 +326,6 @@ def apply_custom_styles():
     """
     Inject base CSS. Safe to call multiple times per render —
     only actually writes to the DOM once per Streamlit rerun.
-
-    Uses a simple boolean flag in session_state rather than ctx id,
-    which was unreliable and caused the UI to skip between themes.
     """
     if not st.session_state.get("_vv_css_injected"):
         st.session_state["_vv_css_injected"] = True
