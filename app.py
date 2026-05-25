@@ -1,15 +1,9 @@
 """
 app.py — ViceVault main entry point.
-
-Sidebar: Dashboard | Log Session | History | Analytics |
-         Read Between The Lines | Where To Go Tonight | Do or Drink | Confessions |
-         Profile | Settings | Logout
-
-New: floating ＋ quick log button, onboarding flow, profile + settings pages.
 """
 
 import streamlit as st
-from styles import apply_custom_styles, inject_page_css
+from styles import apply_custom_styles, inject_page_css, reset_css_flag
 
 # ─── PAGE CONFIG ─────────────────────────────────────────────────────────────
 
@@ -20,12 +14,12 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ─── APPLY GLOBAL STYLES (once per rerun, deduplicated internally) ────────────
+# Reset CSS flag so styles always reinject on every full rerun
+reset_css_flag()
 apply_custom_styles()
 
 # ─── FLOATING QUICK LOG BUTTON ────────────────────────────────────────────────
-# Injects a fixed ＋ button that clicks through to the Log Session page.
-# Uses JS to post a message to Streamlit query params so no external libs needed.
+
 def _inject_floating_log_btn():
     st.html("""
 <style>
@@ -67,11 +61,8 @@ def is_authenticated() -> bool:
 
 
 def logout():
-    keep = {}
     for k in list(st.session_state.keys()):
         del st.session_state[k]
-    for k, v in keep.items():
-        st.session_state[k] = v
     st.rerun()
 
 
@@ -79,7 +70,6 @@ def logout():
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _prewarm_quiz():
-    """Pre-fetch Reddit posts so the quiz feels instant on first open."""
     try:
         import requests, random
         subs = ["relationship_advice", "confession", "tifu", "TrueOffMyChest"]
@@ -161,7 +151,6 @@ def _render_sidebar():
                 btn_type  = "primary" if is_active else "secondary"
                 if st.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
                     st.session_state.selected_feature = key
-                    # Clear onboarding when user navigates away
                     if key != "onboarding":
                         st.session_state.onboarding_done = True
                     st.rerun()
@@ -204,9 +193,6 @@ def _render_feature(feature: str):
 <div style="padding:60px; text-align:center;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:3px;
               color:var(--muted);">COMING SOON</div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-top:8px;">
-    Kingston hotspots map is being set up.
-  </div>
 </div>
 """)
 
@@ -215,14 +201,14 @@ def _render_feature(feature: str):
         from Pages.do_or_drink_core import init_state
         init_state()
         phase = st.session_state.get("dod_phase", "setup")
-        if phase == "setup":       render_setup()
+        if phase == "setup":        render_setup()
         elif phase == "generating": render_generating()
         elif phase == "game":       render_game()
         elif phase == "gameover":   render_game_over()
 
     elif feature == "confess":
-         from Pages.confession import confessions_page
-         confessions_page()
+        from Pages.confession import confessions_page
+        confessions_page()
 
     elif feature == "profile":
         from Pages.profile import profile_page
@@ -250,7 +236,6 @@ def _render_feature(feature: str):
 def _render_auth():
     inject_page_css()
     page = st.session_state.get("page", "login")
-
     if page == "login":
         _login_page()
     elif page == "register":
@@ -272,45 +257,41 @@ def _login_page():
   </div>
 </div>
 """)
+    _, c, _ = st.columns([1, 2, 1])
+    with c:
+        username = st.text_input("Username", key="login_username", placeholder="your_username")
+        password = st.text_input("Password", type="password", key="login_password")
+        st.html("<div style='height:6px'></div>")
+        if st.button("Log In →", type="primary", use_container_width=True, key="login_btn"):
+            if not username or not password:
+                st.error("Enter username and password.")
+            else:
+                try:
+                    import database as db
+                    user = db.authenticate_user(username.strip(), password)
+                    if user:
+                        st.session_state.authenticated = True
+                        st.session_state.user          = user
+                        st.session_state.vice_log      = db.load_vice_log(user["id"])
+                        st.session_state.selected_feature = "stats"
+                        try:
+                            _prewarm_quiz()
+                        except Exception:
+                            pass
+                        st.rerun()
+                    else:
+                        st.error("Wrong username or password.")
+                except Exception as e:
+                    st.error(f"Login error: {e}")
 
-    col, = (st.columns(1),)
-    with st.container():
-        _, c, _ = st.columns([1, 2, 1])
-        with c:
-            username = st.text_input("Username", key="login_username", placeholder="your_username")
-            password = st.text_input("Password", type="password", key="login_password")
-            st.html("<div style='height:6px'></div>")
-            if st.button("Log In →", type="primary", use_container_width=True, key="login_btn"):
-                if not username or not password:
-                    st.error("Enter username and password.")
-                else:
-                    try:
-                        import database as db
-                        user = db.authenticate_user(username.strip(), password)
-                        if user:
-                            st.session_state.authenticated = True
-                            st.session_state.user          = user
-                            st.session_state.vice_log      = db.load_vice_log(user["id"])
-                            st.session_state.selected_feature = "stats"
-                            # Pre-warm quiz in background
-                            try:
-                                _prewarm_quiz()
-                            except Exception:
-                                pass
-                            st.rerun()
-                        else:
-                            st.error("Wrong username or password.")
-                    except Exception as e:
-                        st.error(f"Login error: {e}")
-
-            st.html("<div style='height:8px'></div>")
-            col_r, col_f = st.columns(2)
-            with col_r:
-                if st.button("Create account", use_container_width=True, key="go_register"):
-                    st.session_state.page = "register"; st.rerun()
-            with col_f:
-                if st.button("Forgot password", use_container_width=True, key="go_forgot"):
-                    st.session_state.page = "forgot"; st.rerun()
+        st.html("<div style='height:8px'></div>")
+        col_r, col_f = st.columns(2)
+        with col_r:
+            if st.button("Create account", use_container_width=True, key="go_register"):
+                st.session_state.page = "register"; st.rerun()
+        with col_f:
+            if st.button("Forgot password", use_container_width=True, key="go_forgot"):
+                st.session_state.page = "forgot"; st.rerun()
 
 
 def _register_page():
@@ -322,10 +303,10 @@ def _register_page():
 """)
     _, c, _ = st.columns([1, 2, 1])
     with c:
-        username = st.text_input("Username",        key="reg_username")
-        email    = st.text_input("Email",           key="reg_email")
-        pw       = st.text_input("Password",        type="password", key="reg_pw")
-        pw2      = st.text_input("Confirm password",type="password", key="reg_pw2")
+        username = st.text_input("Username",         key="reg_username")
+        email    = st.text_input("Email",            key="reg_email")
+        pw       = st.text_input("Password",         type="password", key="reg_pw")
+        pw2      = st.text_input("Confirm password", type="password", key="reg_pw2")
         if st.button("Create Account →", type="primary", use_container_width=True, key="reg_btn"):
             if pw != pw2:
                 st.error("Passwords don't match.")
@@ -380,7 +361,6 @@ def _bootstrap_db():
 
 
 def _handle_query_params():
-    """Handle ?vv_action=quick_log from the floating FAB."""
     params = st.query_params
     if params.get("vv_action") == "quick_log":
         st.query_params.clear()
@@ -398,11 +378,9 @@ def main():
         _render_auth()
         return
 
-    # Initialise defaults
     st.session_state.setdefault("selected_feature", "stats")
     st.session_state.setdefault("onboarding_done", False)
 
-    # Check onboarding — new user with no logs
     from Pages.onboarding import should_show_onboarding
     if should_show_onboarding() and not st.session_state.onboarding_done:
         _render_sidebar()
