@@ -4,6 +4,7 @@ import streamlit as st
 
 try:
     import mysql.connector
+    from mysql.connector import pooling
     MYSQL_AVAILABLE = True
 except ImportError:
     MYSQL_AVAILABLE = False
@@ -13,22 +14,67 @@ try:
 except ImportError:
     DB_CONFIG = {}
 
+# ─── CONNECTION POOL ─────────────────────────────────────────────────────────
+# One pool per process, shared across all user sessions on this worker.
+# pool_size=10 handles concurrent users without opening a new TCP connection
+# for every query.
 
-def create_connection():
-    if not MYSQL_AVAILABLE:
+_pool: "pooling.MySQLConnectionPool | None" = None
+
+
+def _get_pool() -> "pooling.MySQLConnectionPool | None":
+    global _pool
+    if _pool is not None:
+        return _pool
+    if not MYSQL_AVAILABLE or not DB_CONFIG.get("host"):
         return None
     try:
-        conn = mysql.connector.connect(
-            host=DB_CONFIG.get('host', ''),
-            port=int(DB_CONFIG.get('port', 3306)),
-            user=DB_CONFIG.get('user', ''),
-            password=DB_CONFIG.get('password', ''),
-            database=DB_CONFIG.get('database', ''),
+        _pool = pooling.MySQLConnectionPool(
+            pool_name="vicevault",
+            pool_size=10,
+            pool_reset_session=True,
+            host=DB_CONFIG.get("host", ""),
+            port=int(DB_CONFIG.get("port", 3306)),
+            user=DB_CONFIG.get("user", ""),
+            password=DB_CONFIG.get("password", ""),
+            database=DB_CONFIG.get("database", ""),
             connection_timeout=30,
             autocommit=False,
             ssl_disabled=True,
         )
-        return conn
+        return _pool
+    except Exception as e:
+        st.error(f"DB pool init error: {e}")
+        return None
+
+
+def create_connection():
+    """
+    Get a connection from the pool.
+    Falls back to a direct (non-pooled) connection if the pool is exhausted
+    or unavailable, so the app never fully breaks.
+    """
+    pool = _get_pool()
+    if pool:
+        try:
+            return pool.get_connection()
+        except Exception:
+            pass  # pool exhausted — fall through to direct connection
+
+    # Direct connection fallback
+    if not MYSQL_AVAILABLE or not DB_CONFIG.get("host"):
+        return None
+    try:
+        return mysql.connector.connect(
+            host=DB_CONFIG.get("host", ""),
+            port=int(DB_CONFIG.get("port", 3306)),
+            user=DB_CONFIG.get("user", ""),
+            password=DB_CONFIG.get("password", ""),
+            database=DB_CONFIG.get("database", ""),
+            connection_timeout=30,
+            autocommit=False,
+            ssl_disabled=True,
+        )
     except Exception as e:
         st.error(f"DB connection error: {e}")
         return None
@@ -52,8 +98,6 @@ def ensure_tables():
             INDEX idx_vice_log_time (user_id, logged_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
-        # FIX: quiz_type widened to VARCHAR(64) — previously VARCHAR(32) caused
-        # silent truncation/failure for values like 'read_between_lines_v4_profile_complete' (38 chars)
         """
         CREATE TABLE IF NOT EXISTS quiz_results (
             id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -172,7 +216,7 @@ def ensure_tables():
             PRIMARY KEY (question_hash, opt_index)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
-        ]
+    ]
 
     try:
         cur = conn.cursor()
@@ -180,40 +224,19 @@ def ensure_tables():
             cur.execute(ddl)
         conn.commit()
 
-        # ── Migration: widen quiz_type on existing deployments ────────────────
-        # This is the root cause of "DB save failed (profile_complete)" —
-        # VARCHAR(32) silently rejected the 38-char quiz_type value.
-        try:
-            cur.execute(
-                "ALTER TABLE quiz_results MODIFY COLUMN quiz_type VARCHAR(64) NOT NULL"
-            )
-            conn.commit()
-        except Exception:
-            pass  # already wide enough, or table doesn't exist yet — safe to ignore
-
-        try:
-            cur.execute("ALTER TABLE confessions ADD COLUMN revealed_at DATETIME DEFAULT NULL")
-            conn.commit()
-        except Exception:
-            pass
-
-        try:
-            cur.execute("ALTER TABLE confessions ADD COLUMN reveal_window_secs INT NOT NULL DEFAULT 60")
-            conn.commit()
-        except Exception:
-            pass
-
-        try:
-            cur.execute("ALTER TABLE confessions MODIFY COLUMN recipient_id INT DEFAULT NULL")
-            conn.commit()
-        except Exception:
-            pass
-
-        try:
-            cur.execute("ALTER TABLE confessions ADD COLUMN recipient_email VARCHAR(255) DEFAULT NULL")
-            conn.commit()
-        except Exception:
-            pass
+        # Migrations — all wrapped in try/except so they're safe to re-run
+        for migration in [
+            "ALTER TABLE quiz_results MODIFY COLUMN quiz_type VARCHAR(64) NOT NULL",
+            "ALTER TABLE confessions ADD COLUMN revealed_at DATETIME DEFAULT NULL",
+            "ALTER TABLE confessions ADD COLUMN reveal_window_secs INT NOT NULL DEFAULT 60",
+            "ALTER TABLE confessions MODIFY COLUMN recipient_id INT DEFAULT NULL",
+            "ALTER TABLE confessions ADD COLUMN recipient_email VARCHAR(255) DEFAULT NULL",
+        ]:
+            try:
+                cur.execute(migration)
+                conn.commit()
+            except Exception:
+                pass
 
         cur.close()
     except Exception as e:
@@ -467,7 +490,9 @@ def delete_vice_log(user_id: int) -> bool:
 
 # ─── SOCIAL FEED ──────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=60, show_spinner=False)
 def load_social_feed(limit: int = 20) -> list:
+    """Cached 60s — social feed doesn't need to be live to the second."""
     conn = create_connection()
     if not conn:
         return []
@@ -488,7 +513,9 @@ def load_social_feed(limit: int = 20) -> list:
 
 # ─── VICE GOALS ───────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=120, show_spinner=False)
 def get_vice_goals(user_id: int) -> dict:
+    """Cached 2 min — goals don't change on every render."""
     conn = create_connection()
     if not conn:
         return {}
@@ -518,6 +545,8 @@ def save_vice_goal(user_id: int, vice: str, weekly_limit: int) -> bool:
         )
         conn.commit()
         cur.close()
+        # Bust the cache for this user
+        get_vice_goals.clear()
         return True
     except Exception as e:
         st.error(f"Error saving vice goal: {e}")
@@ -528,98 +557,31 @@ def save_vice_goal(user_id: int, vice: str, weekly_limit: int) -> bool:
 
 # ─── QUIZ RESULTS ─────────────────────────────────────────────────────────────
 
-def save_read_between_lines_result(user_id, profile_name, profile_meta, dim_scores,
-                                    recommendations, total_pct, questions, answers) -> bool:
+def save_read_between_lines_v4(
+    user_id: int, phase: str, result_name: str, result_meta: str,
+    openness_pct: int, total_pts: int, questions: list, answers: dict,
+    dim_scores: dict, recommendations: list,
+) -> bool:
     conn = create_connection()
     if not conn:
         return False
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """INSERT INTO quiz_results
-               (user_id, quiz_type, profile_name, profile_meta, dim_scores,
-                recommendations, total_pct, questions, answers)
-               VALUES (%s, 'read_between_lines', %s, %s, %s, %s, %s, %s, %s)""",
-            (user_id, profile_name, profile_meta, json.dumps(dim_scores),
-             json.dumps(recommendations), total_pct,
-             json.dumps(questions, default=str), json.dumps(answers))
-        )
-        conn.commit()
-        cur.close()
-        return True
-    except Exception as e:
-        st.error(f"Error saving RBTL result: {e}")
-        return False
-    finally:
-        conn.close()
-
-
-def save_what_would_you_do_result(user_id, result_name, result_meta,
-                                   openness_pct, total_pts, questions, answers) -> bool:
-    conn = create_connection()
-    if not conn:
-        return False
+    quiz_type = f"rbtl_v4_{phase}"[:64]
     try:
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO quiz_results
                (user_id, quiz_type, result_name, result_meta,
-                openness_pct, total_pts, questions, answers)
-               VALUES (%s, 'what_would_you_do', %s, %s, %s, %s, %s, %s)""",
-            (user_id, result_name, result_meta, openness_pct, total_pts,
-             json.dumps(questions, default=str), json.dumps(answers))
-        )
-        conn.commit()
-        cur.close()
-        return True
-    except Exception as e:
-        st.error(f"Error saving WWYD result: {e}")
-        return False
-    finally:
-        conn.close()
-
-
-def save_read_between_lines_v4(
-    user_id:         int,
-    phase:           str,
-    result_name:     str,
-    result_meta:     str,
-    openness_pct:    int,
-    total_pts:       int,
-    questions:       list,
-    answers:         dict,
-    dim_scores:      dict,
-    recommendations: list,
-) -> bool:
-    conn = create_connection()
-    if not conn:
-        return False
-
-    # Truncate phase to keep quiz_type within VARCHAR(64).
-    # Full value e.g. "read_between_lines_v4_profile_complete" = 38 chars — safe now,
-    # but guard anyway in case phase strings grow further.
-    quiz_type = f"rbtl_v4_{phase}"[:64]
-
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """INSERT INTO quiz_results
-               (user_id, quiz_type,
-                result_name, result_meta,
-                openness_pct, total_pts,
-                questions, answers,
-                dim_scores, recommendations)
+                openness_pct, total_pts, questions, answers, dim_scores, recommendations)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
-                user_id,
-                quiz_type,
+                user_id, quiz_type,
                 result_name[:128] if result_name else "",
                 result_meta[:255] if result_meta else "",
                 max(0, min(255, openness_pct)),
                 max(0, min(65535, total_pts)),
-                json.dumps(questions,       default=str),
-                json.dumps(answers,         default=str),
-                json.dumps(dim_scores,      default=str),
+                json.dumps(questions, default=str),
+                json.dumps(answers,   default=str),
+                json.dumps(dim_scores, default=str),
                 json.dumps(recommendations, default=str),
             )
         )
@@ -627,7 +589,6 @@ def save_read_between_lines_v4(
         cur.close()
         return True
     except Exception as e:
-        # Surface the real error so it's visible in the UI
         st.error(f"DB save error (rbtl_v4/{phase}): {e}")
         return False
     finally:
@@ -640,7 +601,6 @@ def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> bool:
         return False
     try:
         cur = conn.cursor(dictionary=True)
-        # Match the new quiz_type prefix used by save_read_between_lines_v4
         cur.execute(
             """SELECT id, dim_scores FROM quiz_results
                WHERE user_id = %s AND quiz_type LIKE 'rbtl_v4_%'
@@ -651,17 +611,14 @@ def update_rbtl_selected_categories(user_id: int, selected_cats: list) -> bool:
         if not row:
             cur.close()
             return False
-
         dim_scores = row.get("dim_scores") or {}
         if isinstance(dim_scores, str):
             try:
                 dim_scores = json.loads(dim_scores)
             except Exception:
                 dim_scores = {}
-
         dim_scores["selected"]            = selected_cats
         dim_scores["selection_confirmed"] = True
-
         cur.execute(
             "UPDATE quiz_results SET dim_scores = %s WHERE id = %s",
             (json.dumps(dim_scores, default=str), row["id"])
@@ -943,8 +900,7 @@ def delete_expired_confessions() -> int:
         count = cur.rowcount
         cur.close()
         return count
-    except Exception as e:
-        st.error(f"Error cleaning up confessions: {e}")
+    except Exception:
         return 0
     finally:
         conn.close()
@@ -1095,7 +1051,7 @@ def dismiss_screenshot_alert(alert_id: int) -> bool:
         conn.close()
 
 
-# ─── INTERACTIONS TABLE ───────────────────────────────────────────────────────
+# ─── INTERACTIONS ─────────────────────────────────────────────────────────────
 
 INTERACTIONS_DDL = """
 CREATE TABLE IF NOT EXISTS interactions (
@@ -1223,7 +1179,9 @@ def upsert_shadow_score(user_id: int, hypocrisy_idx: int = None,
         conn.close()
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_shadow_score(user_id: int) -> dict:
+    """Cached 5 min — freak score doesn't change with every render."""
     conn = create_connection()
     if not conn:
         return {}
@@ -1238,6 +1196,9 @@ def get_shadow_score(user_id: int) -> dict:
     finally:
         conn.close()
 
+
+# ─── PUBLIC BOARD ─────────────────────────────────────────────────────────────
+
 def save_public_confession(author_id: int, content: str, vice: str = None) -> int | None:
     conn = create_connection()
     if not conn:
@@ -1251,15 +1212,18 @@ def save_public_confession(author_id: int, content: str, vice: str = None) -> in
         conn.commit()
         new_id = cur.lastrowid
         cur.close()
+        load_public_confessions.clear()
         return new_id
     except Exception as e:
         st.error(f"Error saving public confession: {e}")
         return None
     finally:
         conn.close()
- 
- 
+
+
+@st.cache_data(ttl=30, show_spinner=False)
 def load_public_confessions(limit: int = 20, offset: int = 0, vice: str = None) -> list:
+    """Cached 30s — board is near-realtime but doesn't need to be instant."""
     conn = create_connection()
     if not conn:
         return []
@@ -1268,8 +1232,7 @@ def load_public_confessions(limit: int = 20, offset: int = 0, vice: str = None) 
         if vice:
             cur.execute(
                 """SELECT id, content, vice, reply_count, created_at
-                   FROM public_confessions
-                   WHERE vice = %s
+                   FROM public_confessions WHERE vice = %s
                    ORDER BY created_at DESC LIMIT %s OFFSET %s""",
                 (vice, limit, offset),
             )
@@ -1287,8 +1250,8 @@ def load_public_confessions(limit: int = 20, offset: int = 0, vice: str = None) 
         return []
     finally:
         conn.close()
- 
- 
+
+
 def save_public_reply(confession_id: int, author_id: int, content: str) -> bool:
     conn = create_connection()
     if not conn:
@@ -1305,14 +1268,15 @@ def save_public_reply(confession_id: int, author_id: int, content: str) -> bool:
         )
         conn.commit()
         cur.close()
+        load_public_confessions.clear()
         return True
     except Exception as e:
         st.error(f"Error saving reply: {e}")
         return False
     finally:
         conn.close()
- 
- 
+
+
 def load_public_replies(confession_id: int) -> list:
     conn = create_connection()
     if not conn:
@@ -1320,7 +1284,7 @@ def load_public_replies(confession_id: int) -> list:
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """SELECT id, author_id, content, created_at
+            """SELECT id, content, created_at
                FROM public_confession_replies
                WHERE confession_id = %s
                ORDER BY created_at ASC""",
@@ -1333,10 +1297,10 @@ def load_public_replies(confession_id: int) -> list:
         return []
     finally:
         conn.close()
- 
- 
-# ── Community quiz pulse ──────────────────────────────────────────────────────
- 
+
+
+# ─── COMMUNITY QUIZ PULSE ─────────────────────────────────────────────────────
+
 def record_community_answer(question_hash: str, opt_index: int) -> None:
     conn = create_connection()
     if not conn:
@@ -1355,10 +1319,11 @@ def record_community_answer(question_hash: str, opt_index: int) -> None:
         pass
     finally:
         conn.close()
- 
- 
+
+
+@st.cache_data(ttl=10, show_spinner=False)
 def get_community_answers(question_hash: str) -> dict:
-    """Returns {opt_index: tally, ...}"""
+    """Cached 10s — pulse updates are frequent but don't need instant consistency."""
     conn = create_connection()
     if not conn:
         return {}
@@ -1373,5 +1338,33 @@ def get_community_answers(question_hash: str) -> dict:
         return {r[0]: r[1] for r in rows}
     except Exception:
         return {}
+    finally:
+        conn.close()
+
+
+# ─── LEGACY QUIZ SAVES (kept for backwards compat) ───────────────────────────
+
+def save_read_between_lines_result(user_id, profile_name, profile_meta, dim_scores,
+                                    recommendations, total_pct, questions, answers) -> bool:
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO quiz_results
+               (user_id, quiz_type, profile_name, profile_meta, dim_scores,
+                recommendations, total_pct, questions, answers)
+               VALUES (%s, 'read_between_lines', %s, %s, %s, %s, %s, %s, %s)""",
+            (user_id, profile_name, profile_meta, json.dumps(dim_scores),
+             json.dumps(recommendations), total_pct,
+             json.dumps(questions, default=str), json.dumps(answers))
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception as e:
+        st.error(f"Error saving RBTL result: {e}")
+        return False
     finally:
         conn.close()
