@@ -1,7 +1,14 @@
 """
 Pages/dashboard.py
-Vice tracker — stats, log, history, goals, and streak pages.
-DB-backed. AI weekly reflection via OpenAI. Anonymous social feed.
+Vice tracker — stats, log, history, goals pages.
+
+Changes vs previous:
+- AI reflection moved to TOP of dashboard (before stat cards)
+- Reflection shows a static nudge when no API key / no data
+- Quick log strip lives right below masthead
+- History page: delete single entry button
+- Goals page: "days clean" per vice replaces activity streak
+  (streak now measures days WITHOUT logging each vice)
 """
 
 import streamlit as st
@@ -90,6 +97,9 @@ def add_entry(vice_key: str, data: dict, timestamp: datetime):
             db_id = db.save_vice_entry(user_id, vice_key, timestamp, data)
             if db_id:
                 entry["id"] = db_id
+            # Invalidate DoD player summary cache so new data feeds into dares
+            from Pages.do_or_drink_core import invalidate_player_summary_cache
+            invalidate_player_summary_cache(user_id)
         except Exception:
             pass
 
@@ -134,7 +144,52 @@ def stat_card(label, value, sublabel, color):
 """)
 
 
+# ─── QUICK LOG STRIP ──────────────────────────────────────────────────────────
+
+def render_quick_log():
+    """One-tap log strip. No form required. Shown at top of dashboard."""
+    st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:10px;">
+  Quick Log
+</div>
+""")
+    cols = st.columns(4)
+    for i, (vk, v) in enumerate(VICES.items()):
+        with cols[i]:
+            st.html(f"""
+<div style="background:var(--card); border:1px solid {v['color']}33;
+            border-top:3px solid {v['color']}; border-radius:4px;
+            padding:12px 8px 8px; text-align:center; margin-bottom:4px;">
+  <div style="font-size:22px; line-height:1.2;">{v['icon']}</div>
+  <div style="font-family:'Space Mono',monospace; font-size:7px; letter-spacing:1px;
+              text-transform:uppercase; color:{v['color']}; margin-top:4px;">
+    {v['label'].split('/')[0].strip()}
+  </div>
+</div>
+""")
+            if st.button("＋ Log", key=f"ql_{vk}", use_container_width=True):
+                add_entry(vk, {"method": "Quick log"}, datetime.now())
+                st.session_state.ht_fresh = True
+                try:
+                    from Pages.vice_hot_takes import maybe_render_hot_take
+                    maybe_render_hot_take(vice=vk, user_id=_current_user_id())
+                except Exception:
+                    pass
+                st.toast(f"{v['icon']} Logged!", icon="✓")
+                st.rerun()
+
+    st.html("<div style='height:1px; background:var(--border); margin:16px 0;'></div>")
+
+
 # ─── AI WEEKLY REFLECTION ─────────────────────────────────────────────────────
+
+_STATIC_NUDGES = [
+    "Patterns become visible when there's data to read. The first few logs are the hardest — after that it runs itself.",
+    "The vault only works if you're honest with it. Nothing here gets shared.",
+    "You're tracking something most people don't even admit to themselves. That's already something.",
+]
+
 
 def _generate_reflection(entries: list) -> str:
     try:
@@ -154,7 +209,6 @@ def _generate_reflection(entries: list) -> str:
             lines.append(f"{meta.get('label', v)}: {c} session(s)")
 
         summary = ", ".join(lines) if lines else "no activity"
-
         msg = client.chat.completions.create(
             model="gpt-4o-mini",
             max_tokens=180,
@@ -164,8 +218,7 @@ def _generate_reflection(entries: list) -> str:
                     "You're a non-judgmental wellness companion inside a vice-tracking app. "
                     "Write 2-3 sentences reflecting on the past 7 days of logged activity. "
                     "Be warm, honest, and direct — not preachy. One specific observation, one small nudge.\n\n"
-                    f"This week: {summary}\n\n"
-                    "Keep it under 60 words. Conversational."
+                    f"This week: {summary}\n\nKeep it under 60 words. Conversational."
                 ),
             }],
         )
@@ -175,20 +228,22 @@ def _generate_reflection(entries: list) -> str:
 
 
 def _render_ai_reflection(entries_7d: list):
+    """Reflection shown FIRST on the dashboard, above stat cards."""
+    cached    = st.session_state.get("_reflection_text")
+    cached_at = st.session_state.get("_reflection_ts", 0)
+    stale     = (time.time() - cached_at) > 3600
+
+    if cached and not stale:
+        text = cached
+    else:
+        text = ""
+
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
             text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
   Weekly Reflection
 </div>
 """)
-    cached    = st.session_state.get("_reflection_text")
-    cached_at = st.session_state.get("_reflection_ts", 0)
-    stale     = (time.time() - cached_at) > 3600  # Re-generate after 1 hour
-
-    if cached and not stale:
-        text = cached
-    else:
-        text = ""
 
     if text:
         st.html(f"""
@@ -199,23 +254,44 @@ def _render_ai_reflection(entries_7d: list):
               line-height:1.8; font-style:italic;">{text}</div>
 </div>
 """)
+    elif not entries_7d:
+        # Static nudge when no data
+        import hashlib
+        from datetime import date
+        idx  = int(hashlib.md5(str(date.today()).encode()).hexdigest(), 16) % len(_STATIC_NUDGES)
+        st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-left:3px solid var(--border); border-radius:0 4px 4px 0;
+            padding:16px 18px; margin-bottom:12px;">
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted);
+              line-height:1.8; font-style:italic;">{_STATIC_NUDGES[idx]}</div>
+</div>
+""")
 
-    if st.button(
-        "⟳  Generate Reflection" if not text else "⟳  Refresh Reflection",
-        key="gen_reflection",
-        type="secondary",
-    ):
-        with st.spinner("Reading your week…"):
-            result = _generate_reflection(entries_7d)
-        if result:
-            st.session_state._reflection_text = result
-            st.session_state._reflection_ts   = time.time()
-            st.rerun()
-        else:
-            st.warning("Couldn't generate reflection — check your OpenAI API key.")
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        if st.button(
+            "⟳  Refresh" if text else "⟳  Generate",
+            key="gen_reflection",
+            type="secondary",
+            use_container_width=True,
+        ):
+            if not entries_7d:
+                st.info("Log some sessions first to get a personalised reflection.")
+            else:
+                with st.spinner("Reading your week…"):
+                    result = _generate_reflection(entries_7d)
+                if result:
+                    st.session_state._reflection_text = result
+                    st.session_state._reflection_ts   = time.time()
+                    st.rerun()
+                else:
+                    st.warning("Add OPENAI_API_KEY to secrets to enable AI reflection.")
+
+    st.html("<div style='height:1.5rem'></div>")
 
 
-# ─── ANONYMOUS SOCIAL FEED ────────────────────────────────────────────────────
+# ─── SOCIAL FEED ──────────────────────────────────────────────────────────────
 
 _VICE_ICONS = {"weed": "🌿", "alcohol": "🥃", "sex": "🔥", "other": "💊"}
 
@@ -246,26 +322,15 @@ def _render_social_feed():
     items_html = ""
     for row in feed[:12]:
         logged_at = row.get("logged_at")
-        if hasattr(logged_at, "isoformat"):
-            dt = logged_at
-        else:
-            try:
-                dt = datetime.fromisoformat(str(logged_at))
-            except Exception:
-                dt = datetime.now()
-
-        diff   = datetime.now() - dt
-        mins   = int(diff.total_seconds() / 60)
-        hrs    = mins // 60
-        days   = hrs // 24
-        if days >= 1:
-            ago = f"{days}d ago"
-        elif hrs >= 1:
-            ago = f"{hrs}h ago"
-        elif mins >= 1:
-            ago = f"{mins}m ago"
-        else:
-            ago = "just now"
+        try:
+            dt   = logged_at if hasattr(logged_at, "isoformat") else datetime.fromisoformat(str(logged_at))
+            diff = datetime.now() - dt
+            mins = int(diff.total_seconds() / 60)
+            if mins < 60:   ago = f"{mins}m ago"
+            elif mins < 1440: ago = f"{mins//60}h ago"
+            else:             ago = f"{mins//1440}d ago"
+        except Exception:
+            ago = "recently"
 
         vice  = row.get("vice", "other")
         icon  = _VICE_ICONS.get(vice, "◈")
@@ -287,57 +352,52 @@ def _render_social_feed():
 
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
-            padding:12px 16px;">
-  {items_html}
-</div>
+            padding:12px 16px;">{items_html}</div>
 """)
 
 
 # ─── FREAK SCORE CARD ─────────────────────────────────────────────────────────
 
 def _render_freak_score_card(freak: dict):
-    from styles import inject_page_css
-    inject_page_css()
-    col   = freak["color"]
-    label = freak["label"]
-    fp    = freak["freak_pct"]
-    ci    = freak["conflict_idx"]
-    hp    = freak["hesitation_pct"]
-    tot   = freak["total"]
-    st.html(f'''
+    col = freak["color"]
+    st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
-            border-left:3px solid {col}; border-radius:4px;
-            padding:18px 20px; margin-bottom:12px;">
+            border-left:3px solid {col}; border-radius:4px; padding:18px 20px; margin-bottom:12px;">
   <div style="display:flex; justify-content:space-between; align-items:flex-start;">
     <div>
       <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
                   text-transform:uppercase; color:var(--muted); margin-bottom:4px;">
-        Freak Score · {tot} hot takes
+        Freak Score · {freak['total']} hot takes
       </div>
       <div style="font-family:'Bebas Neue',sans-serif; font-size:22px;
-                  color:{col}; letter-spacing:1px;">{label.upper()}</div>
+                  color:{col}; letter-spacing:1px;">{freak['label'].upper()}</div>
     </div>
     <div style="text-align:right;">
-      <div style="font-family:'Bebas Neue',sans-serif; font-size:44px;
-                  color:{col}; line-height:1;">{fp}</div>
-      <div style="font-family:'Space Mono',monospace; font-size:7px;
-                  color:var(--muted); text-transform:uppercase;">/100</div>
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:44px; color:{col}; line-height:1;">
+        {freak['freak_pct']}
+      </div>
+      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+                  text-transform:uppercase;">/100</div>
     </div>
   </div>
   <div style="display:flex; gap:16px; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
     <div style="text-align:center;">
-      <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--amber);">{ci}</div>
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--amber);">
+        {freak['conflict_idx']}
+      </div>
       <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
                   text-transform:uppercase; letter-spacing:1px;">Conflict</div>
     </div>
     <div style="text-align:center;">
-      <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--magenta);">{hp}%</div>
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--magenta);">
+        {freak['hesitation_pct']}%
+      </div>
       <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
                   text-transform:uppercase; letter-spacing:1px;">Hesitated</div>
     </div>
   </div>
 </div>
-''')
+""")
 
 
 # ─── STATS PAGE ───────────────────────────────────────────────────────────────
@@ -345,6 +405,12 @@ def _render_freak_score_card(freak: dict):
 def stats_page():
     inject_page_css()
     page_masthead("DASHBOARD", "No judgement. Just data.")
+
+    # Quick log strip — one tap, no form
+    render_quick_log()
+
+    # AI Reflection — first thing after the strip
+    _render_ai_reflection(all_entries(7))
 
     log   = all_entries(30)
     total = len(log)
@@ -370,7 +436,7 @@ def stats_page():
 </div>
 """)
     else:
-        # 14-day activity heatmap
+        # 14-day heatmap
         st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
             text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
@@ -383,8 +449,8 @@ def stats_page():
             d = datetime.fromisoformat(e["timestamp"]).date()
             day_counts[d] = day_counts.get(d, 0) + 1
 
-        max_count  = max(day_counts.values(), default=1)
-        cols_heat  = st.columns(14)
+        max_count = max(day_counts.values(), default=1)
+        cols_heat = st.columns(14)
         for i, d in enumerate(days_list):
             cnt       = day_counts.get(d, 0)
             intensity = cnt / max_count if max_count else 0
@@ -398,13 +464,14 @@ def stats_page():
               font-family:'Space Mono',monospace; font-size:10px; color:var(--lime);">
     {cnt if cnt else ''}
   </div>
-  <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">{d.strftime('%d')}</div>
+  <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">
+    {d.strftime('%d')}
+  </div>
 </div>
 """)
 
         st.html("<div style='height:1.5rem'></div>")
 
-        # Breakdown bars
         st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
             text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Breakdown</div>
@@ -430,7 +497,7 @@ def stats_page():
 
     st.html("<div style='height:1.5rem'></div>")
 
-    # ── Freak Score card ──────────────────────────────────────────────────────
+    # Freak Score
     user_id = _current_user_id()
     if user_id:
         try:
@@ -441,12 +508,7 @@ def stats_page():
         except Exception:
             pass
 
-    # AI weekly reflection
-    _render_ai_reflection(all_entries(7))
-
     st.html("<div style='height:1.5rem'></div>")
-
-    # Social feed
     _render_social_feed()
 
 
@@ -455,8 +517,9 @@ def stats_page():
 def render_log_form(vice_key: str):
     v = VICES[vice_key]
     st.html(f"""
-<div style="background:var(--card); border:1px solid var(--border); border-left:3px solid {v['color']};
-            border-radius:4px; padding:20px 20px 4px; margin-bottom:16px;">
+<div style="background:var(--card); border:1px solid var(--border);
+            border-left:3px solid {v['color']}; border-radius:4px;
+            padding:20px 20px 4px; margin-bottom:16px;">
   <span style="font-size:22px;">{v['icon']}</span>
   <span style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:{v['color']};
                letter-spacing:2px; margin-left:8px;">{v['label']}</span>
@@ -467,7 +530,8 @@ def render_log_form(vice_key: str):
         log_date = st.date_input("Date", value=date.today(), max_value=date.today(),
                                  key=f"log_{vice_key}_date")
     with col_time:
-        log_time = st.time_input("Time", value=datetime.now().time(), key=f"log_{vice_key}_time")
+        log_time = st.time_input("Time", value=datetime.now().time(),
+                                 key=f"log_{vice_key}_time")
 
     st.html("<div style='height:4px'></div>")
     form_data = {}
@@ -487,19 +551,17 @@ def render_log_form(vice_key: str):
             form_data[field["key"]] = st.text_input(field["label"], key=key)
 
     st.html("<div style='height:8px'></div>")
-    if st.button(f"Log {v['label']} →", key=f"submit_{vice_key}", type="primary", use_container_width=True):
+    if st.button(f"Log {v['label']} →", key=f"submit_{vice_key}",
+                 type="primary", use_container_width=True):
         entry_dt = datetime.combine(log_date, log_time)
         add_entry(vice_key, form_data, entry_dt)
         st.success(f"Logged. {v['icon']}")
-        # ── Hot Take interrupt ────────────────────────────────────────────────
         st.session_state.ht_fresh = True
         try:
             from Pages.vice_hot_takes import maybe_render_hot_take
-            user_id = _current_user_id()
-            maybe_render_hot_take(vice=vice_key, user_id=user_id)
+            maybe_render_hot_take(vice=vice_key, user_id=_current_user_id())
         except Exception:
             pass
-        # ─────────────────────────────────────────────────────────────────────
         st.rerun()
 
 
@@ -533,17 +595,23 @@ def history_page():
 """)
         return
 
+    user_id = _current_user_id()
+
     for e in log[:50]:
-        v        = VICES[e["vice"]]
+        v        = VICES.get(e["vice"], VICES["other"])
         ts       = datetime.fromisoformat(e["timestamp"])
         time_str = ts.strftime("%b %d, %Y · %H:%M")
         data_str = "  ·  ".join(f"{k}: {val}" for k, val in e["data"].items()
                                  if val and k != "notes")
         notes    = e["data"].get("notes", "")
-        st.html(f"""
+        entry_id = e.get("id")
+
+        col_card, col_del = st.columns([10, 1])
+        with col_card:
+            st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:2px solid {v['color']}; border-radius:4px;
-            padding:14px 16px; margin-bottom:8px;">
+            padding:14px 16px; margin-bottom:2px;">
   <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
     <span style="font-size:16px;">{v['icon']}</span>
     <span style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);
@@ -555,6 +623,23 @@ def history_page():
   {f'<div style="font-family:\'DM Sans\',sans-serif; font-size:11px; color:var(--muted); margin-top:4px; font-style:italic;">"{notes}"</div>' if notes else ''}
 </div>
 """)
+        with col_del:
+            st.html("<div style='height:6px'></div>")
+            if st.button("✕", key=f"del_{entry_id}_{ts.timestamp()}", help="Delete this entry"):
+                # Remove from session state
+                st.session_state.vice_log = [
+                    x for x in st.session_state.vice_log if x.get("id") != entry_id
+                ]
+                # Remove from DB
+                if user_id and entry_id:
+                    try:
+                        import database as db
+                        db.delete_vice_entry(entry_id, user_id)
+                    except Exception:
+                        pass
+                st.rerun()
+
+        st.html("<div style='height:6px'></div>")
 
     st.html("<div style='height:8px'></div>")
     if st.button("Clear all history", type="secondary"):
@@ -572,7 +657,6 @@ def history_page():
 # ─── GOALS PAGE ───────────────────────────────────────────────────────────────
 
 def _this_week_counts() -> dict:
-    """Count sessions per vice in the current calendar week."""
     today      = date.today()
     week_start = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
     counts     = defaultdict(int)
@@ -582,33 +666,39 @@ def _this_week_counts() -> dict:
     return dict(counts)
 
 
-def _compute_streaks_simple(entries: list) -> dict:
-    if not entries:
-        return {"current": 0, "longest": 0}
-    dates = sorted({datetime.fromisoformat(e["timestamp"]).date() for e in entries})
-    today = date.today()
+def _clean_days_per_vice(user_id: int) -> dict:
+    """
+    Returns {vice: days_clean} — how many days since the user last logged each vice.
+    A high number means they've gone longer without it.
+    """
+    try:
+        import database as db
+        last_logged = db.get_last_logged_per_vice(user_id)
+    except Exception:
+        # Fallback: compute from session state
+        last_logged = {}
+        for e in get_log():
+            vk = e["vice"]
+            ts = datetime.fromisoformat(e["timestamp"])
+            if vk not in last_logged or ts > last_logged[vk]:
+                last_logged[vk] = ts
 
-    current  = 0
-    expected = today
-    for d in reversed(dates):
-        if d == expected or d == expected - timedelta(days=1):
-            if d != expected:
-                expected = d
-            current += 1
-            expected = expected - timedelta(days=1)
-        elif d < expected:
-            break
-
-    longest = 1
-    run     = 1
-    for i in range(1, len(dates)):
-        if dates[i] == dates[i - 1] + timedelta(days=1):
-            run += 1
-            longest = max(longest, run)
+    clean = {}
+    now = datetime.now()
+    for vk in VICES:
+        if vk in last_logged:
+            last = last_logged[vk]
+            if hasattr(last, "isoformat"):
+                diff = now - last
+            else:
+                try:
+                    diff = now - datetime.fromisoformat(str(last))
+                except Exception:
+                    diff = timedelta(0)
+            clean[vk] = diff.days
         else:
-            run = 1
-
-    return {"current": current, "longest": longest}
+            clean[vk] = None  # Never logged
+    return clean
 
 
 def goals_page():
@@ -620,42 +710,56 @@ def goals_page():
         st.warning("Log in to use Goals.")
         return
 
-    # Load saved goals
     try:
         import database as db
         saved_goals = db.get_vice_goals(user_id)
     except Exception:
         saved_goals = {}
 
-    this_week = _this_week_counts()
-    streaks   = _compute_streaks_simple(get_log())
+    this_week  = _this_week_counts()
+    clean_days = _clean_days_per_vice(user_id)
 
-    # ── Streak banner ─────────────────────────────────────────────────────────
+    # ── Clean days — the real streak ─────────────────────────────────────────
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Streaks</div>
-""")
-    sc1, sc2 = st.columns(2)
-    with sc1:
-        st.html(f"""
-<div style="background:var(--card); border:1px solid var(--border);
-            border-top:2px solid var(--lime); border-radius:4px; padding:18px 20px;">
-  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Current streak</div>
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:42px; color:var(--lime); line-height:1;">
-    {streaks['current']}<span style="font-size:18px; color:var(--muted);"> days</span>
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
+  Days Without
+</div>
+<div style="background:var(--surface); border:1px solid var(--border); border-radius:4px;
+            padding:10px 14px; margin-bottom:14px;">
+  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); line-height:1.7;">
+    How long since you last logged each vice. Higher = longer break.
   </div>
 </div>
 """)
-    with sc2:
-        st.html(f"""
+    cd_cols = st.columns(4)
+    for i, (vk, v) in enumerate(VICES.items()):
+        days = clean_days.get(vk)
+        with cd_cols[i]:
+            if days is None:
+                display = "—"
+                sub     = "never logged"
+                color   = "var(--muted)"
+            elif days == 0:
+                display = "0"
+                sub     = "logged today"
+                color   = "var(--magenta)"
+            elif days < 3:
+                display = str(days)
+                sub     = f"day{'s' if days != 1 else ''} clean"
+                color   = "var(--amber)"
+            else:
+                display = str(days)
+                sub     = f"day{'s' if days != 1 else ''} clean"
+                color   = "var(--lime)"
+            st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
-            border-top:2px solid var(--amber); border-radius:4px; padding:18px 20px;">
-  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Longest streak</div>
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:42px; color:var(--amber); line-height:1;">
-    {streaks['longest']}<span style="font-size:18px; color:var(--muted);"> days</span>
-  </div>
+            border-top:2px solid {v['color']}; border-radius:4px; padding:14px 12px;">
+  <div style="font-size:16px; margin-bottom:4px;">{v['icon']}</div>
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:32px; color:{color};
+              line-height:1;">{display}</div>
+  <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+              text-transform:uppercase; letter-spacing:1px; margin-top:2px;">{sub}</div>
 </div>
 """)
 
@@ -664,15 +768,13 @@ def goals_page():
     # ── Weekly limits ─────────────────────────────────────────────────────────
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Weekly Limits</div>
-""")
-
-    st.html("""
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
+  Weekly Limits
+</div>
 <div style="background:var(--surface); border:1px solid var(--border); border-radius:4px;
-            padding:12px 16px; margin-bottom:20px;">
+            padding:10px 14px; margin-bottom:20px;">
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft); line-height:1.7;">
-    Set a weekly session limit per vice. 0 means no limit set.
-    Progress resets each Monday.
+    Set a weekly session limit per vice. 0 means no limit. Resets each Monday.
   </div>
 </div>
 """)
@@ -682,7 +784,6 @@ def goals_page():
         current_limit = saved_goals.get(vk, 0)
         used          = this_week.get(vk, 0)
         color         = v["color"]
-
         pct   = min(100, (used / current_limit * 100)) if current_limit else 0
         over  = current_limit and used > current_limit
         bar_c = "var(--magenta)" if over else color
@@ -705,8 +806,7 @@ def goals_page():
         updated[vk] = st.number_input(
             f"Weekly limit for {v['label']}",
             min_value=0, max_value=100, value=int(current_limit), step=1,
-            key=f"goal_{vk}",
-            help="Set to 0 to remove the limit",
+            key=f"goal_{vk}", help="Set to 0 to remove the limit",
         )
 
     st.html("<div style='height:8px'></div>")
