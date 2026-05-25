@@ -1767,15 +1767,13 @@ def load_rbtl_history(user_id: int, limit: int = 5) -> list:
         conn.close()
 
 
-def authenticate_user(username: str, password_hash: str):
-    """
-    Fetch user by username and verify password hash.
-    Returns the user dict on success, None if credentials don't match.
-    """
+def authenticate_user(username: str, password: str):
     conn = create_connection()
     if not conn:
         return None
     try:
+        import hashlib
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
         cur = conn.cursor(dictionary=True)
         cur.execute(
             "SELECT * FROM users WHERE username = %s AND password_hash = %s",
@@ -1783,7 +1781,7 @@ def authenticate_user(username: str, password_hash: str):
         )
         user = cur.fetchone()
         cur.close()
-        return user  # None if no match
+        return user
     except Exception as e:
         st.error(f"Authentication error: {e}")
         return None
