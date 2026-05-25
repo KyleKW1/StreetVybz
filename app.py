@@ -28,6 +28,25 @@ def _load_vice_log_from_db(user_id: int):
         st.session_state.vice_log_loaded = True
 
 
+def _prewarm_quiz():
+    """
+    Kick off Reddit fetching as soon as the user is authenticated
+    so the quiz loads instantly when they navigate to it.
+    Only runs once per session.
+    """
+    if st.session_state.get("_quiz_prewarmed"):
+        return
+    try:
+        from Pages.what_would_you_do import fetch_posts
+        # This populates the @st.cache_data cache in the background
+        # (Streamlit runs this synchronously, but the cached result
+        #  means the loading phase skips the fetch entirely)
+        fetch_posts()
+        st.session_state._quiz_prewarmed = True
+    except Exception:
+        pass
+
+
 def render_sidebar():
     with st.sidebar:
         user = st.session_state.get("user", {})
@@ -62,7 +81,7 @@ def render_sidebar():
             st.session_state.selected_feature = 'hotspots'; st.rerun()
         if st.button("🃏  Do or Drink",            use_container_width=True, key="sb_dod"):
             st.session_state.selected_feature = 'do_or_drink'; st.rerun()
-        if st.button(" Confessions",              use_container_width=True, key="sb_confessions"):
+        if st.button("◈  Confessions",             use_container_width=True, key="sb_confessions"):
             st.session_state.selected_feature = 'confessions'; st.rerun()
 
         st.markdown("<div style='height:1px; background:#2a2a35; margin:12px 0;'></div>",
@@ -87,6 +106,9 @@ def main():
             st.session_state[key] = default
 
     handle_reset_token_from_url()
+
+    # Inject CSS once at the top of every render — pages don't need to call
+    # inject_page_css() but it's safe if they do (deduplication guard in styles.py)
     apply_custom_styles()
 
     if not st.session_state.authenticated:
@@ -102,6 +124,7 @@ def main():
         if user_id:
             _bootstrap_db()
             _load_vice_log_from_db(user_id)
+            _prewarm_quiz()   # pre-fetch Reddit posts while user browses
 
         render_sidebar()
         feature = st.session_state.selected_feature
