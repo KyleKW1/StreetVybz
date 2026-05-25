@@ -212,8 +212,8 @@ def _render_feature(feature: str):
 
     elif feature == "dod":
         from Pages.do_or_drink_ui import render_setup, render_generating, render_game, render_game_over
-        from Pages.do_or_drink_core import init_dod_state
-        init_dod_state()
+        from Pages.do_or_drink_core import init_state
+        init_state()
         phase = st.session_state.get("dod_phase", "setup")
         if phase == "setup":       render_setup()
         elif phase == "generating": render_generating()
