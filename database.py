@@ -216,6 +216,42 @@ def ensure_tables():
             PRIMARY KEY (question_hash, opt_index)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
+        # ── NEW: Do or Drink rooms ──────────────────────────────────────────
+        """
+        CREATE TABLE IF NOT EXISTS dod_rooms (
+            room_code       VARCHAR(6) NOT NULL PRIMARY KEY,
+            host_id         INT NOT NULL,
+            host_username   VARCHAR(128) NOT NULL,
+            players         JSON NOT NULL DEFAULT ('[]'),
+            mode            VARCHAR(16) NOT NULL DEFAULT 'regular',
+            status          VARCHAR(16) NOT NULL DEFAULT 'waiting',
+            created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_dod_host   (host_id),
+            INDEX idx_dod_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
+        # ── Interactions & shadow scores ────────────────────────────────────
+        """
+        CREATE TABLE IF NOT EXISTS interactions (
+            id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id          INT NOT NULL,
+            interaction_type VARCHAR(32)  NOT NULL,
+            created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            payload          JSON,
+            INDEX idx_int_user (user_id),
+            INDEX idx_int_type (user_id, interaction_type),
+            INDEX idx_int_time (user_id, created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS shadow_scores (
+            user_id          INT NOT NULL PRIMARY KEY,
+            hypocrisy_idx    TINYINT UNSIGNED DEFAULT 0,
+            conflict_idx     TINYINT UNSIGNED DEFAULT 0,
+            freak_score      TINYINT UNSIGNED DEFAULT 0,
+            updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
     ]
 
     try:
@@ -243,7 +279,6 @@ def ensure_tables():
         st.error(f"Schema bootstrap error: {e}")
     finally:
         conn.close()
-
 
 # ─── USERS ────────────────────────────────────────────────────────────────────
 
