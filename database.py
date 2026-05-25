@@ -252,6 +252,22 @@ def ensure_tables():
             updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
+        """
+        CREATE TABLE IF NOT EXISTS deleted_user_archive (
+            id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            original_user_id INT NOT NULL,
+            username        VARCHAR(128),
+            email           VARCHAR(255),
+            deleted_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            vice_log        LONGTEXT,
+            quiz_results    LONGTEXT,
+            goals           LONGTEXT,
+            interactions    LONGTEXT,
+            shadow_scores   LONGTEXT,
+            INDEX idx_dua_user    (original_user_id),
+            INDEX idx_dua_deleted (deleted_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
     ]
 
     try:
