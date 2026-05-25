@@ -5,8 +5,6 @@ app.py — ViceVault main entry point.
 import streamlit as st
 from styles import apply_custom_styles, inject_page_css, reset_css_flag
 
-# ─── PAGE CONFIG ─────────────────────────────────────────────────────────────
-
 st.set_page_config(
     page_title="ViceVault",
     page_icon="⚡",
@@ -14,34 +12,21 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Reset CSS flag so styles always reinject on every full rerun
 reset_css_flag()
 apply_custom_styles()
 
-# ─── FLOATING QUICK LOG BUTTON ────────────────────────────────────────────────
 
 def _inject_floating_log_btn():
     st.html("""
 <style>
 #vv-fab {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  z-index: 9999;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background: var(--lime, #c6ff00);
-  color: #0a0a0b;
-  font-size: 26px;
-  line-height: 52px;
-  text-align: center;
-  cursor: pointer;
-  box-shadow: 0 4px 18px rgba(198,255,0,0.35);
-  border: none;
-  font-family: 'Space Mono', monospace;
-  transition: transform 0.15s, box-shadow 0.15s;
-  user-select: none;
+  position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+  width: 52px; height: 52px; border-radius: 50%;
+  background: var(--lime, #c6ff00); color: #0a0a0b;
+  font-size: 26px; line-height: 52px; text-align: center;
+  cursor: pointer; box-shadow: 0 4px 18px rgba(198,255,0,0.35);
+  border: none; font-family: 'Space Mono', monospace;
+  transition: transform 0.15s, box-shadow 0.15s; user-select: none;
 }
 #vv-fab:hover { transform: scale(1.08); box-shadow: 0 6px 24px rgba(198,255,0,0.5); }
 #vv-fab:active { transform: scale(0.96); }
@@ -54,8 +39,6 @@ def _inject_floating_log_btn():
 """)
 
 
-# ─── AUTH HELPERS ─────────────────────────────────────────────────────────────
-
 def is_authenticated() -> bool:
     return bool(st.session_state.get("authenticated") and st.session_state.get("user"))
 
@@ -66,8 +49,6 @@ def logout():
     st.rerun()
 
 
-# ─── QUIZ PRE-WARM ────────────────────────────────────────────────────────────
-
 @st.cache_data(ttl=1800, show_spinner=False)
 def _prewarm_quiz():
     try:
@@ -76,8 +57,7 @@ def _prewarm_quiz():
         sub  = random.choice(subs)
         r    = requests.get(
             f"https://www.reddit.com/r/{sub}/hot.json?limit=10",
-            headers={"User-Agent": "ViceVault/1.0"},
-            timeout=5,
+            headers={"User-Agent": "ViceVault/1.0"}, timeout=5,
         )
         if r.ok:
             return [p["data"] for p in r.json()["data"]["children"] if not p["data"].get("over_18")]
@@ -86,8 +66,7 @@ def _prewarm_quiz():
     return []
 
 
-# ─── NAVIGATION SIDEBAR ───────────────────────────────────────────────────────
-
+# ─── Full original labels — font scaled down to fit ───────────────────────────
 NAV_SECTIONS = [
     {
         "label": "Vault",
@@ -116,10 +95,11 @@ NAV_SECTIONS = [
     },
 ]
 
+
 def _render_sidebar():
     with st.sidebar:
-        user = st.session_state.get("user", {})
-        uname = user.get("username", "—")
+        user   = st.session_state.get("user", {})
+        uname  = user.get("username", "—")
         initials = uname[:2].upper()
 
         st.html(f"""
@@ -129,14 +109,27 @@ def _render_sidebar():
   <div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
     <div style="width:28px; height:28px; border-radius:50%; background:var(--lime);
                 display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-      <span style="font-family:'Bebas Neue',sans-serif; font-size:12px; color:#0a0a0b;">
-        {initials}
-      </span>
+      <span style="font-family:'Bebas Neue',sans-serif; font-size:12px; color:#0a0a0b;">{initials}</span>
     </div>
     <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--soft);
                 letter-spacing:1px; text-transform:uppercase;">{uname}</div>
   </div>
 </div>
+""")
+
+        # Scale down font so long labels fit on one line without truncation
+        st.html("""
+<style>
+section[data-testid="stSidebar"] .stButton > button {
+  font-size: 9px !important;
+  letter-spacing: 0.6px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+}
+</style>
 """)
 
         selected = st.session_state.get("selected_feature", "stats")
@@ -148,8 +141,8 @@ def _render_sidebar():
 """)
             for key, label in section["items"]:
                 is_active = selected == key
-                btn_type  = "primary" if is_active else "secondary"
-                if st.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
+                if st.button(label, key=f"nav_{key}", use_container_width=True,
+                             type="primary" if is_active else "secondary"):
                     st.session_state.selected_feature = key
                     if key != "onboarding":
                         st.session_state.onboarding_done = True
@@ -160,42 +153,23 @@ def _render_sidebar():
             logout()
 
 
-# ─── FEATURE ROUTER ───────────────────────────────────────────────────────────
-
 def _render_feature(feature: str):
     if feature in ("stats", "dashboard"):
-        from Pages.dashboard import stats_page
-        stats_page()
-
+        from Pages.dashboard import stats_page; stats_page()
     elif feature == "log":
-        from Pages.dashboard import log_session_page
-        log_session_page()
-
+        from Pages.dashboard import log_session_page; log_session_page()
     elif feature == "history":
-        from Pages.dashboard import history_page
-        history_page()
-
+        from Pages.dashboard import history_page; history_page()
     elif feature == "analytics":
-        from Pages.analytics import analytics_page
-        analytics_page()
-
+        from Pages.analytics import analytics_page; analytics_page()
     elif feature == "rbtl":
-        from Pages.what_would_you_do import what_would_you_do_page
-        what_would_you_do_page()
-
+        from Pages.what_would_you_do import what_would_you_do_page; what_would_you_do_page()
     elif feature == "hotspots":
         try:
-            from Pages.hotspots import hotspots_page
-            hotspots_page()
+            from Pages.hotspots import hotspots_page; hotspots_page()
         except ImportError:
             inject_page_css()
-            st.html("""
-<div style="padding:60px; text-align:center;">
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:3px;
-              color:var(--muted);">COMING SOON</div>
-</div>
-""")
-
+            st.html('<div style="padding:60px;text-align:center;font-family:\'Bebas Neue\',sans-serif;font-size:28px;letter-spacing:3px;color:var(--muted);">COMING SOON</div>')
     elif feature == "dod":
         from Pages.do_or_drink_ui import render_setup, render_generating, render_game, render_game_over
         from Pages.do_or_drink_core import init_state
@@ -205,55 +179,36 @@ def _render_feature(feature: str):
         elif phase == "generating": render_generating()
         elif phase == "game":       render_game()
         elif phase == "gameover":   render_game_over()
-
     elif feature == "confess":
-        from Pages.confession import confessions_page
-        confessions_page()
-
+        from Pages.confession import confessions_page; confessions_page()
     elif feature == "profile":
-        from Pages.profile import profile_page
-        profile_page()
-
+        from Pages.profile import profile_page; profile_page()
     elif feature == "settings":
-        from Pages.settings import settings_page
-        settings_page()
-
+        from Pages.settings import settings_page; settings_page()
     elif feature == "onboarding":
-        from Pages.onboarding import onboarding_page
-        onboarding_page()
-
+        from Pages.onboarding import onboarding_page; onboarding_page()
     elif feature == "quick_log":
-        from Pages.dashboard import log_session_page
-        log_session_page()
-
+        from Pages.dashboard import log_session_page; log_session_page()
     else:
-        from Pages.dashboard import stats_page
-        stats_page()
+        from Pages.dashboard import stats_page; stats_page()
 
-
-# ─── AUTH PAGES ───────────────────────────────────────────────────────────────
 
 def _render_auth():
     inject_page_css()
     page = st.session_state.get("page", "login")
-    if page == "login":
-        _login_page()
-    elif page == "register":
-        _register_page()
-    elif page == "forgot":
-        _forgot_page()
+    if page == "login":      _login_page()
+    elif page == "register": _register_page()
+    elif page == "forgot":   _forgot_page()
 
 
 def _login_page():
     st.html("""
-<div style="max-width:400px; margin:60px auto 0;">
-  <div style="text-align:center; margin-bottom:32px;">
-    <div style="font-family:'Bebas Neue',sans-serif; font-size:60px; color:var(--lime);
-                letter-spacing:4px; line-height:0.9;">VICE<br>VAULT</div>
-    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--muted); margin-top:10px;">
-      Your vice. Your data. Private.
-    </div>
+<div style="max-width:400px; margin:60px auto 0; text-align:center; margin-bottom:32px;">
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:60px; color:var(--lime);
+              letter-spacing:4px; line-height:0.9;">VICE<br>VAULT</div>
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--muted); margin-top:10px;">
+    Your vice. Your data. Private.
   </div>
 </div>
 """)
@@ -270,20 +225,17 @@ def _login_page():
                     import database as db
                     user = db.authenticate_user(username.strip(), password)
                     if user:
-                        st.session_state.authenticated = True
-                        st.session_state.user          = user
-                        st.session_state.vice_log      = db.load_vice_log(user["id"])
+                        st.session_state.authenticated    = True
+                        st.session_state.user             = user
+                        st.session_state.vice_log         = db.load_vice_log(user["id"])
                         st.session_state.selected_feature = "stats"
-                        try:
-                            _prewarm_quiz()
-                        except Exception:
-                            pass
+                        try: _prewarm_quiz()
+                        except Exception: pass
                         st.rerun()
                     else:
                         st.error("Wrong username or password.")
                 except Exception as e:
                     st.error(f"Login error: {e}")
-
         st.html("<div style='height:8px'></div>")
         col_r, col_f = st.columns(2)
         with col_r:
@@ -308,12 +260,9 @@ def _register_page():
         pw       = st.text_input("Password",         type="password", key="reg_pw")
         pw2      = st.text_input("Confirm password", type="password", key="reg_pw2")
         if st.button("Create Account →", type="primary", use_container_width=True, key="reg_btn"):
-            if pw != pw2:
-                st.error("Passwords don't match.")
-            elif len(pw) < 8:
-                st.error("Password must be at least 8 characters.")
-            elif not username.strip():
-                st.error("Enter a username.")
+            if pw != pw2:              st.error("Passwords don't match.")
+            elif len(pw) < 8:          st.error("Password must be at least 8 characters.")
+            elif not username.strip(): st.error("Enter a username.")
             else:
                 try:
                     import database as db
@@ -350,12 +299,9 @@ def _forgot_page():
             st.session_state.page = "login"; st.rerun()
 
 
-# ─── BOOTSTRAP ────────────────────────────────────────────────────────────────
-
 def _bootstrap_db():
     try:
-        import database as db
-        db.ensure_tables()
+        import database as db; db.ensure_tables()
     except Exception:
         pass
 
@@ -367,8 +313,6 @@ def _handle_query_params():
         st.session_state.selected_feature = "log"
         st.rerun()
 
-
-# ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 def main():
     _bootstrap_db()
