@@ -1,15 +1,11 @@
-# styles.py — ViceVault rebrand base styles
+# styles.py — ViceVault base styles
+# CSS is injected at most once per Streamlit rerun.
+# Call apply_custom_styles() / inject_page_css() as many times as you like —
+# only the first call in each render cycle actually writes to the DOM.
 
 import streamlit as st
 
-
-def inject_page_css():
-    """Alias used by individual pages — applies the same global styles."""
-    apply_custom_styles()
-
-
-def apply_custom_styles():
-    st.html("""
+_BASE_CSS = """
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -23,9 +19,7 @@ def apply_custom_styles():
 
 .stApp { background:var(--bg) !important; }
 section[data-testid="stMain"] { background:var(--bg) !important; }
-section.main .block-container {
-  padding-bottom: 3rem !important;
-}
+section.main .block-container { padding-bottom: 3rem !important; }
 
 /* Sidebar */
 section[data-testid="stSidebar"] {
@@ -105,6 +99,21 @@ section[data-testid="stSidebar"] .stButton > button:hover {
   color:var(--muted) !important;
 }
 
+/* Select boxes */
+.stSelectbox > div > div {
+  background:var(--card) !important;
+  border:1px solid var(--border) !important;
+  border-radius:3px !important;
+  color:var(--text) !important;
+}
+.stSelectbox label {
+  font-family:'Space Mono',monospace !important;
+  font-size:9px !important;
+  letter-spacing:2px !important;
+  text-transform:uppercase !important;
+  color:var(--muted) !important;
+}
+
 /* Alerts */
 .stAlert {
   border-radius:3px !important;
@@ -124,4 +133,37 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 #MainMenu { visibility:hidden; }
 footer    { visibility:hidden; }
 </style>
-""")
+"""
+
+
+def apply_custom_styles():
+    """
+    Inject base CSS. Safe to call multiple times per render —
+    only actually writes to the DOM once per Streamlit rerun.
+    """
+    # Guard: skip if already injected this rerun.
+    # We use a flag in session_state tied to Streamlit's internal script run counter,
+    # which increments by 1 on every rerun for the session.
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        ctx = get_script_run_ctx()
+        run_key = f"_css_run_{id(ctx)}" if ctx else "_css_run_fallback"
+    except Exception:
+        run_key = "_css_run_fallback"
+
+    if st.session_state.get(run_key):
+        return
+
+    # Mark as injected for this run, clean up stale keys from prior runs
+    stale = [k for k in list(st.session_state.keys())
+             if k.startswith("_css_run_") and k != run_key]
+    for k in stale:
+        del st.session_state[k]
+    st.session_state[run_key] = True
+
+    st.html(_BASE_CSS)
+
+
+def inject_page_css():
+    """Alias used by individual pages — same deduplication guard applies."""
+    apply_custom_styles()
