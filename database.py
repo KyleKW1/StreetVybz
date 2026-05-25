@@ -1766,22 +1766,42 @@ def load_rbtl_history(user_id: int, limit: int = 5) -> list:
     finally:
         conn.close()
 
-
 def authenticate_user(username: str, password: str):
     conn = create_connection()
     if not conn:
         return None
     try:
-        import hashlib
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
         cur = conn.cursor(dictionary=True)
-        cur.execute(
-            "SELECT * FROM users WHERE username = %s AND password_hash = %s",
-            (username, password_hash)
-        )
+        cur.execute("SELECT * FROM users WHERE username = %s", (username,))
         user = cur.fetchone()
         cur.close()
-        return user
+        if not user:
+            return None
+
+        stored = user.get("password_hash", "")
+
+        # bcrypt hash
+        if stored.startswith("$2b$") or stored.startswith("$2a$"):
+            try:
+                import bcrypt
+                if bcrypt.checkpw(password.encode(), stored.encode()):
+                    return user
+            except Exception:
+                pass
+            return None
+
+        # SHA-256 hex (64 chars)
+        if len(stored) == 64:
+            import hashlib
+            if hashlib.sha256(password.encode()).hexdigest() == stored:
+                return user
+            return None
+
+        # Plain text fallback (legacy/test accounts)
+        if stored == password:
+            return user
+
+        return None
     except Exception as e:
         st.error(f"Authentication error: {e}")
         return None
