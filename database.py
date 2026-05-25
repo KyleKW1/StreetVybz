@@ -1370,7 +1370,7 @@ def save_read_between_lines_result(user_id, profile_name, profile_meta, dim_scor
         conn.close()
 
 # ── DDL to add inside ensure_tables() ────────────────────────────────────────
-
+ 
 NEW_DDL = [
     """
     CREATE TABLE IF NOT EXISTS dod_rooms (
@@ -1386,9 +1386,9 @@ NEW_DDL = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
 ]
-
+ 
 # ─── VICE LOG — single entry delete ──────────────────────────────────────────
-
+ 
 def delete_vice_entry(entry_id: int, user_id: int) -> bool:
     """Delete a single vice log entry. user_id guard prevents cross-user deletion."""
     conn = create_connection()
@@ -1409,10 +1409,10 @@ def delete_vice_entry(entry_id: int, user_id: int) -> bool:
         return False
     finally:
         conn.close()
-
-
+ 
+ 
 # ─── CLEAN DAYS PER VICE ──────────────────────────────────────────────────────
-
+ 
 def get_last_logged_per_vice(user_id: int) -> dict:
     """
     Returns {vice: last_logged_at datetime} for each vice the user has logged.
@@ -1437,10 +1437,10 @@ def get_last_logged_per_vice(user_id: int) -> dict:
         return {}
     finally:
         conn.close()
-
-
+ 
+ 
 # ─── DATA EXPORT ──────────────────────────────────────────────────────────────
-
+ 
 def export_user_data(user_id: int) -> dict:
     """
     Returns all user data as a serialisable dict for JSON download.
@@ -1451,12 +1451,12 @@ def export_user_data(user_id: int) -> dict:
         return {}
     try:
         cur = conn.cursor(dictionary=True)
-
+ 
         cur.execute("SELECT username, email, created_at FROM users WHERE id = %s", (user_id,))
         user = cur.fetchone() or {}
         if user.get("created_at"):
             user["created_at"] = str(user["created_at"])
-
+ 
         cur.execute(
             "SELECT vice, logged_at, details FROM vice_log WHERE user_id = %s ORDER BY logged_at DESC",
             (user_id,)
@@ -1474,7 +1474,7 @@ def export_user_data(user_id: int) -> dict:
                 "logged_at": str(row["logged_at"]),
                 "details": d,
             })
-
+ 
         cur.execute(
             """SELECT quiz_type, completed_at, result_name, openness_pct, dim_scores
                FROM quiz_results WHERE user_id = %s ORDER BY completed_at DESC""",
@@ -1495,13 +1495,13 @@ def export_user_data(user_id: int) -> dict:
                 "openness_pct": row["openness_pct"],
                 "dim_scores":   ds,
             })
-
+ 
         cur.execute(
             "SELECT vice, weekly_limit FROM vice_goals WHERE user_id = %s",
             (user_id,)
         )
         goals = {r["vice"]: r["weekly_limit"] for r in cur.fetchall()}
-
+ 
         cur.execute(
             "SELECT interaction_type, created_at, payload FROM interactions WHERE user_id = %s ORDER BY created_at DESC",
             (user_id,)
@@ -1519,7 +1519,7 @@ def export_user_data(user_id: int) -> dict:
                 "created_at": str(row["created_at"]),
                 "payload":    p,
             })
-
+ 
         cur.close()
         return {
             "user":         user,
@@ -1534,10 +1534,10 @@ def export_user_data(user_id: int) -> dict:
         return {}
     finally:
         conn.close()
-
-
+ 
+ 
 # ─── ACCOUNT DELETION ─────────────────────────────────────────────────────────
-
+ 
 def delete_user_account(user_id: int) -> bool:
     """
     Hard delete everything for a user.
@@ -1562,7 +1562,7 @@ def delete_user_account(user_id: int) -> bool:
                 cur.execute(f"DELETE FROM {table} WHERE user_id = %s", (user_id,))
             except Exception:
                 pass
-
+ 
         # Confessions — anonymise rather than delete (keeps exchange integrity)
         try:
             cur.execute(
@@ -1571,7 +1571,7 @@ def delete_user_account(user_id: int) -> bool:
             )
         except Exception:
             pass
-
+ 
         # Public confessions — leave content, mark author anonymous
         try:
             cur.execute(
@@ -1580,7 +1580,7 @@ def delete_user_account(user_id: int) -> bool:
             )
         except Exception:
             pass
-
+ 
         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
         conn.commit()
         cur.close()
@@ -1590,10 +1590,10 @@ def delete_user_account(user_id: int) -> bool:
         return False
     finally:
         conn.close()
-
-
+ 
+ 
 # ─── DO OR DRINK ROOMS ────────────────────────────────────────────────────────
-
+ 
 def create_dod_room(host_id: int, host_username: str, mode: str) -> str | None:
     """Create a room and return the 6-char code, or None on failure."""
     import secrets
@@ -1624,8 +1624,8 @@ def create_dod_room(host_id: int, host_username: str, mode: str) -> str | None:
         return None
     finally:
         conn.close()
-
-
+ 
+ 
 def join_dod_room(room_code: str, user_id: int, username: str) -> dict | None:
     """
     Add a player to a room. Returns the room dict on success, None on failure.
@@ -1645,18 +1645,18 @@ def join_dod_room(room_code: str, user_id: int, username: str) -> dict | None:
         if not room:
             cur.close()
             return "not_found"
-
+ 
         players = room.get("players") or []
         if isinstance(players, str):
             try:
                 players = json.loads(players)
             except Exception:
                 players = []
-
+ 
         if any(p.get("user_id") == user_id for p in players):
             cur.close()
             return "already_in"
-
+ 
         players.append({"username": username, "user_id": user_id, "is_host": False})
         cur.execute(
             "UPDATE dod_rooms SET players = %s WHERE room_code = %s",
@@ -1671,8 +1671,8 @@ def join_dod_room(room_code: str, user_id: int, username: str) -> dict | None:
         return None
     finally:
         conn.close()
-
-
+ 
+ 
 def get_dod_room(room_code: str) -> dict | None:
     conn = create_connection()
     if not conn:
@@ -1694,8 +1694,8 @@ def get_dod_room(room_code: str) -> dict | None:
         return None
     finally:
         conn.close()
-
-
+ 
+ 
 def close_dod_room(room_code: str) -> None:
     conn = create_connection()
     if not conn:
@@ -1712,8 +1712,8 @@ def close_dod_room(room_code: str) -> None:
         pass
     finally:
         conn.close()
-
-
+ 
+ 
 def cleanup_old_dod_rooms() -> None:
     """Delete rooms older than 24 hours."""
     conn = create_connection()
@@ -1730,10 +1730,10 @@ def cleanup_old_dod_rooms() -> None:
         pass
     finally:
         conn.close()
-
-
+ 
+ 
 # ─── RBTL RESULT HISTORY ──────────────────────────────────────────────────────
-
+ 
 def load_rbtl_history(user_id: int, limit: int = 5) -> list:
     """Load past RBTL quiz completions for the profile / history view."""
     conn = create_connection()
