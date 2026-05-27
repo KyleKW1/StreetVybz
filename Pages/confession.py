@@ -496,8 +496,11 @@ def _render_compose():
 </div>
 """)
     else:
+        # Pre-fill if arriving from Friends tab "↑ Confess" button
+        _prefill = st.session_state.pop("conf_prefill", "") or ""
         recipient_username = st.text_input(
             "Send to (username)",
+            value=_prefill,
             placeholder="Their ViceVault username",
             key=f"conf_recipient_{gen}",
         )
@@ -1320,9 +1323,11 @@ def _render_friends():
                 elif result == "already_friends":
                     st.info(f"You and {uname} are already friends.")
                 elif result == "already_sent":
-                    st.info("Request already pending.")
+                    st.info("Request already pending — they haven't accepted yet.")
+                elif result == "error":
+                    st.error("Couldn't send the request. Check your connection and try again.")
                 else:
-                    st.error("Something went wrong.")
+                    st.error(f"Unexpected response: {result}")
 
     st.html("""
 <div style="background:var(--surface); border:1px solid var(--border); border-radius:4px;
