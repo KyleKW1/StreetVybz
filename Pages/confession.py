@@ -1,12 +1,13 @@
 """
-Pages/confession.py — Mutual blind confession exchange + anonymous community board.
+Pages/confession.py — Mutual blind confession exchange + anonymous community board + Friends/Compare.
 
 Tabs:
   Compose  — start a new confession exchange with a specific user or invite by email
   Inbox    — confessions sent to you
   Sent     — confessions you started
   Revealed — exchanges that have unlocked
-  Board    — anonymous public confession board (post without a recipient)
+  Board    — anonymous public confession board
+  Friends  — add friends, accept requests, compare vault stats
 """
 
 import streamlit as st
@@ -14,8 +15,18 @@ import secrets
 import string
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from styles import inject_page_css
+
+
+# ─── VICE META ────────────────────────────────────────────────────────────────
+
+_VICE_META = {
+    "weed":    {"label": "Weed",    "icon": "🌿", "color": "#c6ff00"},
+    "alcohol": {"label": "Alcohol", "icon": "🥃", "color": "#ffb300"},
+    "sex":     {"label": "Sex",     "icon": "🔥", "color": "#ff2d78"},
+    "other":   {"label": "Other",   "icon": "💊", "color": "#00e5ff"},
+}
 
 
 # ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -835,27 +846,17 @@ def _render_board_post_form():
     vice_choice = st.selectbox(
         "Tag it (optional)",
         ["None", "Weed 🌿", "Alcohol 🥃", "Sex 🔥", "Other 💊"],
-        key=f"pcb_vice_{gen}",
-        index=0,
+        key=f"pcb_vice_{gen}", index=0,
     )
-    vice_map = {
-        "None": None, "Weed 🌿": "weed",
-        "Alcohol 🥃": "alcohol", "Sex 🔥": "sex", "Other 💊": "other",
-    }
+    vice_map = {"None": None, "Weed 🌿": "weed", "Alcohol 🥃": "alcohol", "Sex 🔥": "sex", "Other 💊": "other"}
     vice_key = vice_map[vice_choice]
 
     content = st.text_area(
-        "Your confession",
-        placeholder="Say it. Nobody knows it's you.",
-        key=f"pcb_content_{gen}",
-        height=120,
-        max_chars=1000,
+        "Your confession", placeholder="Say it. Nobody knows it's you.",
+        key=f"pcb_content_{gen}", height=120, max_chars=1000,
     )
 
-    if st.button(
-        "Post anonymously →", type="primary", use_container_width=True,
-        key=f"pcb_submit_{gen}",
-    ):
+    if st.button("Post anonymously →", type="primary", use_container_width=True, key=f"pcb_submit_{gen}"):
         uid  = _uid()
         if not uid:
             st.error("Log in to post.")
@@ -901,12 +902,8 @@ def _render_board_card(item: dict):
 </div>
 """)
 
-    with st.expander(
-        f"{'Read & reply' if replies else 'Be the first to reply'} →",
-        expanded=False,
-    ):
+    with st.expander(f"{'Read & reply' if replies else 'Be the first to reply'} →", expanded=False):
         thread = _db("load_public_replies", cid, default=[])
-
         if thread:
             for reply in thread:
                 reply_ago = _time_ago(reply.get("created_at"))
@@ -926,15 +923,11 @@ def _render_board_card(item: dict):
 <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);
             padding:8px 0 4px; font-style:italic;">No replies yet. Be the first.</div>
 """)
-
         uid = _uid()
         if uid:
             reply_text = st.text_area(
-                "Reply anonymously",
-                placeholder="Say something…",
-                key=f"pcb_reply_text_{cid}",
-                height=72,
-                label_visibility="collapsed",
+                "Reply anonymously", placeholder="Say something…",
+                key=f"pcb_reply_text_{cid}", height=72, label_visibility="collapsed",
             )
             if st.button("Reply →", key=f"pcb_reply_btn_{cid}", use_container_width=True):
                 text = (reply_text or "").strip()
@@ -970,41 +963,28 @@ def _render_board():
 </div>
 """)
 
-    # ── Filter ────────────────────────────────────────────────────────────────
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
             text-transform:uppercase; color:var(--muted); margin-bottom:8px;">Filter</div>
 """)
-    filter_options = {
-        "All": None, "🌿 Weed": "weed",
-        "🥃 Alcohol": "alcohol", "🔥 Sex": "sex", "💊 Other": "other",
-    }
+    filter_options = {"All": None, "🌿 Weed": "weed", "🥃 Alcohol": "alcohol", "🔥 Sex": "sex", "💊 Other": "other"}
     st.session_state.setdefault("pcb_filter", None)
 
     fcols = st.columns(len(filter_options))
     for i, (label, val) in enumerate(filter_options.items()):
         with fcols[i]:
             active = st.session_state.pcb_filter == val
-            if st.button(
-                label, key=f"pcb_f_{i}", use_container_width=True,
-                type="primary" if active else "secondary",
-            ):
+            if st.button(label, key=f"pcb_f_{i}", use_container_width=True,
+                         type="primary" if active else "secondary"):
                 st.session_state.pcb_filter = val
                 st.rerun()
 
     st.html("<div style='height:1rem'></div>")
-
-    # ── Post form ─────────────────────────────────────────────────────────────
     with st.expander("◈  Post something", expanded=False):
         _render_board_post_form()
-
     st.html("<div style='height:1px; background:var(--border); margin:16px 0;'></div>")
 
-    # ── Feed ──────────────────────────────────────────────────────────────────
-    posts = _db(
-        "load_public_confessions", 30, 0, st.session_state.pcb_filter, default=[]
-    )
-
+    posts = _db("load_public_confessions", 30, 0, st.session_state.pcb_filter, default=[])
     if not posts:
         st.html("""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
@@ -1020,6 +1000,339 @@ def _render_board():
 
     for item in posts:
         _render_board_card(item)
+
+
+# ─── FRIENDS / COMPARE ───────────────────────────────────────────────────────
+
+def _vice_bar(vice: str, count: int, total: int):
+    """Render a single vice bar for the compare view."""
+    meta = _VICE_META.get(vice, {"label": vice.title(), "icon": "◈", "color": "var(--muted)"})
+    pct  = round(count / total * 100) if total else 0
+    return f"""
+<div style="margin-bottom:10px;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+    <span style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
+                 text-transform:uppercase; color:{meta['color']};">
+      {meta['icon']} {meta['label']}
+    </span>
+    <span style="font-family:'Bebas Neue',sans-serif; font-size:16px; color:{meta['color']};">
+      {count}
+    </span>
+  </div>
+  <div style="height:3px; background:var(--border); border-radius:2px;">
+    <div style="width:{pct}%; height:100%; background:{meta['color']}; border-radius:2px;"></div>
+  </div>
+</div>"""
+
+
+def _days_clean_display(vice: str, last_per_vice: dict) -> str:
+    """Return formatted days-clean string for a vice."""
+    last_str = last_per_vice.get(vice)
+    if not last_str:
+        return "—"
+    try:
+        last = datetime.fromisoformat(str(last_str))
+        days = (datetime.now() - last).days
+        if days == 0:
+            return "today"
+        return f"{days}d"
+    except Exception:
+        return "—"
+
+
+def _render_compare_panel(stats: dict, label: str, is_me: bool):
+    """Render one side of the compare split-view."""
+    col_accent = "var(--lime)" if is_me else "var(--cyan)"
+    username   = stats.get("username", label)
+    initials   = username[:2].upper()
+
+    freak       = stats.get("freak_score")
+    freak_str   = f"{freak}/100" if freak is not None else "—"
+    total       = stats.get("total_sessions", 0)
+    vice_counts = stats.get("vice_counts", {})
+    rbtl        = stats.get("rbtl_name") or "—"
+    rbtl_open   = stats.get("rbtl_openness")
+    last_per    = stats.get("last_per_vice", {})
+
+    bars_html = "".join(
+        _vice_bar(v, vice_counts.get(v, 0), total)
+        for v in ["weed", "alcohol", "sex", "other"]
+    ) if total else '<div style="font-family:\'DM Sans\',sans-serif; font-size:12px; color:var(--muted); font-style:italic; padding:8px 0;">No sessions logged (30d)</div>'
+
+    clean_items = "".join(
+        f'<div style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid var(--border);">'
+        f'<span style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--muted); text-transform:uppercase; letter-spacing:1px;">'
+        f'{_VICE_META.get(v, {}).get("icon","◈")} {_VICE_META.get(v, {}).get("label", v)}</span>'
+        f'<span style="font-family:\'Bebas Neue\',sans-serif; font-size:16px; color:{col_accent};">'
+        f'{_days_clean_display(v, last_per)}</span>'
+        f'</div>'
+        for v in ["weed", "alcohol", "sex", "other"]
+    )
+
+    st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-top:3px solid {col_accent}; border-radius:4px; padding:20px;">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px;">
+    <div style="width:40px; height:40px; border-radius:50%; background:{col_accent};
+                display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+      <span style="font-family:'Bebas Neue',sans-serif; font-size:16px; color:#0a0a0b;">{initials}</span>
+    </div>
+    <div>
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--text);
+                  letter-spacing:1px; line-height:1;">{username}</div>
+      <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);
+                  text-transform:uppercase; letter-spacing:1px; margin-top:2px;">
+        {"You" if is_me else "Friend"}
+      </div>
+    </div>
+  </div>
+
+  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--muted); margin-bottom:10px;">Sessions (30d)</div>
+  {bars_html}
+
+  <div style="margin-top:16px; margin-bottom:4px; font-family:'Space Mono',monospace;
+              font-size:8px; letter-spacing:2px; text-transform:uppercase; color:var(--muted);">
+    Days Since Last
+  </div>
+  {clean_items}
+
+  <div style="display:flex; gap:12px; margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
+    <div style="flex:1; text-align:center;">
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:32px; color:{col_accent}; line-height:1;">
+        {freak_str}
+      </div>
+      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+                  text-transform:uppercase; letter-spacing:1px; margin-top:2px;">Freak Score</div>
+    </div>
+    <div style="flex:1; text-align:center;">
+      <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:{col_accent};
+                  line-height:1.3; font-style:italic; margin-top:4px;">{rbtl}</div>
+      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+                  text-transform:uppercase; letter-spacing:1px; margin-top:4px;">RBTL Result</div>
+      {f'<div style="font-family:Bebas Neue,sans-serif; font-size:18px; color:{col_accent};">{rbtl_open}%</div>' if rbtl_open else ''}
+    </div>
+  </div>
+</div>
+""")
+
+
+def _render_friends():
+    inject_page_css()
+    uid = _uid()
+    if not uid:
+        st.error("Log in to use Friends.")
+        return
+
+    # ── State ─────────────────────────────────────────────────────────────────
+    st.session_state.setdefault("friend_compare_id",   None)
+    st.session_state.setdefault("friend_compare_stats", None)
+    st.session_state.setdefault("friend_add_gen",       0)
+
+    # ── Compare view (full-page takeover when active) ─────────────────────────
+    if st.session_state.friend_compare_id and st.session_state.friend_compare_stats:
+        friend_stats = st.session_state.friend_compare_stats
+        my_stats     = _db("get_user_public_stats", uid, default={})
+
+        st.html("""
+<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:16px;">
+  Vault Compare
+</div>
+""")
+        col_me, col_them = st.columns(2)
+        with col_me:
+            _render_compare_panel(my_stats or {"username": _username()}, "You", is_me=True)
+        with col_them:
+            _render_compare_panel(friend_stats, friend_stats.get("username", "Friend"), is_me=False)
+
+        st.html("<div style='height:16px'></div>")
+
+        # ── Insight callouts ──────────────────────────────────────────────────
+        my_freak   = (my_stats or {}).get("freak_score") or 0
+        their_freak = friend_stats.get("freak_score") or 0
+        my_total    = (my_stats or {}).get("total_sessions", 0)
+        their_total = friend_stats.get("total_sessions", 0)
+
+        insights = []
+        if my_freak and their_freak:
+            diff = abs(my_freak - their_freak)
+            if diff <= 8:
+                insights.append(("◆ Aligned", f"Your freak scores are within {diff} points of each other.", "var(--lime)"))
+            elif my_freak > their_freak:
+                insights.append(("▲ You lead", f"Your freak score is {diff} points higher.", "var(--amber)"))
+            else:
+                insights.append(("▲ They lead", f"Their freak score is {diff} points higher.", "var(--cyan)"))
+        if my_total and their_total:
+            if my_total > their_total * 1.5:
+                insights.append(("◎ More active", f"You've logged {my_total - their_total} more sessions this month.", "var(--lime)"))
+            elif their_total > my_total * 1.5:
+                insights.append(("◎ More active", f"They've logged {their_total - my_total} more sessions this month.", "var(--cyan)"))
+
+        if insights:
+            for icon_label, detail, color in insights:
+                st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-left:3px solid {color}; border-radius:4px;
+            padding:12px 16px; margin-bottom:8px; display:flex; align-items:center; gap:12px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:{color}; flex-shrink:0;">{icon_label}</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">{detail}</div>
+</div>
+""")
+
+        if st.button("← Back to Friends", use_container_width=True, key="compare_back"):
+            st.session_state.friend_compare_id    = None
+            st.session_state.friend_compare_stats = None
+            st.rerun()
+        return
+
+    # ── Pending requests ──────────────────────────────────────────────────────
+    requests = _db("load_friend_requests", uid, default=[])
+    if requests:
+        _section_label(f"Friend Requests — {len(requests)}")
+        for req in requests:
+            sender   = req.get("sender_username", "Someone")
+            req_id   = req.get("id")
+            ago      = _time_ago(req.get("created_at"))
+            st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-left:3px solid var(--amber); border-radius:4px;
+            padding:14px 18px; margin-bottom:4px; display:flex;
+            justify-content:space-between; align-items:center;">
+  <div>
+    <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; color:var(--text);">{sender}</div>
+    <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">{ago}</div>
+  </div>
+</div>
+""")
+            col_acc, col_dec, _ = st.columns([2, 2, 3])
+            with col_acc:
+                if st.button("Accept →", key=f"fr_acc_{req_id}", type="primary", use_container_width=True):
+                    _db("respond_friend_request", req_id, uid, True)
+                    st.rerun()
+            with col_dec:
+                if st.button("Decline", key=f"fr_dec_{req_id}", use_container_width=True):
+                    _db("respond_friend_request", req_id, uid, False)
+                    st.rerun()
+            st.html("<div style='height:6px'></div>")
+
+        st.html("<div style='height:1px; background:var(--border); margin:16px 0;'></div>")
+
+    # ── Friends list ──────────────────────────────────────────────────────────
+    friends = _db("load_friends", uid, default=[])
+    _section_label(f"Friends — {len(friends)}")
+
+    if friends:
+        for f in friends:
+            fname     = f.get("username", "?")
+            freak     = f.get("freak_score")
+            top_vice  = f.get("top_vice")
+            sessions  = f.get("session_count", 0)
+            rbtl      = f.get("rbtl_name") or "—"
+            fid       = f.get("user_id")
+            req_id    = f.get("request_id")
+            top_meta  = _VICE_META.get(top_vice, {}) if top_vice else {}
+            initials  = fname[:2].upper()
+
+            st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-radius:4px; padding:16px 18px; margin-bottom:4px;">
+  <div style="display:flex; align-items:center; gap:14px;">
+    <div style="width:40px; height:40px; border-radius:50%; background:var(--border);
+                display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+      <span style="font-family:'Bebas Neue',sans-serif; font-size:16px; color:var(--soft);">{initials}</span>
+    </div>
+    <div style="flex:1; min-width:0;">
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:20px; color:var(--text);
+                  letter-spacing:1px; line-height:1;">{fname}</div>
+      <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);
+                  text-transform:uppercase; letter-spacing:1px; margin-top:3px;">
+        {f"{top_meta.get('icon','')} {top_meta.get('label','')} most · " if top_vice else ""}{sessions} sessions · {rbtl}
+      </div>
+    </div>
+    <div style="text-align:right; flex-shrink:0;">
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:28px; color:var(--lime);">
+        {f"{freak}" if freak is not None else "—"}
+      </div>
+      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+                  text-transform:uppercase;">freak</div>
+    </div>
+  </div>
+</div>
+""")
+            col_cmp, col_conf, col_rm, _ = st.columns([2, 2, 1, 2])
+            with col_cmp:
+                if st.button("Compare →", key=f"cmp_{fid}", use_container_width=True, type="primary"):
+                    with st.spinner("Loading…"):
+                        stats = _db("get_user_public_stats", fid, default={})
+                    st.session_state.friend_compare_id    = fid
+                    st.session_state.friend_compare_stats = stats
+                    st.rerun()
+            with col_conf:
+                if st.button("↑ Confess", key=f"conf_friend_{fid}", use_container_width=True):
+                    st.session_state.conf_tab        = "compose"
+                    # Pre-fill recipient — set in session state, compose form will pick it up
+                    st.session_state[f"conf_prefill"] = fname
+                    st.rerun()
+            with col_rm:
+                if st.button("✕", key=f"rm_friend_{fid}", help="Remove friend"):
+                    _db("remove_friend", uid, fid)
+                    st.rerun()
+
+            st.html("<div style='height:8px'></div>")
+    else:
+        st.html("""
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:48px; text-align:center;">
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:24px; letter-spacing:3px;
+              color:var(--muted); margin-bottom:8px;">NO FRIENDS YET</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted);">
+    Add someone below — they'll see your vault stats once both sides accept.
+  </div>
+</div>
+""")
+
+    # ── Add friend ────────────────────────────────────────────────────────────
+    st.html("<div style='height:1px; background:var(--border); margin:20px 0;'></div>")
+    _section_label("Add a Friend")
+    gen = st.session_state.friend_add_gen
+    uname_input = st.text_input(
+        "Username", placeholder="Their ViceVault username",
+        key=f"friend_add_input_{gen}",
+    )
+    if st.button("Send Friend Request →", type="primary", use_container_width=True, key=f"friend_add_btn_{gen}"):
+        uname = (uname_input or "").strip()
+        if not uname:
+            st.error("Enter a username.")
+        elif uname.lower() == _username().lower():
+            st.error("You can't add yourself.")
+        else:
+            target = _db("get_user_by_username", uname)
+            if not target:
+                st.error(f"No user found: '{uname}'")
+            else:
+                result = _db("send_friend_request", uid, target["id"], default="error")
+                if result == "sent":
+                    st.success(f"Request sent to {uname}.")
+                    st.session_state.friend_add_gen += 1
+                    st.rerun()
+                elif result == "already_friends":
+                    st.info(f"You and {uname} are already friends.")
+                elif result == "already_sent":
+                    st.info("Request already pending.")
+                else:
+                    st.error("Something went wrong.")
+
+    st.html("""
+<div style="background:var(--surface); border:1px solid var(--border); border-radius:4px;
+            padding:12px 16px; margin-top:12px;">
+  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted); line-height:1.7;">
+    Friends can see your freak score, vice breakdown (last 30 days), and RBTL result.
+    Individual session details are never shared.
+  </div>
+</div>
+""")
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
@@ -1069,7 +1382,7 @@ def confessions_page():
     st.html("""
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Vice Vault</div>
+              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Vice Vault · Social</div>
   <div class="glitch-wrap" data-text="CONFESSIONS"
        style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:var(--text);
               letter-spacing:3px; line-height:0.95;">CONFESSIONS</div>
@@ -1094,42 +1407,38 @@ def confessions_page():
     inbox_action  = sum(1 for i in inbox_items  if i["status"] in ("sent", "questioning"))
     outbox_action = sum(1 for i in outbox_items if i["status"] == "responded")
     revealed_all  = [i for i in inbox_items + outbox_items if i["status"] == "revealed"]
+    pending_reqs  = _db("load_friend_requests", uid, default=[])
 
-    # ── Tab bar ───────────────────────────────────────────────────────────────
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # ── Tab bar (6 tabs) ──────────────────────────────────────────────────────
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
-        if st.button(
-            "◈  Compose", use_container_width=True, key="tab_compose",
-            type="primary" if st.session_state.conf_tab == "compose" else "secondary",
-        ):
+        if st.button("◈  Compose", use_container_width=True, key="tab_compose",
+                     type="primary" if st.session_state.conf_tab == "compose" else "secondary"):
             st.session_state.conf_tab = "compose"; st.rerun()
     with col2:
         b2 = f" ({inbox_action})" if inbox_action else ""
-        if st.button(
-            f"↓  Inbox{b2}", use_container_width=True, key="tab_inbox",
-            type="primary" if st.session_state.conf_tab == "inbox" else "secondary",
-        ):
+        if st.button(f"↓  Inbox{b2}", use_container_width=True, key="tab_inbox",
+                     type="primary" if st.session_state.conf_tab == "inbox" else "secondary"):
             st.session_state.conf_tab = "inbox"; st.rerun()
     with col3:
         b3 = f" ({outbox_action})" if outbox_action else ""
-        if st.button(
-            f"↑  Sent{b3}", use_container_width=True, key="tab_sent",
-            type="primary" if st.session_state.conf_tab == "sent" else "secondary",
-        ):
+        if st.button(f"↑  Sent{b3}", use_container_width=True, key="tab_sent",
+                     type="primary" if st.session_state.conf_tab == "sent" else "secondary"):
             st.session_state.conf_tab = "sent"; st.rerun()
     with col4:
         b4 = f" ({len(revealed_all)})" if revealed_all else ""
-        if st.button(
-            f"⚡  Revealed{b4}", use_container_width=True, key="tab_revealed",
-            type="primary" if st.session_state.conf_tab == "revealed" else "secondary",
-        ):
+        if st.button(f"⚡  Revealed{b4}", use_container_width=True, key="tab_revealed",
+                     type="primary" if st.session_state.conf_tab == "revealed" else "secondary"):
             st.session_state.conf_tab = "revealed"; st.rerun()
     with col5:
-        if st.button(
-            "◉  Board", use_container_width=True, key="tab_board",
-            type="primary" if st.session_state.conf_tab == "board" else "secondary",
-        ):
+        if st.button("◉  Board", use_container_width=True, key="tab_board",
+                     type="primary" if st.session_state.conf_tab == "board" else "secondary"):
             st.session_state.conf_tab = "board"; st.rerun()
+    with col6:
+        b6 = f" ({len(pending_reqs)})" if pending_reqs else ""
+        if st.button(f"👥  Friends{b6}", use_container_width=True, key="tab_friends",
+                     type="primary" if st.session_state.conf_tab == "friends" else "secondary"):
+            st.session_state.conf_tab = "friends"; st.rerun()
 
     st.html("<div style='height:1.5rem'></div>")
 
@@ -1147,6 +1456,9 @@ def confessions_page():
 
     elif tab == "board":
         _render_board()
+
+    elif tab == "friends":
+        _render_friends()
 
     elif tab == "revealed":
         inject_page_css()
