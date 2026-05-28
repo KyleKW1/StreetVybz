@@ -15,9 +15,6 @@ except ImportError:
     DB_CONFIG = {}
 
 # ─── CONNECTION POOL ─────────────────────────────────────────────────────────
-# One pool per process, shared across all user sessions on this worker.
-# pool_size=10 handles concurrent users without opening a new TCP connection
-# for every query.
 
 _pool: "pooling.MySQLConnectionPool | None" = None
 
@@ -49,19 +46,13 @@ def _get_pool() -> "pooling.MySQLConnectionPool | None":
 
 
 def create_connection():
-    """
-    Get a connection from the pool.
-    Falls back to a direct (non-pooled) connection if the pool is exhausted
-    or unavailable, so the app never fully breaks.
-    """
     pool = _get_pool()
     if pool:
         try:
             return pool.get_connection()
         except Exception:
-            pass  # pool exhausted — fall through to direct connection
+            pass
 
-    # Direct connection fallback
     if not MYSQL_AVAILABLE or not DB_CONFIG.get("host"):
         return None
     try:
@@ -216,7 +207,6 @@ def ensure_tables():
             PRIMARY KEY (question_hash, opt_index)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
-        # ── NEW: Do or Drink rooms ──────────────────────────────────────────
         """
         CREATE TABLE IF NOT EXISTS dod_rooms (
             room_code       VARCHAR(6) NOT NULL PRIMARY KEY,
@@ -230,7 +220,6 @@ def ensure_tables():
             INDEX idx_dod_status (status)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
-        # ── Interactions & shadow scores ────────────────────────────────────
         """
         CREATE TABLE IF NOT EXISTS interactions (
             id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -268,6 +257,20 @@ def ensure_tables():
             INDEX idx_dua_deleted (deleted_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
+        # ── Friends / Social ──────────────────────────────────────────────────
+        """
+        CREATE TABLE IF NOT EXISTS friend_requests (
+            id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            sender_id       INT NOT NULL,
+            recipient_id    INT NOT NULL,
+            status          VARCHAR(16) NOT NULL DEFAULT 'pending',
+            created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_friend_pair (sender_id, recipient_id),
+            INDEX idx_fr_recipient (recipient_id, status),
+            INDEX idx_fr_sender    (sender_id, status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
     ]
 
     try:
@@ -276,7 +279,6 @@ def ensure_tables():
             cur.execute(ddl)
         conn.commit()
 
-        # Migrations — all wrapped in try/except so they're safe to re-run
         for migration in [
             "ALTER TABLE quiz_results MODIFY COLUMN quiz_type VARCHAR(64) NOT NULL",
             "ALTER TABLE confessions ADD COLUMN revealed_at DATETIME DEFAULT NULL",
@@ -296,6 +298,7 @@ def ensure_tables():
     finally:
         conn.close()
 
+
 # ─── USERS ────────────────────────────────────────────────────────────────────
 
 def get_user_by_username(username: str):
@@ -310,6 +313,22 @@ def get_user_by_username(username: str):
         return user
     except Exception as e:
         st.error(f"Error fetching user: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def get_user_by_id(user_id: int):
+    conn = create_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+        user = cur.fetchone()
+        cur.close()
+        return user
+    except Exception as e:
         return None
     finally:
         conn.close()
@@ -480,6 +499,12 @@ def save_vice_entry(user_id: int, vice: str, logged_at, details: dict):
         conn.commit()
         new_id = cur.lastrowid
         cur.close()
+        # ── Cache invalidation ──
+        try:
+            load_vice_log.clear()
+            load_social_feed.clear()
+        except Exception:
+            pass
         return new_id
     except Exception as e:
         st.error(f"Error saving vice entry: {e}")
@@ -488,7 +513,9 @@ def save_vice_entry(user_id: int, vice: str, logged_at, details: dict):
         conn.close()
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def load_vice_log(user_id: int) -> list:
+    """Cached 60s. Cleared on save/delete."""
     conn = create_connection()
     if not conn:
         return []
@@ -531,6 +558,11 @@ def delete_vice_log(user_id: int) -> bool:
         cur.execute("DELETE FROM vice_log WHERE user_id = %s", (user_id,))
         conn.commit()
         cur.close()
+        try:
+            load_vice_log.clear()
+            load_social_feed.clear()
+        except Exception:
+            pass
         return True
     except Exception as e:
         st.error(f"Error deleting vice log: {e}")
@@ -543,7 +575,6 @@ def delete_vice_log(user_id: int) -> bool:
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_social_feed(limit: int = 20) -> list:
-    """Cached 60s — social feed doesn't need to be live to the second."""
     conn = create_connection()
     if not conn:
         return []
@@ -566,7 +597,6 @@ def load_social_feed(limit: int = 20) -> list:
 
 @st.cache_data(ttl=120, show_spinner=False)
 def get_vice_goals(user_id: int) -> dict:
-    """Cached 2 min — goals don't change on every render."""
     conn = create_connection()
     if not conn:
         return {}
@@ -596,7 +626,6 @@ def save_vice_goal(user_id: int, vice: str, weekly_limit: int) -> bool:
         )
         conn.commit()
         cur.close()
-        # Bust the cache for this user
         get_vice_goals.clear()
         return True
     except Exception as e:
@@ -722,6 +751,15 @@ def load_latest_rbtl_result(user_id: int) -> dict | None:
 
 # ─── CONFESSIONS ──────────────────────────────────────────────────────────────
 
+def _clear_confession_cache():
+    """Clear inbox/outbox caches after any status mutation."""
+    try:
+        load_confessions_inbox.clear()
+        load_confessions_outbox.clear()
+    except Exception:
+        pass
+
+
 def save_confession(sender_id: int, recipient_id: int, code: str,
                     questions: list, window_seconds: int = 60) -> bool:
     conn = create_connection()
@@ -737,6 +775,7 @@ def save_confession(sender_id: int, recipient_id: int, code: str,
         )
         conn.commit()
         cur.close()
+        _clear_confession_cache()
         return True
     except Exception as e:
         st.error(f"Error saving confession: {e}")
@@ -761,6 +800,7 @@ def save_confession_invite(sender_id: int, recipient_email: str, code: str,
         )
         conn.commit()
         cur.close()
+        _clear_confession_cache()
         return True
     except Exception as e:
         st.error(f"Error saving confession invite: {e}")
@@ -794,7 +834,9 @@ def get_confession_by_code(code: str):
         conn.close()
 
 
+@st.cache_data(ttl=20, show_spinner=False)
 def load_confessions_inbox(user_id: int) -> list:
+    """Cached 20s. Cleared on any confession mutation."""
     conn = create_connection()
     if not conn:
         return []
@@ -821,7 +863,9 @@ def load_confessions_inbox(user_id: int) -> list:
         conn.close()
 
 
+@st.cache_data(ttl=20, show_spinner=False)
 def load_confessions_outbox(user_id: int) -> list:
+    """Cached 20s. Cleared on any confession mutation."""
     conn = create_connection()
     if not conn:
         return []
@@ -862,6 +906,8 @@ def confession_recipient_submit_questions(code: str, recipient_questions: list) 
         conn.commit()
         changed = cur.rowcount > 0
         cur.close()
+        if changed:
+            _clear_confession_cache()
         return changed
     except Exception as e:
         st.error(f"Error submitting questions: {e}")
@@ -884,6 +930,8 @@ def confession_recipient_answer(code: str, recipient_answers: list) -> bool:
         conn.commit()
         changed = cur.rowcount > 0
         cur.close()
+        if changed:
+            _clear_confession_cache()
         return changed
     except Exception as e:
         st.error(f"Error saving answers: {e}")
@@ -909,6 +957,8 @@ def confession_sender_answer(code: str, sender_answers: list) -> bool:
         conn.commit()
         changed = cur.rowcount > 0
         cur.close()
+        if changed:
+            _clear_confession_cache()
         return changed
     except Exception as e:
         st.error(f"Error revealing confession: {e}")
@@ -927,6 +977,8 @@ def delete_confession(code: str) -> bool:
         conn.commit()
         deleted = cur.rowcount > 0
         cur.close()
+        if deleted:
+            _clear_confession_cache()
         return deleted
     except Exception as e:
         st.error(f"Error deleting confession: {e}")
@@ -950,6 +1002,8 @@ def delete_expired_confessions() -> int:
         conn.commit()
         count = cur.rowcount
         cur.close()
+        if count:
+            _clear_confession_cache()
         return count
     except Exception:
         return 0
@@ -1104,46 +1158,6 @@ def dismiss_screenshot_alert(alert_id: int) -> bool:
 
 # ─── INTERACTIONS ─────────────────────────────────────────────────────────────
 
-INTERACTIONS_DDL = """
-CREATE TABLE IF NOT EXISTS interactions (
-    id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id          INT NOT NULL,
-    interaction_type VARCHAR(32)  NOT NULL,
-    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    payload          JSON,
-    INDEX idx_int_user (user_id),
-    INDEX idx_int_type (user_id, interaction_type),
-    INDEX idx_int_time (user_id, created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-"""
-
-SHADOW_SCORE_DDL = """
-CREATE TABLE IF NOT EXISTS shadow_scores (
-    user_id          INT NOT NULL PRIMARY KEY,
-    hypocrisy_idx    TINYINT UNSIGNED DEFAULT 0,
-    conflict_idx     TINYINT UNSIGNED DEFAULT 0,
-    freak_score      TINYINT UNSIGNED DEFAULT 0,
-    updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-"""
-
-
-def ensure_interactions_table():
-    conn = create_connection()
-    if not conn:
-        return
-    try:
-        cur = conn.cursor()
-        cur.execute(INTERACTIONS_DDL)
-        cur.execute(SHADOW_SCORE_DDL)
-        conn.commit()
-        cur.close()
-    except Exception:
-        pass
-    finally:
-        conn.close()
-
-
 def save_interaction(user_id: int, interaction_type: str, payload: dict) -> bool:
     conn = create_connection()
     if not conn:
@@ -1156,6 +1170,10 @@ def save_interaction(user_id: int, interaction_type: str, payload: dict) -> bool
         )
         conn.commit()
         cur.close()
+        try:
+            load_interactions.clear()
+        except Exception:
+            pass
         return True
     except Exception:
         return False
@@ -1163,7 +1181,9 @@ def save_interaction(user_id: int, interaction_type: str, payload: dict) -> bool
         conn.close()
 
 
+@st.cache_data(ttl=120, show_spinner=False)
 def load_interactions(user_id: int, interaction_type: str = None) -> list:
+    """Cached 2 min. Cleared on new interaction save."""
     conn = create_connection()
     if not conn:
         return []
@@ -1223,6 +1243,10 @@ def upsert_shadow_score(user_id: int, hypocrisy_idx: int = None,
         )
         conn.commit()
         cur.close()
+        try:
+            get_shadow_score.clear()
+        except Exception:
+            pass
         return True
     except Exception:
         return False
@@ -1232,7 +1256,6 @@ def upsert_shadow_score(user_id: int, hypocrisy_idx: int = None,
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_shadow_score(user_id: int) -> dict:
-    """Cached 5 min — freak score doesn't change with every render."""
     conn = create_connection()
     if not conn:
         return {}
@@ -1274,7 +1297,6 @@ def save_public_confession(author_id: int, content: str, vice: str = None) -> in
 
 @st.cache_data(ttl=30, show_spinner=False)
 def load_public_confessions(limit: int = 20, offset: int = 0, vice: str = None) -> list:
-    """Cached 30s — board is near-realtime but doesn't need to be instant."""
     conn = create_connection()
     if not conn:
         return []
@@ -1374,7 +1396,6 @@ def record_community_answer(question_hash: str, opt_index: int) -> None:
 
 @st.cache_data(ttl=10, show_spinner=False)
 def get_community_answers(question_hash: str) -> dict:
-    """Cached 10s — pulse updates are frequent but don't need instant consistency."""
     conn = create_connection()
     if not conn:
         return {}
@@ -1393,7 +1414,7 @@ def get_community_answers(question_hash: str) -> dict:
         conn.close()
 
 
-# ─── LEGACY QUIZ SAVES (kept for backwards compat) ───────────────────────────
+# ─── LEGACY QUIZ SAVES ────────────────────────────────────────────────────────
 
 def save_read_between_lines_result(user_id, profile_name, profile_meta, dim_scores,
                                     recommendations, total_pct, questions, answers) -> bool:
@@ -1420,28 +1441,10 @@ def save_read_between_lines_result(user_id, profile_name, profile_meta, dim_scor
     finally:
         conn.close()
 
-# ── DDL to add inside ensure_tables() ────────────────────────────────────────
- 
-NEW_DDL = [
-    """
-    CREATE TABLE IF NOT EXISTS dod_rooms (
-        room_code       VARCHAR(6) NOT NULL PRIMARY KEY,
-        host_id         INT NOT NULL,
-        host_username   VARCHAR(128) NOT NULL,
-        players         JSON NOT NULL DEFAULT ('[]'),
-        mode            VARCHAR(16) NOT NULL DEFAULT 'regular',
-        status          VARCHAR(16) NOT NULL DEFAULT 'waiting',
-        created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_dod_host   (host_id),
-        INDEX idx_dod_status (status)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """,
-]
- 
+
 # ─── VICE LOG — single entry delete ──────────────────────────────────────────
- 
+
 def delete_vice_entry(entry_id: int, user_id: int) -> bool:
-    """Delete a single vice log entry. user_id guard prevents cross-user deletion."""
     conn = create_connection()
     if not conn:
         return False
@@ -1454,21 +1457,23 @@ def delete_vice_entry(entry_id: int, user_id: int) -> bool:
         conn.commit()
         deleted = cur.rowcount > 0
         cur.close()
+        if deleted:
+            try:
+                load_vice_log.clear()
+                load_social_feed.clear()
+            except Exception:
+                pass
         return deleted
     except Exception as e:
         st.error(f"Error deleting entry: {e}")
         return False
     finally:
         conn.close()
- 
- 
+
+
 # ─── CLEAN DAYS PER VICE ──────────────────────────────────────────────────────
- 
+
 def get_last_logged_per_vice(user_id: int) -> dict:
-    """
-    Returns {vice: last_logged_at datetime} for each vice the user has logged.
-    Used to compute "days clean" per vice on the goals page.
-    """
     conn = create_connection()
     if not conn:
         return {}
@@ -1488,26 +1493,21 @@ def get_last_logged_per_vice(user_id: int) -> dict:
         return {}
     finally:
         conn.close()
- 
- 
+
+
 # ─── DATA EXPORT ──────────────────────────────────────────────────────────────
- 
+
 def export_user_data(user_id: int) -> dict:
-    """
-    Returns all user data as a serialisable dict for JSON download.
-    Covers vice log, quiz results, goals, hot takes.
-    """
     conn = create_connection()
     if not conn:
         return {}
     try:
         cur = conn.cursor(dictionary=True)
- 
         cur.execute("SELECT username, email, created_at FROM users WHERE id = %s", (user_id,))
         user = cur.fetchone() or {}
         if user.get("created_at"):
             user["created_at"] = str(user["created_at"])
- 
+
         cur.execute(
             "SELECT vice, logged_at, details FROM vice_log WHERE user_id = %s ORDER BY logged_at DESC",
             (user_id,)
@@ -1520,12 +1520,8 @@ def export_user_data(user_id: int) -> dict:
                     d = json.loads(d)
                 except Exception:
                     d = {}
-            vice_log.append({
-                "vice": row["vice"],
-                "logged_at": str(row["logged_at"]),
-                "details": d,
-            })
- 
+            vice_log.append({"vice": row["vice"], "logged_at": str(row["logged_at"]), "details": d})
+
         cur.execute(
             """SELECT quiz_type, completed_at, result_name, openness_pct, dim_scores
                FROM quiz_results WHERE user_id = %s ORDER BY completed_at DESC""",
@@ -1546,13 +1542,10 @@ def export_user_data(user_id: int) -> dict:
                 "openness_pct": row["openness_pct"],
                 "dim_scores":   ds,
             })
- 
-        cur.execute(
-            "SELECT vice, weekly_limit FROM vice_goals WHERE user_id = %s",
-            (user_id,)
-        )
+
+        cur.execute("SELECT vice, weekly_limit FROM vice_goals WHERE user_id = %s", (user_id,))
         goals = {r["vice"]: r["weekly_limit"] for r in cur.fetchall()}
- 
+
         cur.execute(
             "SELECT interaction_type, created_at, payload FROM interactions WHERE user_id = %s ORDER BY created_at DESC",
             (user_id,)
@@ -1565,12 +1558,8 @@ def export_user_data(user_id: int) -> dict:
                     p = json.loads(p)
                 except Exception:
                     p = {}
-            interactions.append({
-                "type":       row["interaction_type"],
-                "created_at": str(row["created_at"]),
-                "payload":    p,
-            })
- 
+            interactions.append({"type": row["interaction_type"], "created_at": str(row["created_at"]), "payload": p})
+
         cur.close()
         return {
             "user":         user,
@@ -1585,41 +1574,26 @@ def export_user_data(user_id: int) -> dict:
         return {}
     finally:
         conn.close()
- 
- 
+
+
 # ─── ACCOUNT DELETION ─────────────────────────────────────────────────────────
- 
+
 def delete_user_account(user_id: int) -> bool:
-    """
-    Archives all user data to deleted_user_archive, then hard-deletes.
-    The archive is permanent and not exposed anywhere in the app.
-    """
     conn = create_connection()
     if not conn:
         return False
     try:
         cur = conn.cursor(dictionary=True)
-
-        # ── 1. Collect everything before touching a single row ────────────────
         cur.execute("SELECT username, email FROM users WHERE id = %s", (user_id,))
         user_row = cur.fetchone() or {}
-
-        cur.execute(
-            "SELECT vice, logged_at, details FROM vice_log WHERE user_id = %s",
-            (user_id,)
-        )
+        cur.execute("SELECT vice, logged_at, details FROM vice_log WHERE user_id = %s", (user_id,))
         vice_log_rows = []
         for r in cur.fetchall():
             d = r.get("details") or {}
             if isinstance(d, str):
                 try: d = json.loads(d)
                 except Exception: d = {}
-            vice_log_rows.append({
-                "vice": r["vice"],
-                "logged_at": str(r["logged_at"]),
-                "details": d,
-            })
-
+            vice_log_rows.append({"vice": r["vice"], "logged_at": str(r["logged_at"]), "details": d})
         cur.execute(
             """SELECT quiz_type, completed_at, result_name, openness_pct,
                       dim_scores, recommendations, answers
@@ -1635,36 +1609,19 @@ def delete_user_account(user_id: int) -> bool:
                     except Exception: r[col] = {}
             r["completed_at"] = str(r.get("completed_at", ""))
             quiz_rows.append(r)
-
-        cur.execute(
-            "SELECT vice, weekly_limit FROM vice_goals WHERE user_id = %s",
-            (user_id,)
-        )
+        cur.execute("SELECT vice, weekly_limit FROM vice_goals WHERE user_id = %s", (user_id,))
         goals_rows = {r["vice"]: r["weekly_limit"] for r in cur.fetchall()}
-
-        cur.execute(
-            "SELECT interaction_type, created_at, payload FROM interactions WHERE user_id = %s",
-            (user_id,)
-        )
+        cur.execute("SELECT interaction_type, created_at, payload FROM interactions WHERE user_id = %s", (user_id,))
         interaction_rows = []
         for r in cur.fetchall():
             p = r.get("payload") or {}
             if isinstance(p, str):
                 try: p = json.loads(p)
                 except Exception: p = {}
-            interaction_rows.append({
-                "type": r["interaction_type"],
-                "created_at": str(r["created_at"]),
-                "payload": p,
-            })
-
-        cur.execute(
-            "SELECT * FROM shadow_scores WHERE user_id = %s", (user_id,)
-        )
+            interaction_rows.append({"type": r["interaction_type"], "created_at": str(r["created_at"]), "payload": p})
+        cur.execute("SELECT * FROM shadow_scores WHERE user_id = %s", (user_id,))
         shadow_row = cur.fetchone() or {}
 
-        # ── 2. Write archive row ──────────────────────────────────────────────
-        # Use a regular (non-dict) cursor for the INSERT
         cur.close()
         cur = conn.cursor()
         cur.execute(
@@ -1683,40 +1640,30 @@ def delete_user_account(user_id: int) -> bool:
                 json.dumps(shadow_row,       default=str),
             )
         )
-
-        # ── 3. Delete live data ───────────────────────────────────────────────
-        for table in [
-            "vice_log", "quiz_results", "vice_goals",
-            "interactions", "shadow_scores", "session_tokens",
-        ]:
+        for table in ["vice_log", "quiz_results", "vice_goals", "interactions", "shadow_scores", "session_tokens"]:
             try:
                 cur.execute(f"DELETE FROM {table} WHERE user_id = %s", (user_id,))
             except Exception:
                 pass
-
-        # Confessions — remove unsent ones, leave revealed exchanges intact
         try:
-            cur.execute(
-                "DELETE FROM confessions WHERE sender_id = %s AND status = 'sent'",
-                (user_id,)
-            )
+            cur.execute("DELETE FROM confessions WHERE sender_id = %s AND status = 'sent'", (user_id,))
+            cur.execute("UPDATE public_confessions SET author_id = 0 WHERE author_id = %s", (user_id,))
+            # Remove from friend requests
+            cur.execute("DELETE FROM friend_requests WHERE sender_id = %s OR recipient_id = %s", (user_id, user_id))
         except Exception:
             pass
-
-        # Public confessions — anonymise rather than delete
-        try:
-            cur.execute(
-                "UPDATE public_confessions SET author_id = 0 WHERE author_id = %s",
-                (user_id,)
-            )
-        except Exception:
-            pass
-
         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
         conn.commit()
         cur.close()
+        try:
+            load_vice_log.clear()
+            load_confessions_inbox.clear()
+            load_confessions_outbox.clear()
+            load_friends.clear()
+            load_friend_requests.clear()
+        except Exception:
+            pass
         return True
-
     except Exception as e:
         st.error(f"Account deletion error: {e}")
         try:
@@ -1726,20 +1673,18 @@ def delete_user_account(user_id: int) -> bool:
         return False
     finally:
         conn.close()
- 
- 
+
+
 # ─── DO OR DRINK ROOMS ────────────────────────────────────────────────────────
- 
+
 def create_dod_room(host_id: int, host_username: str, mode: str) -> str | None:
-    """Create a room and return the 6-char code, or None on failure."""
-    import secrets
-    import string
+    import secrets, string
     conn = create_connection()
     if not conn:
         return None
     try:
         cur = conn.cursor()
-        for _ in range(10):  # retry until unique code found
+        for _ in range(10):
             code = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
             host_player = json.dumps([{"username": host_username, "user_id": host_id, "is_host": True}])
             try:
@@ -1752,7 +1697,7 @@ def create_dod_room(host_id: int, host_username: str, mode: str) -> str | None:
                 cur.close()
                 return code
             except mysql.connector.IntegrityError:
-                continue  # code collision, retry
+                continue
         cur.close()
         return None
     except Exception as e:
@@ -1760,44 +1705,30 @@ def create_dod_room(host_id: int, host_username: str, mode: str) -> str | None:
         return None
     finally:
         conn.close()
- 
- 
+
+
 def join_dod_room(room_code: str, user_id: int, username: str) -> dict | None:
-    """
-    Add a player to a room. Returns the room dict on success, None on failure.
-    Returns the string 'already_in' if player is already in the room.
-    Returns the string 'not_found' if room doesn't exist.
-    """
     conn = create_connection()
     if not conn:
         return None
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute(
-            "SELECT * FROM dod_rooms WHERE room_code = %s AND status = 'waiting'",
-            (room_code.upper(),)
-        )
+        cur.execute("SELECT * FROM dod_rooms WHERE room_code = %s AND status = 'waiting'", (room_code.upper(),))
         room = cur.fetchone()
         if not room:
             cur.close()
             return "not_found"
- 
         players = room.get("players") or []
         if isinstance(players, str):
             try:
                 players = json.loads(players)
             except Exception:
                 players = []
- 
         if any(p.get("user_id") == user_id for p in players):
             cur.close()
             return "already_in"
- 
         players.append({"username": username, "user_id": user_id, "is_host": False})
-        cur.execute(
-            "UPDATE dod_rooms SET players = %s WHERE room_code = %s",
-            (json.dumps(players), room_code.upper())
-        )
+        cur.execute("UPDATE dod_rooms SET players = %s WHERE room_code = %s", (json.dumps(players), room_code.upper()))
         conn.commit()
         room["players"] = players
         cur.close()
@@ -1807,8 +1738,8 @@ def join_dod_room(room_code: str, user_id: int, username: str) -> dict | None:
         return None
     finally:
         conn.close()
- 
- 
+
+
 def get_dod_room(room_code: str) -> dict | None:
     conn = create_connection()
     if not conn:
@@ -1830,48 +1761,41 @@ def get_dod_room(room_code: str) -> dict | None:
         return None
     finally:
         conn.close()
- 
- 
+
+
 def close_dod_room(room_code: str) -> None:
     conn = create_connection()
     if not conn:
         return
     try:
         cur = conn.cursor()
-        cur.execute(
-            "UPDATE dod_rooms SET status = 'closed' WHERE room_code = %s",
-            (room_code,)
-        )
+        cur.execute("UPDATE dod_rooms SET status = 'closed' WHERE room_code = %s", (room_code,))
         conn.commit()
         cur.close()
     except Exception:
         pass
     finally:
         conn.close()
- 
- 
+
+
 def cleanup_old_dod_rooms() -> None:
-    """Delete rooms older than 24 hours."""
     conn = create_connection()
     if not conn:
         return
     try:
         cur = conn.cursor()
-        cur.execute(
-            "DELETE FROM dod_rooms WHERE created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)"
-        )
+        cur.execute("DELETE FROM dod_rooms WHERE created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)")
         conn.commit()
         cur.close()
     except Exception:
         pass
     finally:
         conn.close()
- 
- 
+
+
 # ─── RBTL RESULT HISTORY ──────────────────────────────────────────────────────
- 
+
 def load_rbtl_history(user_id: int, limit: int = 5) -> list:
-    """Load past RBTL quiz completions for the profile / history view."""
     conn = create_connection()
     if not conn:
         return []
@@ -1902,6 +1826,7 @@ def load_rbtl_history(user_id: int, limit: int = 5) -> list:
     finally:
         conn.close()
 
+
 def authenticate_user(username: str, password: str):
     conn = create_connection()
     if not conn:
@@ -1913,10 +1838,7 @@ def authenticate_user(username: str, password: str):
         cur.close()
         if not user:
             return None
-
         stored = user.get("password_hash", "")
-
-        # bcrypt hash
         if stored.startswith("$2b$") or stored.startswith("$2a$"):
             try:
                 import bcrypt
@@ -1925,21 +1847,321 @@ def authenticate_user(username: str, password: str):
             except Exception:
                 pass
             return None
-
-        # SHA-256 hex (64 chars)
         if len(stored) == 64:
             import hashlib
             if hashlib.sha256(password.encode()).hexdigest() == stored:
                 return user
             return None
-
-        # Plain text fallback (legacy/test accounts)
         if stored == password:
             return user
-
         return None
     except Exception as e:
         st.error(f"Authentication error: {e}")
         return None
+    finally:
+        conn.close()
+
+
+# ─── FRIENDS / SOCIAL ─────────────────────────────────────────────────────────
+
+def send_friend_request(sender_id: int, recipient_id: int) -> str:
+    """
+    Returns: 'sent' | 'already_friends' | 'already_sent' | 'error'
+
+    Bug fix: previously the cursor was closed inside the `if row:` block and
+    then re-used for the INSERT when status was 'declined', causing an
+    OperationalError. Now the check returns early for terminal states and
+    the cursor stays open until the INSERT is done.
+    """
+    conn = create_connection()
+    if not conn:
+        return "error"
+    try:
+        cur = conn.cursor(dictionary=True)
+        # Check existing relationship in either direction
+        cur.execute(
+            """SELECT id, status, sender_id FROM friend_requests
+               WHERE (sender_id = %s AND recipient_id = %s)
+                  OR (sender_id = %s AND recipient_id = %s)""",
+            (sender_id, recipient_id, recipient_id, sender_id)
+        )
+        row = cur.fetchone()
+
+        if row:
+            existing_status = row["status"]
+            existing_id     = row["id"]
+
+            if existing_status == "accepted":
+                cur.close()
+                return "already_friends"
+
+            if existing_status == "pending":
+                cur.close()
+                return "already_sent"
+
+            # Status is 'declined' — update the existing row in-place
+            # (keeps the original direction; either party can re-initiate)
+            cur.execute(
+                "UPDATE friend_requests SET sender_id=%s, recipient_id=%s, status='pending', updated_at=NOW() WHERE id=%s",
+                (sender_id, recipient_id, existing_id)
+            )
+            conn.commit()
+            cur.close()
+        else:
+            # Fresh request — no prior relationship
+            cur.close()
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO friend_requests (sender_id, recipient_id, status)
+                   VALUES (%s, %s, 'pending')""",
+                (sender_id, recipient_id)
+            )
+            conn.commit()
+            cur.close()
+
+        try:
+            load_friend_requests.clear()
+            load_friends.clear()
+        except Exception:
+            pass
+        return "sent"
+    except Exception as e:
+        st.error(f"Friend request error: {e}")
+        return "error"
+    finally:
+        conn.close()
+
+
+def respond_friend_request(request_id: int, user_id: int, accept: bool) -> bool:
+    """Accept or decline a friend request. user_id must be the recipient."""
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        new_status = "accepted" if accept else "declined"
+        cur.execute(
+            """UPDATE friend_requests
+               SET status = %s, updated_at = NOW()
+               WHERE id = %s AND recipient_id = %s AND status = 'pending'""",
+            (new_status, request_id, user_id)
+        )
+        conn.commit()
+        changed = cur.rowcount > 0
+        cur.close()
+        if changed:
+            try:
+                load_friend_requests.clear()
+                load_friends.clear()
+            except Exception:
+                pass
+        return changed
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def remove_friend(user_id: int, friend_id: int) -> bool:
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """DELETE FROM friend_requests
+               WHERE (sender_id = %s AND recipient_id = %s)
+                  OR (sender_id = %s AND recipient_id = %s)""",
+            (user_id, friend_id, friend_id, user_id)
+        )
+        conn.commit()
+        removed = cur.rowcount > 0
+        cur.close()
+        if removed:
+            try:
+                load_friends.clear()
+                load_friend_requests.clear()
+            except Exception:
+                pass
+        return removed
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def load_friend_requests(user_id: int) -> list:
+    """Pending requests where user_id is the recipient."""
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT fr.id, fr.sender_id, fr.created_at, u.username AS sender_username
+               FROM friend_requests fr
+               JOIN users u ON u.id = fr.sender_id
+               WHERE fr.recipient_id = %s AND fr.status = 'pending'
+               ORDER BY fr.created_at DESC""",
+            (user_id,)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def load_friends(user_id: int) -> list:
+    """
+    Returns list of accepted friends with basic public stats.
+    Each item: {user_id, username, freak_score, top_vice, session_count_30d, rbtl_name}
+    """
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT
+                 CASE WHEN fr.sender_id = %s THEN fr.recipient_id ELSE fr.sender_id END AS friend_id,
+                 CASE WHEN fr.sender_id = %s THEN ru.username ELSE su.username END AS username,
+                 fr.id AS request_id
+               FROM friend_requests fr
+               JOIN users su ON su.id = fr.sender_id
+               JOIN users ru ON ru.id = fr.recipient_id
+               WHERE (fr.sender_id = %s OR fr.recipient_id = %s)
+                 AND fr.status = 'accepted'""",
+            (user_id, user_id, user_id, user_id)
+        )
+        friends = cur.fetchall()
+
+        result = []
+        for f in friends:
+            fid = f["friend_id"]
+            # Shadow score (freak score)
+            cur.execute("SELECT freak_score FROM shadow_scores WHERE user_id = %s", (fid,))
+            ss = cur.fetchone()
+            freak = ss["freak_score"] if ss else None
+
+            # Vice summary (last 30 days)
+            cur.execute(
+                """SELECT vice, COUNT(*) AS cnt FROM vice_log
+                   WHERE user_id = %s AND logged_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                   GROUP BY vice ORDER BY cnt DESC""",
+                (fid,)
+            )
+            vice_rows = cur.fetchall()
+            total_sessions = sum(r["cnt"] for r in vice_rows)
+            top_vice       = vice_rows[0]["vice"] if vice_rows else None
+            vice_counts    = {r["vice"]: r["cnt"] for r in vice_rows}
+
+            # Last RBTL result
+            cur.execute(
+                """SELECT result_name FROM quiz_results
+                   WHERE user_id = %s AND quiz_type = 'rbtl_v4_profile_complete'
+                   ORDER BY completed_at DESC LIMIT 1""",
+                (fid,)
+            )
+            rbtl = cur.fetchone()
+
+            # Days clean per vice
+            cur.execute(
+                """SELECT vice, MAX(logged_at) AS last_logged
+                   FROM vice_log WHERE user_id = %s GROUP BY vice""",
+                (fid,)
+            )
+            last_per_vice = {r["vice"]: r["last_logged"] for r in cur.fetchall()}
+
+            result.append({
+                "user_id":         fid,
+                "username":        f["username"],
+                "request_id":      f["request_id"],
+                "freak_score":     freak,
+                "top_vice":        top_vice,
+                "session_count":   total_sessions,
+                "vice_counts":     vice_counts,
+                "rbtl_name":       rbtl["result_name"] if rbtl else None,
+                "last_per_vice":   {k: v.isoformat() if hasattr(v, "isoformat") else str(v)
+                                    for k, v in last_per_vice.items()},
+            })
+
+        cur.close()
+        return result
+    except Exception as e:
+        st.error(f"Error loading friends: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_user_public_stats(user_id: int) -> dict:
+    """
+    Fetch aggregated public stats for a single user.
+    Used in the compare view. No individual session details exposed.
+    """
+    conn = create_connection()
+    if not conn:
+        return {}
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+        u = cur.fetchone()
+        if not u:
+            cur.close()
+            return {}
+
+        cur.execute("SELECT freak_score, conflict_idx FROM shadow_scores WHERE user_id = %s", (user_id,))
+        ss = cur.fetchone() or {}
+
+        cur.execute(
+            """SELECT vice, COUNT(*) AS cnt FROM vice_log
+               WHERE user_id = %s AND logged_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+               GROUP BY vice ORDER BY cnt DESC""",
+            (user_id,)
+        )
+        vice_rows = cur.fetchall()
+        vice_counts  = {r["vice"]: r["cnt"] for r in vice_rows}
+        total        = sum(vice_counts.values())
+        top_vice     = vice_rows[0]["vice"] if vice_rows else None
+
+        cur.execute(
+            """SELECT vice, MAX(logged_at) AS last_logged
+               FROM vice_log WHERE user_id = %s GROUP BY vice""",
+            (user_id,)
+        )
+        last_per_vice = {}
+        for r in cur.fetchall():
+            last_per_vice[r["vice"]] = r["last_logged"]
+
+        cur.execute(
+            """SELECT result_name, result_meta, openness_pct FROM quiz_results
+               WHERE user_id = %s AND quiz_type = 'rbtl_v4_profile_complete'
+               ORDER BY completed_at DESC LIMIT 1""",
+            (user_id,)
+        )
+        rbtl = cur.fetchone()
+
+        cur.close()
+        return {
+            "username":      u["username"],
+            "freak_score":   ss.get("freak_score"),
+            "conflict_idx":  ss.get("conflict_idx"),
+            "vice_counts":   vice_counts,
+            "total_sessions": total,
+            "top_vice":      top_vice,
+            "last_per_vice": {k: v.isoformat() if hasattr(v, "isoformat") else str(v)
+                              for k, v in last_per_vice.items()},
+            "rbtl_name":     rbtl["result_name"]    if rbtl else None,
+            "rbtl_meta":     rbtl["result_meta"]    if rbtl else None,
+            "rbtl_openness": rbtl["openness_pct"]   if rbtl else None,
+        }
+    except Exception:
+        return {}
     finally:
         conn.close()
