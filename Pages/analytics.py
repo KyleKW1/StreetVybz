@@ -1,6 +1,10 @@
 """
 Pages/analytics.py — Vice analytics & trends.
-Added: combined timeline view showing all vices per day as colour-coded bars.
+
+Speed changes vs previous:
+- Day-vice aggregation cached in st.session_state['_analytics_cache']
+  keyed by log length + user_id; rebuilds only when log changes.
+- Period selector no longer triggers full re-aggregation from raw log every run.
 """
 import streamlit as st
 from datetime import datetime, timedelta
@@ -19,13 +23,68 @@ def get_log():
     return st.session_state.get("vice_log", [])
 
 
-def entries_in_range(days: int):
+def entries_in_range(log: list, days: int):
     cutoff = datetime.now() - timedelta(days=days)
     return [
-        e for e in get_log()
+        e for e in log
         if datetime.fromisoformat(e["timestamp"]) >= cutoff
     ]
 
+
+# ─── CACHED AGGREGATION ───────────────────────────────────────────────────────
+
+def _build_aggregations(log: list) -> dict:
+    """
+    Pre-compute all aggregations over the full log.
+    Returns a dict that period-specific views can slice cheaply.
+    """
+    day_vice: dict = defaultdict(lambda: defaultdict(int))
+    week_totals: dict = defaultdict(int)
+    dow_totals: dict  = defaultdict(int)
+
+    for e in log:
+        try:
+            dt = datetime.fromisoformat(e["timestamp"])
+        except Exception:
+            continue
+        d    = dt.date()
+        vk   = e["vice"]
+        dow  = dt.strftime("%A")
+        wk   = (dt - timedelta(days=dt.weekday())).date()
+
+        day_vice[d][vk] += 1
+        week_totals[wk] += 1
+        dow_totals[dow] += 1
+
+    return {
+        "day_vice":    dict(day_vice),
+        "week_totals": dict(week_totals),
+        "dow_totals":  dict(dow_totals),
+    }
+
+
+def _get_aggregations(log: list) -> dict:
+    """
+    Returns cached aggregation dict, rebuilding only when the log has changed.
+    Cache key: (user_id, log_length) — cheap to check, safe invalidation.
+    """
+    uid      = (st.session_state.get("user") or {}).get("id", 0)
+    cache_key = f"_analytics_agg_{uid}"
+    size_key  = f"_analytics_agg_size_{uid}"
+
+    current_size = len(log)
+    cached_size  = st.session_state.get(size_key, -1)
+
+    if st.session_state.get(cache_key) and cached_size == current_size:
+        return st.session_state[cache_key]
+
+    agg = _build_aggregations(log)
+    st.session_state[cache_key]  = agg
+    st.session_state[size_key]   = current_size
+    return agg
+
+
+# ─── PAGE ─────────────────────────────────────────────────────────────────────
 
 def analytics_page():
     inject_page_css()
@@ -62,12 +121,15 @@ def analytics_page():
                             index=1, key="analytics_period")
     days_map = {"Last 7 days": 7, "Last 30 days": 30, "Last 90 days": 90, "All time": 9999}
     days     = days_map[period]
-    entries  = entries_in_range(days)
+    entries  = entries_in_range(log, days)
     total    = len(entries)
 
     if total == 0:
         st.info("No sessions in this period.")
         return
+
+    # ── Pre-computed aggregations (cached) ────────────────────────────────────
+    agg = _get_aggregations(log)
 
     # ── Summary cards ─────────────────────────────────────────────────────────
     st.html("""
@@ -99,19 +161,23 @@ def analytics_page():
 </div>
 """)
 
-    display_days = min(days, 30)  # cap at 30 days for readability
-    day_vice_counts: dict = defaultdict(lambda: defaultdict(int))
-    for e in entries_in_range(min(days, 30)):
-        d  = datetime.fromisoformat(e["timestamp"]).date()
-        vk = e["vice"]
-        day_vice_counts[d][vk] += 1
+    display_days   = min(days, 30)
+    day_vice_cache = agg["day_vice"]  # full log aggregation — already built
+    day_list       = [(datetime.now() - timedelta(days=i)).date() for i in range(display_days - 1, -1, -1)]
 
-    day_list = [(datetime.now() - timedelta(days=i)).date() for i in range(display_days - 1, -1, -1)]
-    max_day  = max((sum(day_vice_counts[d].values()) for d in day_list), default=1)
+    # Filter to period
+    period_cutoff = datetime.now() - timedelta(days=display_days)
+    day_vice_counts = {
+        d: day_vice_cache[d]
+        for d in day_list
+        if d in day_vice_cache
+    }
+
+    max_day = max((sum(v.values()) for v in day_vice_counts.values()), default=1)
 
     bars_html = '<div style="display:flex; align-items:flex-end; gap:2px; height:120px; margin-bottom:8px;">'
     for d in day_list:
-        day_total = sum(day_vice_counts[d].values())
+        day_total = sum(day_vice_counts.get(d, {}).values())
         if day_total == 0:
             bars_html += f"""
 <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:1px;">
@@ -121,10 +187,9 @@ def analytics_page():
 </div>"""
             continue
 
-        # Stack per-vice segments proportionally
         segments = ""
         for vk, meta in VICE_META.items():
-            cnt = day_vice_counts[d].get(vk, 0)
+            cnt = day_vice_counts.get(d, {}).get(vk, 0)
             if cnt == 0:
                 continue
             seg_h = max(4, int((cnt / max_day) * 100))
@@ -144,7 +209,6 @@ def analytics_page():
 
     bars_html += "</div>"
 
-    # Legend
     legend = "".join(
         f'<div style="display:inline-flex; align-items:center; gap:5px; margin-right:14px;">'
         f'<div style="width:10px; height:10px; background:{meta["color"]}; border-radius:2px;"></div>'
@@ -162,18 +226,20 @@ def analytics_page():
 
     st.html("<div style='height:1.5rem'></div>")
 
-    # ── Weekly frequency ──────────────────────────────────────────────────────
+    # ── Weekly frequency (from cached agg) ────────────────────────────────────
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
             text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
   Weekly Frequency
 </div>
 """)
-    week_counts: dict = defaultdict(int)
-    for e in entries:
-        dt         = datetime.fromisoformat(e["timestamp"])
-        week_start = (dt - timedelta(days=dt.weekday())).date()
-        week_counts[week_start] += 1
+    # Slice weekly totals to the selected period
+    period_week_cutoff = datetime.now().date() - timedelta(days=days)
+    week_counts = {
+        wk: cnt
+        for wk, cnt in agg["week_totals"].items()
+        if wk >= period_week_cutoff
+    }
 
     if week_counts:
         max_wk       = max(week_counts.values(), default=1)
@@ -234,23 +300,25 @@ def analytics_page():
 
     st.html("<div style='height:1.5rem'></div>")
 
-    # ── Insights ──────────────────────────────────────────────────────────────
+    # ── Insights (from cached dow aggregation) ────────────────────────────────
     st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
             text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Insights</div>
 """)
+
+    # Compute dow for the selected period only (fast — just iterates entries)
     dow_counts: dict = defaultdict(int)
     for e in entries:
         dow = datetime.fromisoformat(e["timestamp"]).strftime("%A")
         dow_counts[dow] += 1
+
     busiest_day    = max(dow_counts, key=dow_counts.get) if dow_counts else "—"
     top_vice_key   = max(counts, key=counts.get) if counts else None
     top_vice       = VICE_META[top_vice_key]["label"] if top_vice_key else "—"
     top_vice_icon  = VICE_META[top_vice_key]["icon"]  if top_vice_key else ""
     top_vice_color = VICE_META[top_vice_key]["color"] if top_vice_key else "var(--lime)"
     active_days    = len({datetime.fromisoformat(e["timestamp"]).date() for e in entries})
-
-    avg_per_week = round(total / max(1, days / 7), 1)
+    avg_per_week   = round(total / max(1, days / 7), 1)
 
     insights = [
         ("Busiest day",    busiest_day,                   "var(--cyan)"),
