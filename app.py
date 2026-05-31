@@ -266,7 +266,8 @@ def _register_page():
             else:
                 try:
                     import database as db
-                    uid = db.create_user(username.strip(), email.strip(), pw)
+                    from auth import hash_password
+                    uid = db.create_user(username.strip(), email.strip(), hash_password(pw))
                     if uid:
                         user = db.get_user_by_id(uid)
                         st.session_state.authenticated    = True
