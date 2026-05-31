@@ -15,9 +15,6 @@ except ImportError:
     DB_CONFIG = {}
 
 # ─── CONNECTION POOL ─────────────────────────────────────────────────────────
-# One pool per process, shared across all user sessions on this worker.
-# pool_size=10 handles concurrent users without opening a new TCP connection
-# for every query.
 
 _pool: "pooling.MySQLConnectionPool | None" = None
 
@@ -49,19 +46,13 @@ def _get_pool() -> "pooling.MySQLConnectionPool | None":
 
 
 def create_connection():
-    """
-    Get a connection from the pool.
-    Falls back to a direct (non-pooled) connection if the pool is exhausted
-    or unavailable, so the app never fully breaks.
-    """
     pool = _get_pool()
     if pool:
         try:
             return pool.get_connection()
         except Exception:
-            pass  # pool exhausted — fall through to direct connection
+            pass
 
-    # Direct connection fallback
     if not MYSQL_AVAILABLE or not DB_CONFIG.get("host"):
         return None
     try:
@@ -216,7 +207,6 @@ def ensure_tables():
             PRIMARY KEY (question_hash, opt_index)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
-        # ── NEW: Do or Drink rooms ──────────────────────────────────────────
         """
         CREATE TABLE IF NOT EXISTS dod_rooms (
             room_code       VARCHAR(6) NOT NULL PRIMARY KEY,
@@ -230,7 +220,6 @@ def ensure_tables():
             INDEX idx_dod_status (status)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
-        # ── Interactions & shadow scores ────────────────────────────────────
         """
         CREATE TABLE IF NOT EXISTS interactions (
             id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -276,7 +265,6 @@ def ensure_tables():
             cur.execute(ddl)
         conn.commit()
 
-        # Migrations — all wrapped in try/except so they're safe to re-run
         for migration in [
             "ALTER TABLE quiz_results MODIFY COLUMN quiz_type VARCHAR(64) NOT NULL",
             "ALTER TABLE confessions ADD COLUMN revealed_at DATETIME DEFAULT NULL",
@@ -332,10 +320,36 @@ def get_user_by_email(email: str):
         conn.close()
 
 
-def create_user(username: str, email: str, password_hash: str):
+def get_user_by_id(user_id: int):
+    """Fetch a single user row by primary key. Returns dict or None."""
     conn = create_connection()
     if not conn:
-        return False, "Database connection failed"
+        return None
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+        user = cur.fetchone()
+        cur.close()
+        return user
+    except Exception as e:
+        st.error(f"Error fetching user by id: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def create_user(username: str, email: str, password_hash: str):
+    """
+    Insert a new user row.
+    Returns the new user's integer ID on success, None on failure
+    (duplicate username/email or DB error).
+
+    NOTE: app.py calls this directly and expects an int ID back.
+          auth.py's register_user() wraps this and converts to (bool, str).
+    """
+    conn = create_connection()
+    if not conn:
+        return None
     try:
         cur = conn.cursor()
         cur.execute(
@@ -343,12 +357,12 @@ def create_user(username: str, email: str, password_hash: str):
             (username, email, password_hash)
         )
         conn.commit()
+        new_id = cur.lastrowid
         cur.close()
-        return True, "Registration successful!"
-    except mysql.connector.IntegrityError:
-        return False, "Username or email already exists."
-    except Exception as e:
-        return False, f"Registration error: {e}"
+        return new_id
+    except Exception:
+        # IntegrityError = duplicate; any other exception = real error
+        return None
     finally:
         conn.close()
 
@@ -539,11 +553,31 @@ def delete_vice_log(user_id: int) -> bool:
         conn.close()
 
 
+def delete_vice_entry(entry_id: int, user_id: int) -> bool:
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM vice_log WHERE id = %s AND user_id = %s",
+            (entry_id, user_id)
+        )
+        conn.commit()
+        deleted = cur.rowcount > 0
+        cur.close()
+        return deleted
+    except Exception as e:
+        st.error(f"Error deleting entry: {e}")
+        return False
+    finally:
+        conn.close()
+
+
 # ─── SOCIAL FEED ──────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_social_feed(limit: int = 20) -> list:
-    """Cached 60s — social feed doesn't need to be live to the second."""
     conn = create_connection()
     if not conn:
         return []
@@ -566,7 +600,6 @@ def load_social_feed(limit: int = 20) -> list:
 
 @st.cache_data(ttl=120, show_spinner=False)
 def get_vice_goals(user_id: int) -> dict:
-    """Cached 2 min — goals don't change on every render."""
     conn = create_connection()
     if not conn:
         return {}
@@ -596,12 +629,33 @@ def save_vice_goal(user_id: int, vice: str, weekly_limit: int) -> bool:
         )
         conn.commit()
         cur.close()
-        # Bust the cache for this user
         get_vice_goals.clear()
         return True
     except Exception as e:
         st.error(f"Error saving vice goal: {e}")
         return False
+    finally:
+        conn.close()
+
+
+def get_last_logged_per_vice(user_id: int) -> dict:
+    conn = create_connection()
+    if not conn:
+        return {}
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT vice, MAX(logged_at) AS last_logged
+               FROM vice_log
+               WHERE user_id = %s
+               GROUP BY vice""",
+            (user_id,)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return {r["vice"]: r["last_logged"] for r in rows}
+    except Exception:
+        return {}
     finally:
         conn.close()
 
@@ -716,6 +770,66 @@ def load_latest_rbtl_result(user_id: int) -> dict | None:
         return row
     except Exception:
         return None
+    finally:
+        conn.close()
+
+
+def load_rbtl_history(user_id: int, limit: int = 5) -> list:
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT result_name, result_meta, openness_pct, total_pts, completed_at, dim_scores
+               FROM quiz_results
+               WHERE user_id = %s AND quiz_type = 'rbtl_v4_profile_complete'
+               ORDER BY completed_at DESC
+               LIMIT %s""",
+            (user_id, limit)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        for row in rows:
+            row["completed_at"] = str(row.get("completed_at", ""))[:16]
+            ds = row.get("dim_scores") or {}
+            if isinstance(ds, str):
+                try:
+                    ds = json.loads(ds)
+                except Exception:
+                    ds = {}
+            row["dim_scores"] = ds
+        return rows
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+# ─── LEGACY QUIZ SAVE ─────────────────────────────────────────────────────────
+
+def save_read_between_lines_result(user_id, profile_name, profile_meta, dim_scores,
+                                    recommendations, total_pct, questions, answers) -> bool:
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO quiz_results
+               (user_id, quiz_type, profile_name, profile_meta, dim_scores,
+                recommendations, total_pct, questions, answers)
+               VALUES (%s, 'read_between_lines', %s, %s, %s, %s, %s, %s, %s)""",
+            (user_id, profile_name, profile_meta, json.dumps(dim_scores),
+             json.dumps(recommendations), total_pct,
+             json.dumps(questions, default=str), json.dumps(answers))
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception as e:
+        st.error(f"Error saving RBTL result: {e}")
+        return False
     finally:
         conn.close()
 
@@ -1232,7 +1346,6 @@ def upsert_shadow_score(user_id: int, hypocrisy_idx: int = None,
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_shadow_score(user_id: int) -> dict:
-    """Cached 5 min — freak score doesn't change with every render."""
     conn = create_connection()
     if not conn:
         return {}
@@ -1274,7 +1387,6 @@ def save_public_confession(author_id: int, content: str, vice: str = None) -> in
 
 @st.cache_data(ttl=30, show_spinner=False)
 def load_public_confessions(limit: int = 20, offset: int = 0, vice: str = None) -> list:
-    """Cached 30s — board is near-realtime but doesn't need to be instant."""
     conn = create_connection()
     if not conn:
         return []
@@ -1374,7 +1486,6 @@ def record_community_answer(question_hash: str, opt_index: int) -> None:
 
 @st.cache_data(ttl=10, show_spinner=False)
 def get_community_answers(question_hash: str) -> dict:
-    """Cached 10s — pulse updates are frequent but don't need instant consistency."""
     conn = create_connection()
     if not conn:
         return {}
@@ -1393,121 +1504,153 @@ def get_community_answers(question_hash: str) -> dict:
         conn.close()
 
 
-# ─── LEGACY QUIZ SAVES (kept for backwards compat) ───────────────────────────
+# ─── DO OR DRINK ROOMS ────────────────────────────────────────────────────────
 
-def save_read_between_lines_result(user_id, profile_name, profile_meta, dim_scores,
-                                    recommendations, total_pct, questions, answers) -> bool:
+def create_dod_room(host_id: int, host_username: str, mode: str) -> str | None:
+    import secrets
+    import string
     conn = create_connection()
     if not conn:
-        return False
+        return None
     try:
         cur = conn.cursor()
-        cur.execute(
-            """INSERT INTO quiz_results
-               (user_id, quiz_type, profile_name, profile_meta, dim_scores,
-                recommendations, total_pct, questions, answers)
-               VALUES (%s, 'read_between_lines', %s, %s, %s, %s, %s, %s, %s)""",
-            (user_id, profile_name, profile_meta, json.dumps(dim_scores),
-             json.dumps(recommendations), total_pct,
-             json.dumps(questions, default=str), json.dumps(answers))
-        )
-        conn.commit()
+        for _ in range(10):
+            code = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
+            host_player = json.dumps([{"username": host_username, "user_id": host_id, "is_host": True}])
+            try:
+                cur.execute(
+                    """INSERT INTO dod_rooms (room_code, host_id, host_username, players, mode)
+                       VALUES (%s, %s, %s, %s, %s)""",
+                    (code, host_id, host_username, host_player, mode)
+                )
+                conn.commit()
+                cur.close()
+                return code
+            except mysql.connector.IntegrityError:
+                continue
         cur.close()
-        return True
+        return None
     except Exception as e:
-        st.error(f"Error saving RBTL result: {e}")
-        return False
+        st.error(f"Room creation error: {e}")
+        return None
     finally:
         conn.close()
 
-# ── DDL to add inside ensure_tables() ────────────────────────────────────────
- 
-NEW_DDL = [
-    """
-    CREATE TABLE IF NOT EXISTS dod_rooms (
-        room_code       VARCHAR(6) NOT NULL PRIMARY KEY,
-        host_id         INT NOT NULL,
-        host_username   VARCHAR(128) NOT NULL,
-        players         JSON NOT NULL DEFAULT ('[]'),
-        mode            VARCHAR(16) NOT NULL DEFAULT 'regular',
-        status          VARCHAR(16) NOT NULL DEFAULT 'waiting',
-        created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_dod_host   (host_id),
-        INDEX idx_dod_status (status)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """,
-]
- 
-# ─── VICE LOG — single entry delete ──────────────────────────────────────────
- 
-def delete_vice_entry(entry_id: int, user_id: int) -> bool:
-    """Delete a single vice log entry. user_id guard prevents cross-user deletion."""
+
+def join_dod_room(room_code: str, user_id: int, username: str) -> dict | None:
     conn = create_connection()
     if not conn:
-        return False
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "DELETE FROM vice_log WHERE id = %s AND user_id = %s",
-            (entry_id, user_id)
-        )
-        conn.commit()
-        deleted = cur.rowcount > 0
-        cur.close()
-        return deleted
-    except Exception as e:
-        st.error(f"Error deleting entry: {e}")
-        return False
-    finally:
-        conn.close()
- 
- 
-# ─── CLEAN DAYS PER VICE ──────────────────────────────────────────────────────
- 
-def get_last_logged_per_vice(user_id: int) -> dict:
-    """
-    Returns {vice: last_logged_at datetime} for each vice the user has logged.
-    Used to compute "days clean" per vice on the goals page.
-    """
-    conn = create_connection()
-    if not conn:
-        return {}
+        return None
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """SELECT vice, MAX(logged_at) AS last_logged
-               FROM vice_log
-               WHERE user_id = %s
-               GROUP BY vice""",
-            (user_id,)
+            "SELECT * FROM dod_rooms WHERE room_code = %s AND status = 'waiting'",
+            (room_code.upper(),)
         )
-        rows = cur.fetchall()
+        room = cur.fetchone()
+        if not room:
+            cur.close()
+            return "not_found"
+
+        players = room.get("players") or []
+        if isinstance(players, str):
+            try:
+                players = json.loads(players)
+            except Exception:
+                players = []
+
+        if any(p.get("user_id") == user_id for p in players):
+            cur.close()
+            return "already_in"
+
+        players.append({"username": username, "user_id": user_id, "is_host": False})
+        cur.execute(
+            "UPDATE dod_rooms SET players = %s WHERE room_code = %s",
+            (json.dumps(players), room_code.upper())
+        )
+        conn.commit()
+        room["players"] = players
         cur.close()
-        return {r["vice"]: r["last_logged"] for r in rows}
+        return room
+    except Exception as e:
+        st.error(f"Room join error: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def get_dod_room(room_code: str) -> dict | None:
+    conn = create_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM dod_rooms WHERE room_code = %s", (room_code.upper(),))
+        room = cur.fetchone()
+        cur.close()
+        if room:
+            players = room.get("players") or []
+            if isinstance(players, str):
+                try:
+                    room["players"] = json.loads(players)
+                except Exception:
+                    room["players"] = []
+        return room
     except Exception:
-        return {}
+        return None
     finally:
         conn.close()
- 
- 
+
+
+def close_dod_room(room_code: str) -> None:
+    conn = create_connection()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE dod_rooms SET status = 'closed' WHERE room_code = %s",
+            (room_code,)
+        )
+        conn.commit()
+        cur.close()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
+def cleanup_old_dod_rooms() -> None:
+    conn = create_connection()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM dod_rooms WHERE created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)"
+        )
+        conn.commit()
+        cur.close()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
 # ─── DATA EXPORT ──────────────────────────────────────────────────────────────
- 
+
 def export_user_data(user_id: int) -> dict:
-    """
-    Returns all user data as a serialisable dict for JSON download.
-    Covers vice log, quiz results, goals, hot takes.
-    """
     conn = create_connection()
     if not conn:
         return {}
     try:
         cur = conn.cursor(dictionary=True)
- 
+
         cur.execute("SELECT username, email, created_at FROM users WHERE id = %s", (user_id,))
         user = cur.fetchone() or {}
         if user.get("created_at"):
             user["created_at"] = str(user["created_at"])
- 
+
         cur.execute(
             "SELECT vice, logged_at, details FROM vice_log WHERE user_id = %s ORDER BY logged_at DESC",
             (user_id,)
@@ -1525,7 +1668,7 @@ def export_user_data(user_id: int) -> dict:
                 "logged_at": str(row["logged_at"]),
                 "details": d,
             })
- 
+
         cur.execute(
             """SELECT quiz_type, completed_at, result_name, openness_pct, dim_scores
                FROM quiz_results WHERE user_id = %s ORDER BY completed_at DESC""",
@@ -1546,13 +1689,13 @@ def export_user_data(user_id: int) -> dict:
                 "openness_pct": row["openness_pct"],
                 "dim_scores":   ds,
             })
- 
+
         cur.execute(
             "SELECT vice, weekly_limit FROM vice_goals WHERE user_id = %s",
             (user_id,)
         )
         goals = {r["vice"]: r["weekly_limit"] for r in cur.fetchall()}
- 
+
         cur.execute(
             "SELECT interaction_type, created_at, payload FROM interactions WHERE user_id = %s ORDER BY created_at DESC",
             (user_id,)
@@ -1570,7 +1713,7 @@ def export_user_data(user_id: int) -> dict:
                 "created_at": str(row["created_at"]),
                 "payload":    p,
             })
- 
+
         cur.close()
         return {
             "user":         user,
@@ -1585,22 +1728,17 @@ def export_user_data(user_id: int) -> dict:
         return {}
     finally:
         conn.close()
- 
- 
+
+
 # ─── ACCOUNT DELETION ─────────────────────────────────────────────────────────
- 
+
 def delete_user_account(user_id: int) -> bool:
-    """
-    Archives all user data to deleted_user_archive, then hard-deletes.
-    The archive is permanent and not exposed anywhere in the app.
-    """
     conn = create_connection()
     if not conn:
         return False
     try:
         cur = conn.cursor(dictionary=True)
 
-        # ── 1. Collect everything before touching a single row ────────────────
         cur.execute("SELECT username, email FROM users WHERE id = %s", (user_id,))
         user_row = cur.fetchone() or {}
 
@@ -1663,8 +1801,6 @@ def delete_user_account(user_id: int) -> bool:
         )
         shadow_row = cur.fetchone() or {}
 
-        # ── 2. Write archive row ──────────────────────────────────────────────
-        # Use a regular (non-dict) cursor for the INSERT
         cur.close()
         cur = conn.cursor()
         cur.execute(
@@ -1684,7 +1820,6 @@ def delete_user_account(user_id: int) -> bool:
             )
         )
 
-        # ── 3. Delete live data ───────────────────────────────────────────────
         for table in [
             "vice_log", "quiz_results", "vice_goals",
             "interactions", "shadow_scores", "session_tokens",
@@ -1694,7 +1829,6 @@ def delete_user_account(user_id: int) -> bool:
             except Exception:
                 pass
 
-        # Confessions — remove unsent ones, leave revealed exchanges intact
         try:
             cur.execute(
                 "DELETE FROM confessions WHERE sender_id = %s AND status = 'sent'",
@@ -1703,7 +1837,6 @@ def delete_user_account(user_id: int) -> bool:
         except Exception:
             pass
 
-        # Public confessions — anonymise rather than delete
         try:
             cur.execute(
                 "UPDATE public_confessions SET author_id = 0 WHERE author_id = %s",
@@ -1726,181 +1859,9 @@ def delete_user_account(user_id: int) -> bool:
         return False
     finally:
         conn.close()
- 
- 
-# ─── DO OR DRINK ROOMS ────────────────────────────────────────────────────────
- 
-def create_dod_room(host_id: int, host_username: str, mode: str) -> str | None:
-    """Create a room and return the 6-char code, or None on failure."""
-    import secrets
-    import string
-    conn = create_connection()
-    if not conn:
-        return None
-    try:
-        cur = conn.cursor()
-        for _ in range(10):  # retry until unique code found
-            code = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
-            host_player = json.dumps([{"username": host_username, "user_id": host_id, "is_host": True}])
-            try:
-                cur.execute(
-                    """INSERT INTO dod_rooms (room_code, host_id, host_username, players, mode)
-                       VALUES (%s, %s, %s, %s, %s)""",
-                    (code, host_id, host_username, host_player, mode)
-                )
-                conn.commit()
-                cur.close()
-                return code
-            except mysql.connector.IntegrityError:
-                continue  # code collision, retry
-        cur.close()
-        return None
-    except Exception as e:
-        st.error(f"Room creation error: {e}")
-        return None
-    finally:
-        conn.close()
- 
- 
-def join_dod_room(room_code: str, user_id: int, username: str) -> dict | None:
-    """
-    Add a player to a room. Returns the room dict on success, None on failure.
-    Returns the string 'already_in' if player is already in the room.
-    Returns the string 'not_found' if room doesn't exist.
-    """
-    conn = create_connection()
-    if not conn:
-        return None
-    try:
-        cur = conn.cursor(dictionary=True)
-        cur.execute(
-            "SELECT * FROM dod_rooms WHERE room_code = %s AND status = 'waiting'",
-            (room_code.upper(),)
-        )
-        room = cur.fetchone()
-        if not room:
-            cur.close()
-            return "not_found"
- 
-        players = room.get("players") or []
-        if isinstance(players, str):
-            try:
-                players = json.loads(players)
-            except Exception:
-                players = []
- 
-        if any(p.get("user_id") == user_id for p in players):
-            cur.close()
-            return "already_in"
- 
-        players.append({"username": username, "user_id": user_id, "is_host": False})
-        cur.execute(
-            "UPDATE dod_rooms SET players = %s WHERE room_code = %s",
-            (json.dumps(players), room_code.upper())
-        )
-        conn.commit()
-        room["players"] = players
-        cur.close()
-        return room
-    except Exception as e:
-        st.error(f"Room join error: {e}")
-        return None
-    finally:
-        conn.close()
- 
- 
-def get_dod_room(room_code: str) -> dict | None:
-    conn = create_connection()
-    if not conn:
-        return None
-    try:
-        cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM dod_rooms WHERE room_code = %s", (room_code.upper(),))
-        room = cur.fetchone()
-        cur.close()
-        if room:
-            players = room.get("players") or []
-            if isinstance(players, str):
-                try:
-                    room["players"] = json.loads(players)
-                except Exception:
-                    room["players"] = []
-        return room
-    except Exception:
-        return None
-    finally:
-        conn.close()
- 
- 
-def close_dod_room(room_code: str) -> None:
-    conn = create_connection()
-    if not conn:
-        return
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "UPDATE dod_rooms SET status = 'closed' WHERE room_code = %s",
-            (room_code,)
-        )
-        conn.commit()
-        cur.close()
-    except Exception:
-        pass
-    finally:
-        conn.close()
- 
- 
-def cleanup_old_dod_rooms() -> None:
-    """Delete rooms older than 24 hours."""
-    conn = create_connection()
-    if not conn:
-        return
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "DELETE FROM dod_rooms WHERE created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)"
-        )
-        conn.commit()
-        cur.close()
-    except Exception:
-        pass
-    finally:
-        conn.close()
- 
- 
-# ─── RBTL RESULT HISTORY ──────────────────────────────────────────────────────
- 
-def load_rbtl_history(user_id: int, limit: int = 5) -> list:
-    """Load past RBTL quiz completions for the profile / history view."""
-    conn = create_connection()
-    if not conn:
-        return []
-    try:
-        cur = conn.cursor(dictionary=True)
-        cur.execute(
-            """SELECT result_name, result_meta, openness_pct, total_pts, completed_at, dim_scores
-               FROM quiz_results
-               WHERE user_id = %s AND quiz_type = 'rbtl_v4_profile_complete'
-               ORDER BY completed_at DESC
-               LIMIT %s""",
-            (user_id, limit)
-        )
-        rows = cur.fetchall()
-        cur.close()
-        for row in rows:
-            row["completed_at"] = str(row.get("completed_at", ""))[:16]
-            ds = row.get("dim_scores") or {}
-            if isinstance(ds, str):
-                try:
-                    ds = json.loads(ds)
-                except Exception:
-                    ds = {}
-            row["dim_scores"] = ds
-        return rows
-    except Exception:
-        return []
-    finally:
-        conn.close()
+
+
+# ─── AUTHENTICATE USER ────────────────────────────────────────────────────────
 
 def authenticate_user(username: str, password: str):
     conn = create_connection()
@@ -1916,7 +1877,6 @@ def authenticate_user(username: str, password: str):
 
         stored = user.get("password_hash", "")
 
-        # bcrypt hash
         if stored.startswith("$2b$") or stored.startswith("$2a$"):
             try:
                 import bcrypt
@@ -1926,14 +1886,12 @@ def authenticate_user(username: str, password: str):
                 pass
             return None
 
-        # SHA-256 hex (64 chars)
         if len(stored) == 64:
             import hashlib
             if hashlib.sha256(password.encode()).hexdigest() == stored:
                 return user
             return None
 
-        # Plain text fallback (legacy/test accounts)
         if stored == password:
             return user
 
@@ -1943,3 +1901,25 @@ def authenticate_user(username: str, password: str):
         return None
     finally:
         conn.close()
+
+
+# ─── FRIENDS ─────────────────────────────────────────────────────────────────
+# Stub implementations — replace with full versions if you add a friends table.
+
+def send_friend_request(sender_id: int, recipient_id: int, default=None):
+    return default
+
+def load_friend_requests(user_id: int, default=None):
+    return default if default is not None else []
+
+def respond_friend_request(request_id, user_id: int, accept: bool):
+    return None
+
+def load_friends(user_id: int, default=None):
+    return default if default is not None else []
+
+def remove_friend(user_id: int, friend_id: int):
+    return None
+
+def get_user_public_stats(user_id: int, default=None):
+    return default if default is not None else {}
