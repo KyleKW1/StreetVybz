@@ -59,11 +59,20 @@ def validate_email(email: str) -> bool:
 # ── Registration / Authentication ─────────────────────────────────────────────
 
 def register_user(username: str, email: str, password: str):
+    """
+    Called by Pages/auth_page.py — returns (bool, str) tuple.
+
+    database.create_user() now returns an int ID on success or None on failure,
+    so we wrap it here to preserve the (bool, str) contract that auth_page expects.
+    """
     db = _db()
     if not db:
         return False, "Database unavailable."
     try:
-        return db.create_user(username, email, hash_password(password))
+        uid = db.create_user(username, email, hash_password(password))
+        if uid:
+            return True, "Registration successful!"
+        return False, "Username or email already exists."
     except Exception:
         return False, "Registration error — please try again."
 
@@ -117,7 +126,6 @@ def check_session_valid() -> bool:
         return True
     token = st.session_state.get("session_token")
     if not token:
-        # Older session pre-token — still let them in
         return True
     user = st.session_state.get("user", {})
     user_id = user.get("id") if user else None
