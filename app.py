@@ -1,5 +1,6 @@
 """
 app.py — ViceVault main entry point.
+
 """
 
 import streamlit as st
@@ -44,6 +45,14 @@ def is_authenticated() -> bool:
 
 
 def logout():
+    # Invalidate the server-side token too (was previously session-state only)
+    try:
+        import database as db
+        token = st.session_state.get("session_token")
+        if token:
+            db.invalidate_session_token(token)
+    except Exception:
+        pass
     for k in list(st.session_state.keys()):
         del st.session_state[k]
     st.rerun()
@@ -98,8 +107,9 @@ NAV_SECTIONS = [
 
 def _render_sidebar():
     with st.sidebar:
+        import html as _html
         user   = st.session_state.get("user", {})
-        uname  = user.get("username", "—")
+        uname  = _html.escape(user.get("username", "—"))
         initials = uname[:2].upper()
 
         st.html(f"""
@@ -222,9 +232,13 @@ def _login_page():
                 st.error("Enter username and password.")
             else:
                 try:
-                    import database as db
-                    user = db.authenticate_user(username.strip(), password)
-                    if user:
+                    # Fix #1: route through auth.authenticate_user —
+                    # bcrypt verification, legacy-hash migration, session token,
+                    # and rate limiting (Fix #7). No plaintext path.
+                    from auth import authenticate_user
+                    success, user = authenticate_user(username.strip(), password)
+                    if success and user:
+                        import database as db
                         st.session_state.authenticated    = True
                         st.session_state.user             = user
                         st.session_state.vice_log         = db.load_vice_log(user["id"])
@@ -232,6 +246,8 @@ def _login_page():
                         try: _prewarm_quiz()
                         except Exception: pass
                         st.rerun()
+                    elif user == "locked":
+                        st.error("Too many failed attempts. Try again in 10 minutes.")
                     else:
                         st.error("Wrong username or password.")
                 except Exception as e:
@@ -260,9 +276,12 @@ def _register_page():
         pw       = st.text_input("Password",         type="password", key="reg_pw")
         pw2      = st.text_input("Confirm password", type="password", key="reg_pw2")
         if st.button("Create Account →", type="primary", use_container_width=True, key="reg_btn"):
-            if pw != pw2:              st.error("Passwords don't match.")
-            elif len(pw) < 8:          st.error("Password must be at least 8 characters.")
-            elif not username.strip(): st.error("Enter a username.")
+            from auth import validate_password, validate_email as _validate_email
+            ok_pw, pw_msg = validate_password(pw)
+            if pw != pw2:                       st.error("Passwords don't match.")
+            elif not ok_pw:                     st.error(pw_msg)  # Fix #7: 8-char min everywhere
+            elif not username.strip():          st.error("Enter a username.")
+            elif not _validate_email(email.strip()): st.error("That email doesn't look right.")
             else:
                 try:
                     import database as db
@@ -270,6 +289,14 @@ def _register_page():
                     uid = db.create_user(username.strip(), email.strip(), hash_password(pw))
                     if uid:
                         user = db.get_user_by_id(uid)
+                        # Issue a session token for the fresh account too
+                        import secrets as _secrets
+                        token = _secrets.token_urlsafe(32)
+                        try:
+                            db.create_session_token(uid, token)
+                            st.session_state.session_token = token
+                        except Exception:
+                            pass
                         st.session_state.authenticated    = True
                         st.session_state.user             = user
                         st.session_state.vice_log         = []
@@ -322,6 +349,20 @@ def main():
     if not is_authenticated():
         _render_auth()
         return
+
+    # Fix #4: validate the session token on every authenticated page load.
+    # If it's been invalidated (screenshot logout, password reset, etc.),
+    # the user is actually logged out now.
+    try:
+        from auth import check_session_valid
+        if not check_session_valid():
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
+            st.warning("Your session has ended. Please log in again.")
+            _render_auth()
+            return
+    except Exception:
+        pass
 
     st.session_state.setdefault("selected_feature", "stats")
     st.session_state.setdefault("onboarding_done", False)
