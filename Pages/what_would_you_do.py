@@ -10,7 +10,8 @@ No pre-written scenario bank. Everything is generated.
 All prompts are gender-neutral and orientation-inclusive.
 
 Community Pulse: after answering each question the user sees an anonymous
-breakdown of how other ViceVault users responded.
+breakdown of how other ViceVault users responded — with the most
+surprising stat called out explicitly.
 """
 
 import hashlib
@@ -117,71 +118,105 @@ RESULT_TYPES = [
     {
         "min": 0, "max": 10, "icon": "🔒", "name": "Closed Garden",
         "meta": "Yours. Only yours. Period.",
-        "desc": "You're wired for exclusivity and not apologising for it. Every scenario triggered a protective instinct. You believe some things stay between two people — no amount of 'communication' changes that. That's not fear. That's a value.",
+        "hook": "You answered every single one the same way. That consistency either means total clarity — or a story you haven't told yourself yet.",
+        "signal": "You're not curious about the scenarios. You're protective of something.",
+        "tell": "The question that probably landed hardest was one you dismissed fast.",
     },
     {
         "min": 11, "max": 22, "icon": "🌿", "name": "Quietly Curious",
         "meta": "The thought has crossed your mind. More than once.",
-        "desc": "You'd never bring it up unprompted, but these scenarios stirred something. You're more open than your defaults suggest. Given the right relationship and the right conversation, you'd hear someone out. Not closed — just careful about who gets the key.",
+        "hook": "You played it safe on the ones that felt risky. But you didn't close the door all the way on any of them.",
+        "signal": "There's a gap between what you'd say out loud and what you actually thought reading these.",
+        "tell": "Someone who knows you well would not be entirely surprised by your score.",
     },
     {
         "min": 23, "max": 35, "icon": "🌙", "name": "The Open Door",
         "meta": "You've thought this through. Seriously.",
-        "desc": "You're past the theoretical phase. These scenarios didn't make you uncomfortable — they made you think. You understand the dynamics, you've processed the jealousy question. The only thing between you and yes is the right moment.",
+        "hook": "You've been here before — in your head, at least. These scenarios didn't shock you. They felt familiar.",
+        "signal": "The gap between where you are and where you want to be is mostly just one honest conversation.",
+        "tell": "You know which scenario you'd actually say yes to if the circumstances were right.",
     },
     {
         "min": 36, "max": 44, "icon": "🔺", "name": "Already Decided",
         "meta": "The question isn't whether. It's when.",
-        "desc": "No internal conflict left. You read these scenarios and recognised yourself — not as observer but as someone who's been in a version of these situations or is clearly ready. You know what you want.",
+        "hook": "You didn't hesitate on the ones that matter. That's not impulsiveness — that's someone who's done the work already.",
+        "signal": "You're past theory. The only thing between you and acting on this is logistics.",
+        "tell": "You probably already know who you'd want in the room.",
     },
     {
         "min": 45, "max": 999, "icon": "⚡", "name": "The Third Is Already Picked",
         "meta": "You know exactly who. They probably know too.",
-        "desc": "You're not curious — you're experienced, or so ready it's the same thing. These scenarios felt like reading your own diary. You've had the late-night conversations. You've made the decision.",
+        "hook": "You read these like someone reading their own journal entries. Not recognition — confirmation.",
+        "signal": "This isn't curiosity. This is inventory.",
+        "tell": "The most interesting question for you isn't what — it's what you're still waiting for.",
     },
 ]
 
+# Phase 2: escalating hidden desire statements — starts softer, goes deeper
 HIDDEN_DESIRE_QUESTIONS = [
-    {"id": "hd_01", "signal": "power_dynamic_latent",
-     "text": "You're watching a film. A scene with a specific power dynamic between two characters makes you shift in your seat — nothing explicit, just the energy."},
-    {"id": "hd_02", "signal": "hidden_fantasy_present",
-     "text": "You've had a fantasy you've never told anyone. Not because it's wrong — just because saying it out loud would feel exposing."},
-    {"id": "hd_03", "signal": "archetype_attraction",
-     "text": "There's a specific energy in a person — not necessarily a look — that makes you immediately wonder what they'd be like in bed."},
-    {"id": "hd_04", "signal": "shame_adjacent_arousal",
-     "text": "You've read or watched something you'd be embarrassed to admit turned you on."},
-    {"id": "hd_05", "signal": "desired_intensity",
-     "text": "Someone wanting you so much they lose a little control — that does something for you."},
-    {"id": "hd_06", "signal": "dom_latent",
-     "text": "You've thought about being completely in charge — every decision, every pace, every permission."},
-    {"id": "hd_07", "signal": "sub_latent",
-     "text": "You've thought about having zero say — someone else deciding everything, and you just going with it."},
-    {"id": "hd_08", "signal": "exhib_latent",
-     "text": "The thought of someone watching you — even hypothetically — is more interesting than you usually admit."},
-    {"id": "hd_09", "signal": "group_latent",
-     "text": "You've wondered what it would be like with more than one person involved."},
-    {"id": "hd_10", "signal": "unnamed_fixation",
-     "text": "There's something specific you've never done but think about more than you'd expect."},
-    {"id": "hd_11", "signal": "taboo_draw",
-     "text": "A certain kind of taboo — not harmful, just forbidden — is quietly compelling to you."},
-    {"id": "hd_12", "signal": "elaborated_fantasy",
-     "text": "You've fantasised about a scenario so specific and detailed it surprised you when you noticed how mapped-out it was."},
-    {"id": "hd_13", "signal": "authentic_exposure",
-     "text": "You're drawn to the idea of being fully seen — no performance, no holding back — and having that be enough."},
-    {"id": "hd_14", "signal": "stranger_context",
-     "text": "A stranger in a specific setting — a hotel, a flight, a party — and the fantasy almost writes itself."},
-    {"id": "hd_15", "signal": "verbal_latent",
+    # Tier 1 — warm up (low stakes, normalising)
+    {"id": "hd_01", "signal": "verbal_latent", "tier": 1,
      "text": "Words matter to you in bed. The right thing said at the right moment does more than most physical acts."},
+    {"id": "hd_02", "signal": "desired_intensity", "tier": 1,
+     "text": "Someone wanting you badly enough to lose a little composure — that does something for you."},
+    {"id": "hd_03", "signal": "authentic_exposure", "tier": 1,
+     "text": "You're drawn to the idea of being completely seen — no performance, no holding back — and having that land well."},
+
+    # Tier 2 — building
+    {"id": "hd_04", "signal": "power_dynamic_latent", "tier": 2,
+     "text": "A scene in a film with a specific power dynamic between two characters — nothing explicit, just the energy — makes you shift in your seat."},
+    {"id": "hd_05", "signal": "archetype_attraction", "tier": 2,
+     "text": "There's a specific kind of person — not necessarily a look — whose presence makes you immediately wonder what they'd be like."},
+    {"id": "hd_06", "signal": "stranger_context", "tier": 2,
+     "text": "A stranger in a specific setting — a hotel bar, a long flight, a house party — and the scenario almost writes itself before you stop it."},
+
+    # Tier 3 — getting specific
+    {"id": "hd_07", "signal": "dom_latent", "tier": 3,
+     "text": "You've thought about being completely in charge — every decision, every pace, every permission. And you liked it."},
+    {"id": "hd_08", "signal": "sub_latent", "tier": 3,
+     "text": "You've thought about having zero say — someone else setting the terms entirely, and you just going with it. Genuinely."},
+    {"id": "hd_09", "signal": "shame_adjacent_arousal", "tier": 3,
+     "text": "You've encountered something — a video, a story, a thought — that turned you on and your first instinct was to be embarrassed about it."},
+    {"id": "hd_10", "signal": "exhib_latent", "tier": 3,
+     "text": "The idea of being watched — even hypothetically, even just once — is more interesting to you than you typically let on."},
+
+    # Tier 4 — the ones people don't usually name
+    {"id": "hd_11", "signal": "hidden_fantasy_present", "tier": 4,
+     "text": "You have a fantasy you've never told anyone. Not because it's wrong — because saying it out loud would make it real in a way you're not sure you're ready for."},
+    {"id": "hd_12", "signal": "group_latent", "tier": 4,
+     "text": "You've wondered, seriously, what it would be like with more than one person involved. Not as a passing thought — as an actual mental image."},
+    {"id": "hd_13", "signal": "taboo_draw", "tier": 4,
+     "text": "There's a specific flavour of taboo — not harmful, just forbidden — that you keep coming back to even when you tell yourself you're not that interested."},
+
+    # Tier 5 — the ones that catch people off guard
+    {"id": "hd_14", "signal": "elaborated_fantasy", "tier": 5,
+     "text": "You've had a fantasy so specific and detailed — names, setting, sequence — that you surprised yourself when you noticed how mapped-out it already was."},
+    {"id": "hd_15", "signal": "unnamed_fixation", "tier": 5,
+     "text": "There's something specific you've never done but think about more than makes sense given how rarely you'd admit to it."},
 ]
 
 HD_OPTS = [
-    ("nope",     "That's not me",             0),
-    ("maybe",    "Maybe, a little",           1),
-    ("yes",      "Yeah, that lands",          2),
-    ("strongly", "More than I usually admit", 3),
+    ("nope",     "Not me",                    0),
+    ("maybe",    "A little, maybe",           1),
+    ("yes",      "Yeah — that's accurate",    2),
+    ("strongly", "More than I'd usually say", 3),
 ]
 HD_OPT_LABELS = [label for _, label, _ in HD_OPTS]
 HD_OPT_IDS    = [oid   for oid, _, _ in HD_OPTS]
+
+# Transition messages between phases — designed to create anticipation
+PHASE_TRANSITIONS = {
+    "to_hidden_desires": [
+        "Phase 1 read how you react. Phase 2 goes after what you don't usually name.",
+        "The scenarios showed your surface. What comes next goes deeper.",
+        "You answered the situations. Now it gets more personal.",
+    ],
+    "to_profile": [
+        "You answered everything. Now it gets put together.",
+        "Reading your answers back against each other.",
+        "The pattern is clearer than you probably expected.",
+    ],
+}
 
 
 # ─── CSS ──────────────────────────────────────────────────────────────────────
@@ -232,16 +267,20 @@ div[data-testid="stRadio"] > label { display:none !important; }
 div[data-testid="stRadio"] > div { gap:8px !important; flex-direction:column !important; }
 div[data-testid="stRadio"] > div > label {
   background:var(--card) !important; border:1px solid var(--border) !important;
-  border-radius:3px !important; padding:10px 14px !important;
-  font-family:'Space Mono',monospace !important; font-size:10px !important;
-  letter-spacing:1px !important; color:var(--soft) !important;
+  border-radius:3px !important; padding:12px 16px !important;
+  font-family:'DM Sans',sans-serif !important; font-size:13px !important;
+  color:var(--soft) !important;
   cursor:pointer !important; transition:all 0.15s !important; width:100% !important;
+  line-height:1.55 !important;
 }
 div[data-testid="stRadio"] > div > label:hover {
-  border-color:var(--lime) !important; color:var(--lime) !important;
+  border-color:var(--lime) !important; color:var(--text) !important;
+  background:#1c1c22 !important;
 }
 div[data-testid="stRadio"] > div > label[data-checked="true"] {
-  background:var(--magenta) !important; border-color:var(--magenta) !important; color:#fff !important;
+  background:rgba(255,45,120,0.12) !important;
+  border-color:var(--magenta) !important; color:var(--text) !important;
+  border-left-width:3px !important;
 }
 @keyframes card-enter {
   from { opacity:0; transform:translateY(14px) scale(0.98); }
@@ -253,6 +292,8 @@ div[data-testid="stRadio"] > div > label[data-checked="true"] {
   background:var(--magenta); animation:pulse-dot 1.4s infinite; vertical-align:middle; margin-right:6px;
 }
 @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
+@keyframes fade-in { from{opacity:0} to{opacity:1} }
+.fade-in { animation:fade-in 0.5s ease both; }
 </style>
 """)
 
@@ -421,6 +462,20 @@ GENDER_NEUTRAL_RULE = (
     "  The question must feel equally personal to ANY reader regardless of who they are."
 )
 
+ANSWER_OPTION_RULE = (
+    "ANSWER OPTIONS — this is critical:\n"
+    "Each option must feel like a private admission, not a preference on a survey.\n"
+    "The reader should recognise themselves in exactly one option and feel slightly caught.\n"
+    "Options must be specific — not 'I'd be open to it' but 'I've already thought about what I'd say if asked'.\n"
+    "Use first person. Use 'I' and 'me'. No abstractions.\n"
+    "Each option: one sentence, max 20 words, reads like something a real person would think but rarely say.\n"
+    "Scale from most closed (pts:0) to fully on-board (pts:5) — but every option should feel like an honest person's real answer, not a strawman.\n"
+    "pts:0 = real reluctance or firm boundary (not judgement, just honest)\n"
+    "pts:2 = curious but holding back\n"
+    "pts:3 = already thinking about it seriously\n"
+    "pts:5 = decided, or has been here before"
+)
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _generate_question_cached(post_url: str, post_title: str, post_text: str,
@@ -428,23 +483,25 @@ def _generate_question_cached(post_url: str, post_title: str, post_text: str,
     """Generate a quiz question from a Reddit post."""
     client = OpenAI(api_key=api_key)
     prompt = (
+        f"You write questions for a desire and self-knowledge quiz called 'Read Between The Lines'.\n"
+        f"This quiz is for adults on an 18+ platform. It should feel like a mirror, not a survey.\n\n"
         f"Reddit post from {post_sub}:\n"
         f"TITLE: {post_title}\n"
         f"EXCERPT: {post_text[:TEXT_CUTOFF]}\n\n"
-        f"Write ONE punchy question putting the reader DIRECTLY in this scenario.\n"
-        f"Rules:\n"
-        f"- Reference a SPECIFIC detail from this post\n"
-        f"- Ask about gut reaction, not what they 'think about' it\n"
-        f"- Must feel personal and slightly uncomfortable to answer honestly\n"
-        f"- {GENDER_NEUTRAL_RULE}\n"
-        f"- 4 answer options: closed/protective (pts:0), cautious (pts:2), open/curious (pts:3), fully on-board (pts:5)\n"
-        f"- Each option: 1 vivid sentence, gender-neutral\n\n"
+        f"Write ONE question that puts the reader directly inside this specific situation.\n\n"
+        f"Question rules:\n"
+        f"- Reference a SPECIFIC emotional detail from the post, not just the topic\n"
+        f"- The question should create a moment of recognition or slight discomfort\n"
+        f"- Ask about what they'd actually feel or do — not what they 'think about' the topic\n"
+        f"- The question should feel like it was written for them specifically\n"
+        f"- {GENDER_NEUTRAL_RULE}\n\n"
+        f"{ANSWER_OPTION_RULE}\n\n"
         f"Return ONLY JSON:\n"
         f'{{"prompt":"...","opts":[{{"t":"...","pts":0}},{{"t":"...","pts":2}},{{"t":"...","pts":3}},{{"t":"...","pts":5}}]}}'
     )
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
-        max_tokens=350,
+        max_tokens=400,
         messages=[{"role": "user", "content": prompt}],
     )
     raw  = resp.choices[0].message.content.strip()
@@ -456,47 +513,42 @@ def _generate_question_cached(post_url: str, post_title: str, post_text: str,
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _generate_scenario_from_scratch(slot_index: int, api_key: str) -> dict:
-    """
-    Ask the AI to invent a fresh, realistic scenario.
-    slot_index is used as a cache key so each slot gets a different scenario.
-    """
+    """Ask the AI to invent a fresh, realistic scenario."""
     client = OpenAI(api_key=api_key)
 
-    # Vary themes by slot so we don't get repetitive scenarios
     theme_hints = [
-        "an attraction that develops inside an existing relationship",
-        "a conversation a couple has been avoiding",
-        "a past experience that resurfaces",
-        "a fantasy one person has never shared",
-        "meeting someone while already in a relationship",
-        "discovering something unexpected about a partner",
-        "a hypothetical that becomes more real than expected",
-        "an honest conversation about satisfaction",
-        "a boundary being tested or shifted",
-        "an encounter with someone from the past",
+        "an attraction that develops inside an existing relationship — a slow realisation, not a sudden event",
+        "a conversation a couple keeps almost having but never finishing",
+        "a past experience that still surfaces at the wrong moments",
+        "a fantasy one person has been carrying for years without naming it",
+        "meeting someone at a specific moment and the timing being wrong in exactly one way",
+        "discovering something unexpected about a partner that reframes everything before it",
+        "a hypothetical that a couple laughs off but neither forgets",
+        "the gap between what someone says they want and what they keep coming back to",
+        "a boundary that has shifted without either person acknowledging it out loud",
+        "a situation where honesty would be easier than silence but silence keeps winning",
     ]
     hint = theme_hints[slot_index % len(theme_hints)]
 
     prompt = (
-        f"You write scenarios for a desire and relationship quiz called 'Read Between The Lines'.\n\n"
-        f"Invent ONE realistic, emotionally charged scenario about: {hint}.\n"
-        f"Base it on the kind of situation real adults post about anonymously online.\n\n"
-        f"Rules:\n"
-        f"- Make it feel specific and real — like it actually happened to someone\n"
-        f"- 2-4 sentences describing the situation\n"
-        f"- {GENDER_NEUTRAL_RULE}\n"
-        f"- End with ONE question asking the reader their honest gut reaction\n"
-        f"- 4 answer options from most closed (pts:0) to most open (pts:5)\n"
-        f"- Each option: 1 vivid sentence, gender-neutral\n\n"
+        f"You write scenarios for a desire and self-knowledge quiz called 'Read Between The Lines'.\n"
+        f"This quiz is for adults on an 18+ platform. It should feel like a mirror, not a survey.\n\n"
+        f"Create ONE scenario about: {hint}\n\n"
+        f"The scenario should:\n"
+        f"- Feel like something a real person would post about anonymously at 1am\n"
+        f"- Be 2-4 sentences — specific enough to feel real, open enough to feel universal\n"
+        f"- End with a question that creates a moment of self-recognition or slight discomfort\n"
+        f"- {GENDER_NEUTRAL_RULE}\n\n"
+        f"{ANSWER_OPTION_RULE}\n\n"
         f"Return ONLY JSON:\n"
-        f'{{"title":"Short evocative title (max 12 words)",'
+        f'{{"title":"Short evocative title, max 12 words, reads like a confession not a headline",'
         f'"text":"The 2-4 sentence scenario",'
-        f'"prompt":"The question",'
+        f'"prompt":"The question — should feel personal and slightly uncomfortable to answer honestly",'
         f'"opts":[{{"t":"...","pts":0}},{{"t":"...","pts":2}},{{"t":"...","pts":3}},{{"t":"...","pts":5}}]}}'
     )
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
-        max_tokens=420,
+        max_tokens=450,
         messages=[{"role": "user", "content": prompt}],
     )
     raw  = resp.choices[0].message.content.strip()
@@ -523,27 +575,21 @@ def _make_fallback_question(post):
     title = post.get("title", "this scenario")
     short = title[:60] + ("…" if len(title) > 60 else "")
     return {
-        "prompt": f'Reading about "{short}" — where does your gut land?',
+        "prompt": f'Reading "{short}" — which of these is closest to your honest reaction?',
         "opts": [
-            {"t": "Hard no — this kind of thing isn't something I'd want near my relationship.", "pts": 0},
-            {"t": "I get it, but I'd need a lot more trust before I'd even discuss it.", "pts": 2},
-            {"t": "Honestly? This is more interesting to me than I'd usually admit out loud.", "pts": 3},
-            {"t": "This sounds like a conversation I've already had — or want to have soon.", "pts": 5},
+            {"t": "I closed off immediately. This kind of thing isn't in my world.", "pts": 0},
+            {"t": "I read it twice. I wouldn't act on it, but I didn't look away either.", "pts": 2},
+            {"t": "This is more familiar to me than I'd admit in a normal conversation.", "pts": 3},
+            {"t": "I've had a version of this conversation. Or I'm ready to.", "pts": 5},
         ],
     }
 
 
 def _build_question_list(posts: list, api_key: str) -> list:
-    """
-    Build POST_COUNT questions. Two sources, both AI-generated:
-      1. Reddit posts  → GPT-4o-mini writes a question from the post content
-      2. Empty slots   → GPT-4o-mini invents a fresh scenario from scratch
-    Everything runs in parallel. No pre-written bank.
-    """
+    """Build POST_COUNT questions from Reddit posts + AI-invented scenarios."""
     reddit_posts = [p for p in posts if "reddit.com" in p.get("url", "")]
     questions    = []
 
-    # ── Step 1: Reddit posts → generate questions in parallel ─────────────────
     reddit_results = [None] * len(reddit_posts)
 
     def _gen_reddit(idx, post):
@@ -576,7 +622,6 @@ def _build_question_list(posts: list, api_key: str) -> list:
         else:
             questions.append({**post, **_make_fallback_question(post)})
 
-    # ── Step 2: Fill remaining slots with AI-invented scenarios ───────────────
     needed = POST_COUNT - len(questions)
     if needed > 0:
         scratch_results = [None] * needed
@@ -635,26 +680,41 @@ def generate_profile_and_categories(result_type, openness_pct, hd_answers,
     pos_str = "; ".join(pos[:4]) or "none"
     neg_str = "; ".join(neg[:4]) or "none"
 
+    # Count strong HD signals for depth of profile
+    strong_signals = [q["signal"] for q in HIDDEN_DESIRE_QUESTIONS
+                      if hd_answers.get(q["id"]) == "strongly"]
+    mild_signals   = [q["signal"] for q in HIDDEN_DESIRE_QUESTIONS
+                      if hd_answers.get(q["id"]) == "yes"]
+
     prompt = (
-        f"You are a desire profile analyst for an 18+ adult platform.\n\n"
-        f"User profile:\n"
-        f"- Openness result: {result_type['name']} ({openness_pct}%)\n"
-        f"- Hidden desire signals: {hd_str}\n"
+        f"You are a desire profile analyst for an 18+ adult platform called Vice Vault.\n"
+        f"Your job is to write a profile that feels uncomfortably accurate — like it was written specifically for this person.\n\n"
+        f"User's data:\n"
+        f"- Openness archetype: {result_type['name']} ({openness_pct}% openness index)\n"
+        f"- Hidden desire signals (strong): {', '.join(strong_signals) or 'none'}\n"
+        f"- Hidden desire signals (present): {', '.join(mild_signals) or 'none'}\n"
         f"- Resonated with: {pos_str}\n"
-        f"- Rejected (DO NOT recommend): {neg_str}\n\n"
+        f"- Rejected (DO NOT recommend these themes): {neg_str}\n\n"
         f"Your tasks — return ONE JSON object with exactly these keys:\n\n"
-        f'1. "ranked_categories": Score EVERY category from 0-10 based on match. '
-        f"Rejected items get 0.\n"
+        f'1. "ranked_categories": Score EVERY category 0-10 based on how well it matches this person. '
+        f"Rejected themes get 0. Be specific — not everything should score 5+.\n"
         f"   Categories: {json.dumps(ALL_PLATFORM_CATEGORIES)}\n\n"
-        f'2. "recommendations": 5 personalised, frank recs (1-2 sentences each). '
-        f"Gender-neutral. Non-judgmental.\n\n"
+        f'2. "recommendations": Exactly 5 recommendations. Rules:\n'
+        f"   - Write like you know them, not like you're advising a stranger\n"
+        f"   - Each rec should feel like something they're already close to but haven't named\n"
+        f"   - Gender-neutral, non-judgmental, specific — not 'explore your boundaries'\n"
+        f"   - 1-2 sentences. The second sentence should add something unexpected.\n"
+        f"   - Do not recommend anything in the rejected list\n\n"
+        f'3. "insight": One sentence, 15-25 words. The single most accurate thing about this person\'s desire profile. '
+        f"Should feel like something they'd read twice.\n\n"
         f"Return ONLY valid JSON:\n"
         f'{{"ranked_categories":{{"CategoryName":score,...}},'
-        f'"recommendations":["...","...","...","...","..."]}}'
+        f'"recommendations":["...","...","...","...","..."],'
+        f'"insight":"..."}}'
     )
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
-        max_tokens=2000,
+        max_tokens=2200,
         messages=[{"role": "user", "content": prompt}],
     )
     raw  = resp.choices[0].message.content.strip()
@@ -671,13 +731,14 @@ def generate_profile_and_categories(result_type, openness_pct, hd_answers,
         "ranked_categories": scored,
         "top25_names":       [c["name"] for c in scored[:25]],
         "recommendations":   data.get("recommendations", [])[:5],
+        "insight":           data.get("insight", ""),
     }
 
 
 # ─── COMMUNITY PULSE ──────────────────────────────────────────────────────────
 
 def _render_community_pulse(q_hash: str, chosen_idx: int, opt_labels: list):
-    """Record this answer and show an anonymous breakdown."""
+    """Record this answer and show an anonymous breakdown with the most surprising stat called out."""
     try:
         import database as db
         db.record_community_answer(q_hash, chosen_idx)
@@ -689,39 +750,58 @@ def _render_community_pulse(q_hash: str, chosen_idx: int, opt_labels: list):
     if total < 3:
         return
 
-    st.html("""
-<div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
-            text-transform:uppercase; color:var(--muted); margin-top:18px; margin-bottom:10px;">
-  How others answered
+    # Find the most surprising stat: largest deviation from expected 25% (uniform)
+    percentages = {i: round(tallies.get(i, 0) / total * 100) for i in range(len(opt_labels))}
+    expected    = 100 // len(opt_labels)
+    surprise_idx = max(percentages, key=lambda i: abs(percentages[i] - expected))
+    surprise_pct = percentages[surprise_idx]
+
+    # Write a contextual hook about the surprising stat
+    if surprise_pct > 50:
+        surprise_hook = f"More than half said: <em>{opt_labels[surprise_idx][:60]}…</em>"
+    elif surprise_pct < 10:
+        surprise_hook = f"Almost nobody said: <em>{opt_labels[surprise_idx][:60]}…</em>"
+    elif surprise_idx == 0 and surprise_pct > 35:
+        surprise_hook = f"{surprise_pct}% closed the door completely."
+    elif surprise_idx == len(opt_labels) - 1 and surprise_pct > 35:
+        surprise_hook = f"{surprise_pct}% were fully on board. That's higher than you'd expect."
+    else:
+        surprise_hook = f"The split here was more even than most questions. Worth noticing."
+
+    st.html(f"""
+<div style="margin-top:20px; margin-bottom:6px;">
+  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--muted); margin-bottom:8px;">
+    How {total} others answered
+  </div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:11px; color:var(--amber);
+              font-style:italic; margin-bottom:12px; line-height:1.5;">
+    {surprise_hook}
+  </div>
 </div>
 """)
+
     for i, label in enumerate(opt_labels):
         count = tallies.get(i, 0)
-        pct   = round(count / total * 100) if total else 0
+        pct   = percentages[i]
         is_me = (i == chosen_idx)
-        color = "var(--lime)" if is_me else "var(--border)"
+        color = "var(--lime)" if is_me else ("var(--amber)" if i == surprise_idx else "var(--border)")
+        label_color = "var(--lime)" if is_me else ("var(--amber)" if i == surprise_idx else "var(--soft)")
         st.html(f"""
-<div style="margin-bottom:8px;">
-  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+<div style="margin-bottom:10px;">
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px; gap:8px;">
     <div style="font-family:'DM Sans',sans-serif; font-size:11px;
-                color:{'var(--lime)' if is_me else 'var(--soft)'};
-                max-width:86%; line-height:1.4;">
-      {'▶ ' if is_me else ''}{label[:74]}{'…' if len(label) > 74 else ''}
+                color:{label_color}; max-width:82%; line-height:1.4;">
+      {'▶ ' if is_me else ''}{label[:80]}{'…' if len(label) > 80 else ''}
     </div>
     <div style="font-family:'Space Mono',monospace; font-size:10px;
-                color:{'var(--lime)' if is_me else 'var(--muted)'}; flex-shrink:0; margin-left:8px;">
+                color:{label_color}; flex-shrink:0; font-weight:{'700' if is_me else '400'};">
       {pct}%
     </div>
   </div>
   <div style="height:3px; background:var(--border); border-radius:2px;">
-    <div style="width:{pct}%; height:100%; background:{color}; border-radius:2px;"></div>
+    <div style="width:{pct}%; height:100%; background:{color}; border-radius:2px; transition:width 0.4s ease;"></div>
   </div>
-</div>
-""")
-    st.html(f"""
-<div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);
-            text-transform:uppercase; letter-spacing:1px; margin-top:6px;">
-  {total} anonymous responses
 </div>
 """)
 
@@ -747,6 +827,7 @@ _DEFAULTS = {
     "wwyd_top25":         [],
     "wwyd_selected_cats": [],
     "wwyd_pulse_shown":   {},
+    "wwyd_insight":       "",
 }
 
 
@@ -803,6 +884,7 @@ def _save_to_db(phase: str):
                 "top25":       st.session_state.get("wwyd_top25", []),
                 "selected":    st.session_state.get("wwyd_selected_cats", []),
                 "hd_signals":  _hd_signal_str(st.session_state.get("wwyd_hd_answers", {})),
+                "insight":     st.session_state.get("wwyd_insight", ""),
                 "hd_full": {
                     q["id"]: st.session_state.get("wwyd_hd_answers", {}).get(q["id"], "nope")
                     for q in HIDDEN_DESIRE_QUESTIONS
@@ -849,6 +931,7 @@ def _update_selections_in_db(selected_cats: list):
                     "selected":            selected_cats,
                     "selection_confirmed": True,
                     "hd_signals":          _hd_signal_str(st.session_state.get("wwyd_hd_answers", {})),
+                    "insight":             st.session_state.get("wwyd_insight", ""),
                 },
                 recommendations=st.session_state.get("wwyd_recs", []),
             )
@@ -893,31 +976,34 @@ def render_start():
               border-left:3px solid var(--magenta); border-radius:4px;
               padding:16px 18px; margin-bottom:10px;">
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--magenta); margin-bottom:6px;">
+                text-transform:uppercase; color:var(--magenta); margin-bottom:8px;">
       <span class="live-dot"></span>Phase 1 · Scenarios
     </div>
     <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75; margin:0;">
-      AI-generated scenarios — some pulled from Reddit, some invented fresh.
-      All gender-neutral and orientation-inclusive.
-      After you answer each one you'll see how other users responded, anonymously.
+      7 situations pulled from real Reddit posts or invented from scratch by AI.
+      Each one puts you directly inside the moment. After you answer, you'll see how
+      everyone else responded — anonymously. The split is usually surprising.
     </p>
   </div>
   <div style="background:var(--card); border:1px solid var(--border);
               border-left:3px solid var(--amber); border-radius:4px;
               padding:16px 18px; margin-bottom:10px;">
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--amber); margin-bottom:6px;">Phase 2 · Hidden Desires</div>
+                text-transform:uppercase; color:var(--amber); margin-bottom:8px;">Phase 2 · Hidden Desires</div>
     <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75; margin:0;">
-      15 statements designed to surface what you don't usually name out loud.
+      15 statements that escalate. Starts easy. By the end, most people read at
+      least one and think: I've never said that out loud.
     </p>
   </div>
   <div style="background:var(--card); border:1px solid var(--border);
               border-left:3px solid var(--cyan); border-radius:4px;
               padding:16px 18px; margin-bottom:20px;">
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--cyan); margin-bottom:6px;">Phase 3 · Your Category Fingerprint</div>
+                text-transform:uppercase; color:var(--cyan); margin-bottom:8px;">Phase 3 · Your Category Fingerprint</div>
     <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75; margin:0;">
-      Every real platform category scored against your profile. Top 25 highlighted — you pick what fits.
+      Every real platform category scored against your answers.
+      A one-line insight that's either accurate or it isn't.
+      You pick what goes into your profile.
     </p>
   </div>
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
@@ -949,7 +1035,7 @@ def render_loading():
     try:
         upd(5, "Fetching live Reddit posts…")
         posts = fetch_posts()
-        reddit_count = len([p for p in posts if "reddit.com" in p.get("url", "")])
+        reddit_count  = len([p for p in posts if "reddit.com" in p.get("url", "")])
         scratch_count = max(0, POST_COUNT - reddit_count)
 
         status_msg = f"{reddit_count} Reddit post{'s' if reddit_count != 1 else ''}"
@@ -1046,8 +1132,8 @@ def render_quiz():
   <div style="padding:14px 16px 10px;">
     <div style="font-family:'DM Sans',sans-serif; font-size:15px; font-weight:500;
                 color:var(--text); line-height:1.5; margin-bottom:8px;">{q['title']}</div>
-    <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft);
-                line-height:1.75;">{q['text']}</div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
+                line-height:1.8;">{q['text']}</div>
   </div>
   <div style="padding:8px 16px 10px; border-top:1px solid var(--border);
               display:flex; align-items:center; gap:14px;">
@@ -1060,9 +1146,9 @@ def render_quiz():
     {'<a href="' + q["url"] + '" target="_blank" style="margin-left:auto;font-family:\'Space Mono\',monospace;font-size:9px;color:var(--cyan);text-decoration:none;letter-spacing:1px;text-transform:uppercase;">View on Reddit ↗</a>' if is_reddit else '<span style="margin-left:auto;font-family:\'Space Mono\',monospace;font-size:9px;color:var(--muted);">AI-generated scenario</span>'}
   </div>
 </div>
-<div style="font-family:'DM Sans',sans-serif; font-size:14px; font-style:italic;
-            color:var(--amber); border-left:2px solid var(--amber); padding-left:12px;
-            margin-bottom:14px; line-height:1.55;">{q['prompt']}</div>
+<div style="font-family:'DM Sans',sans-serif; font-size:15px; font-style:italic;
+            color:var(--amber); border-left:3px solid var(--amber); padding-left:14px;
+            margin-bottom:18px; line-height:1.6;">{q['prompt']}</div>
 """)
 
     opt_labels  = [(opt["t"] if isinstance(opt, dict) else opt) for opt in q["opts"]]
@@ -1082,7 +1168,7 @@ def render_quiz():
         a[cur] = chosen
         st.session_state.wwyd_answers = a
 
-    # Community pulse (only show after an answer is selected)
+    # Community pulse — only after answer is selected
     if chosen is not None:
         _render_community_pulse(q_hash, chosen, opt_labels)
 
@@ -1100,10 +1186,39 @@ def render_quiz():
                      use_container_width=True, type="primary"):
             if is_last:
                 st.session_state.wwyd_hd_cur = 0
-                st.session_state.wwyd_phase  = "hidden_desires"
+                st.session_state.wwyd_phase  = "phase_transition"
             else:
                 st.session_state.wwyd_cur += 1
             st.rerun()
+
+
+# ─── PHASE: TRANSITION (between Phase 1 and Phase 2) ─────────────────────────
+
+def render_phase_transition():
+    """A brief beat between phases — creates anticipation rather than dead loading."""
+    line = random.choice(PHASE_TRANSITIONS["to_hidden_desires"])
+
+    st.html(f"""
+<div class="enter-card fade-in" style="text-align:center; padding:60px 20px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
+              text-transform:uppercase; color:var(--muted); margin-bottom:20px;">
+    Phase 1 complete
+  </div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:20px; color:var(--text);
+              line-height:1.6; max-width:380px; margin:0 auto 32px; font-style:italic;">
+    {line}
+  </div>
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
+              text-transform:uppercase; color:var(--amber); margin-bottom:8px;">
+    Phase 2 · Hidden Desires
+  </div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);
+              margin-bottom:32px;">15 statements. They escalate.</div>
+</div>
+""")
+    if st.button("Continue →", use_container_width=True, type="primary", key="transition_btn"):
+        st.session_state.wwyd_phase = "hidden_desires"
+        st.rerun()
 
 
 # ─── PHASE: HIDDEN DESIRES ────────────────────────────────────────────────────
@@ -1118,10 +1233,19 @@ def render_hidden_desires():
     q       = HIDDEN_DESIRE_QUESTIONS[cur]
     sel_id  = answers.get(q["id"])
     is_last = (cur == total - 1)
+    tier    = q.get("tier", 1)
+
+    # Tier-based accent color — escalates visually
+    tier_colors = {1: "var(--soft)", 2: "var(--amber)", 3: "var(--magenta)",
+                   4: "var(--magenta)", 5: "var(--lime)"}
+    tier_labels = {1: "Warming up", 2: "Getting specific", 3: "The ones people don't say out loud",
+                   4: "Deeper", 5: "The ones that catch people off guard"}
+    accent = tier_colors.get(tier, "var(--amber)")
+    tier_label = tier_labels.get(tier, "")
 
     segs = "".join(
         f'<div style="flex:1; height:3px; border-radius:2px; background:'
-        f'{"var(--amber)" if i < cur else "rgba(255,179,0,0.4)" if i == cur else "var(--border)"}"></div>'
+        f'{"var(--amber)" if i < cur else f"rgba(255,179,0,0.4)" if i == cur else "var(--border)"}"></div>'
         for i in range(total)
     )
     st.html(f"""
@@ -1131,13 +1255,17 @@ def render_hidden_desires():
 </div>
 <div style="display:flex; gap:2px; margin-bottom:20px;">{segs}</div>
 <div class="enter-card" style="background:var(--card); border:1px solid var(--border);
-            border-top:2px solid var(--amber); border-radius:4px; padding:24px; margin-bottom:14px;">
+            border-top:2px solid {accent}; border-radius:4px; padding:24px 24px 20px; margin-bottom:14px;">
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:3px;
-              text-transform:uppercase; color:var(--amber); margin-bottom:10px;">
-    How much does this resonate?
+              text-transform:uppercase; color:{accent}; margin-bottom:12px; opacity:0.75;">
+    {tier_label}
   </div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:16px; font-style:italic;
-              color:var(--text); line-height:1.65;">{q['text']}</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:17px; font-style:italic;
+              color:var(--text); line-height:1.7; font-weight:300;">{q['text']}</div>
+</div>
+<div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:10px; text-align:center;">
+  How much does this resonate?
 </div>
 """)
 
@@ -1186,9 +1314,12 @@ def render_hidden_desires():
 # ─── PHASE: GENERATING PROFILE ────────────────────────────────────────────────
 
 def render_generating_profile():
-    st.html("""
+    line = random.choice(PHASE_TRANSITIONS["to_profile"])
+    st.html(f"""
 <div style="font-family:'Bebas Neue',sans-serif; font-size:36px; color:var(--text);
-            letter-spacing:3px; margin-bottom:20px;">BUILDING YOUR PROFILE</div>
+            letter-spacing:3px; margin-bottom:8px;">BUILDING YOUR PROFILE</div>
+<div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted);
+            font-style:italic; margin-bottom:24px;">{line}</div>
 """)
     ph_bar    = st.empty()
     ph_status = st.empty()
@@ -1218,8 +1349,10 @@ def render_generating_profile():
             RESULT_TYPES[-1],
         )
 
-        upd(30, "Scoring every platform category against your profile…")
+        upd(30, "Reading your hidden desire signals…")
         client       = _get_client()
+
+        upd(50, "Scoring every category against your profile…")
         profile_data = generate_profile_and_categories(
             result_type, pct, hd_ans, questions, answers, client
         )
@@ -1231,6 +1364,7 @@ def render_generating_profile():
         st.session_state.wwyd_ranked_cats   = profile_data["ranked_categories"]
         st.session_state.wwyd_top25         = profile_data["top25_names"]
         st.session_state.wwyd_recs          = profile_data["recommendations"]
+        st.session_state.wwyd_insight       = profile_data.get("insight", "")
         st.session_state.wwyd_selected_cats = list(profile_data["top25_names"])
 
         _save_to_db("profile_complete")
@@ -1260,6 +1394,7 @@ def render_category_selector():
     selected    = set(st.session_state.wwyd_selected_cats)
     pct         = st.session_state.get("wwyd_openness_pct", 0)
     result_type = st.session_state.get("wwyd_result_type", {})
+    insight     = st.session_state.get("wwyd_insight", "")
 
     st.html(f"""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
@@ -1268,8 +1403,8 @@ def render_category_selector():
 </div>
 <div style="background:var(--card); border:1px solid var(--border);
             border-top:2px solid var(--cyan); border-radius:4px; padding:18px 20px; margin-bottom:16px;">
-  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-    <div>
+  <div style="display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
+    <div style="flex:1; min-width:200px;">
       <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--text);
                   letter-spacing:2px;">{result_type.get('icon','')} {result_type.get('name','')}</div>
       <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--magenta);
@@ -1278,17 +1413,17 @@ def render_category_selector():
       </div>
     </div>
     <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px;
-                padding:8px 14px; text-align:center;">
+                padding:8px 14px; text-align:center; flex-shrink:0;">
       <div style="font-family:'Bebas Neue',sans-serif; font-size:28px; color:var(--text);">{pct}</div>
       <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);
                   text-transform:uppercase; letter-spacing:1px;">openness %</div>
     </div>
   </div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft);
-              margin-top:12px; line-height:1.7;">
-    Every real platform category scored against your signals.
-    <span style="color:var(--lime); font-weight:600;">Lime = AI top 25 picks for you.</span>
-    Toggle anything you want.
+  {f'<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--amber); font-style:italic; line-height:1.6; border-left:2px solid var(--amber); padding-left:12px; margin-bottom:12px;">{insight}</div>' if insight else ''}
+  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted); line-height:1.65;">
+    Every real platform category scored against your answers.
+    <span style="color:var(--lime);">Lime = AI top 25 picks for you.</span>
+    Toggle anything you want — this is your profile, not a recommendation.
   </div>
 </div>
 <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
@@ -1343,26 +1478,41 @@ def render_result():
     recs        = st.session_state.get("wwyd_recs", [])
     ranked_cats = st.session_state.get("wwyd_ranked_cats", [])
     hd_ans      = st.session_state.get("wwyd_hd_answers", {})
+    insight     = st.session_state.get("wwyd_insight", "")
+
+    # Three-line result breakdown instead of one paragraph
+    hook   = result_type.get("hook", "")
+    signal = result_type.get("signal", "")
+    tell   = result_type.get("tell", "")
 
     st.html(f"""
 <div class="enter-card" style="background:var(--card); border:1px solid var(--border);
             border-top:3px solid var(--magenta); border-radius:4px;
-            padding:28px 24px; text-align:center; margin-bottom:14px;">
-  <div style="font-size:48px; margin-bottom:10px;">{result_type['icon']}</div>
+            padding:28px 24px; margin-bottom:14px;">
+  <div style="font-size:42px; margin-bottom:10px;">{result_type['icon']}</div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(28px,6vw,46px);
               letter-spacing:3px; color:var(--text); line-height:1.05; margin-bottom:4px;">
     {result_type['name'].upper()}
   </div>
   <div style="font-family:'Space Mono',monospace; font-size:10px; letter-spacing:2px;
-              color:var(--magenta); text-transform:uppercase; margin-bottom:16px;">
+              color:var(--magenta); text-transform:uppercase; margin-bottom:24px;">
     {result_type['meta']}
   </div>
-  <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
-             line-height:1.85; margin-bottom:20px; max-width:480px;
-             margin-left:auto; margin-right:auto;">
-    {result_type['desc']}
-  </p>
-  <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px; padding:14px;">
+
+  <div style="border-top:1px solid var(--border); padding-top:18px; margin-bottom:16px;">
+    <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text);
+                line-height:1.75; margin-bottom:14px;">{hook}</div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
+                line-height:1.75; margin-bottom:14px; border-left:2px solid var(--border);
+                padding-left:12px;">{signal}</div>
+    <div style="font-family:'Space Mono',monospace; font-size:10px; color:var(--amber);
+                line-height:1.65; letter-spacing:0.5px;">{tell}</div>
+  </div>
+
+  {f'<div style="background:var(--surface); border:1px solid var(--amber); border-radius:3px; padding:14px 16px; margin-top:4px;"><div style="font-family:\'Space Mono\',monospace; font-size:8px; letter-spacing:2px; text-transform:uppercase; color:var(--amber); margin-bottom:6px;">One-line read</div><div style="font-family:\'DM Sans\',sans-serif; font-size:14px; color:var(--text); font-style:italic; line-height:1.65;">{insight}</div></div>' if insight else ''}
+
+  <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px;
+              padding:14px; margin-top:16px;">
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
                 text-transform:uppercase; color:var(--muted); margin-bottom:8px;">Openness Index</div>
     <div style="height:4px; background:var(--border); border-radius:2px; margin-bottom:8px;">
@@ -1381,33 +1531,42 @@ def render_result():
 </div>
 """)
 
-    strong = [q for q in HIDDEN_DESIRE_QUESTIONS if hd_ans.get(q["id"]) in ("yes", "strongly")]
+    # Hidden desire signals — starred for strong, sorted by tier
+    strong = sorted(
+        [q for q in HIDDEN_DESIRE_QUESTIONS if hd_ans.get(q["id"]) in ("yes", "strongly")],
+        key=lambda q: (-(3 if hd_ans.get(q["id"]) == "strongly" else 2), q.get("tier", 1)),
+    )
     if strong:
         sigs_html = "".join(
-            f'<div style="display:flex; gap:10px; align-items:flex-start; padding:8px 0;'
+            f'<div style="display:flex; gap:12px; align-items:flex-start; padding:10px 0;'
             f' border-bottom:1px solid var(--border);">'
-            f'<span style="color:var(--amber); flex-shrink:0; margin-top:2px;">'
+            f'<span style="color:{"var(--magenta)" if hd_ans.get(q["id"]) == "strongly" else "var(--amber)"};'
+            f' flex-shrink:0; margin-top:3px; font-size:10px;">'
             f'{"★" if hd_ans.get(q["id"]) == "strongly" else "◆"}</span>'
             f'<div style="font-family:\'DM Sans\',sans-serif; font-size:12px; color:var(--soft);'
-            f' line-height:1.65; font-style:italic;">{q["text"]}</div></div>'
+            f' line-height:1.7; font-style:italic;">{q["text"]}</div></div>'
             for q in strong
         )
         st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:18px; margin-bottom:12px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--amber); margin-bottom:10px;">
-    Hidden Desire Signals · {len(strong)}
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+                text-transform:uppercase; color:var(--amber);">Hidden Desire Signals</div>
+    <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);">
+      {len([q for q in strong if hd_ans.get(q['id']) == 'strongly'])} strong · {len([q for q in strong if hd_ans.get(q['id']) == 'yes'])} present
+    </div>
   </div>
   {sigs_html}
 </div>
 """)
 
+    # Top 10 categories
     if ranked_cats:
         top10     = [c for c in ranked_cats[:10] if c["score"] > 0]
         max_score = ranked_cats[0]["score"] if ranked_cats else 1
         bars_html = "".join(
-            f'<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">'
+            f'<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">'
             f'<div style="font-family:\'Space Mono\',monospace; font-size:9px;'
             f' color:{"var(--lime)" if c["name"] in sel_cats else "var(--soft)"};'
             f' width:150px; flex-shrink:0; white-space:nowrap; overflow:hidden;'
@@ -1425,31 +1584,36 @@ def render_result():
         st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:18px; margin-bottom:12px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--cyan); margin-bottom:4px;">
-    Your Content Fingerprint · Top 10
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+                text-transform:uppercase; color:var(--cyan);">Content Fingerprint · Top 10</div>
+    <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);">
+      {len(sel_cats)} selected
+    </div>
   </div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:11px; color:var(--muted);
-              margin-bottom:14px;">{len(sel_cats)} categories selected.</div>
   {bars_html}
 </div>
 """)
 
+    # Recommendations — each one specific, not a category header
     if recs:
         recs_html = "".join(
-            f'<div style="background:var(--surface); border:1px solid var(--border);'
-            f' border-left:2px solid var(--magenta); border-radius:0 4px 4px 0;'
-            f' padding:12px 16px; margin-bottom:8px; font-family:\'DM Sans\',sans-serif;'
-            f' font-size:13px; color:var(--soft); line-height:1.75;">{r}</div>'
-            for r in recs
+            f'<div style="padding:14px 0; border-bottom:1px solid var(--border);">'
+            f'<div style="font-family:\'Space Mono\',monospace; font-size:8px; letter-spacing:2px;'
+            f' text-transform:uppercase; color:var(--magenta); margin-bottom:6px;">0{i+1}</div>'
+            f'<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--soft);'
+            f' line-height:1.8;">{r}</div></div>'
+            for i, r in enumerate(recs)
         )
         st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:18px; margin-bottom:16px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--magenta); margin-bottom:12px;">
+              text-transform:uppercase; color:var(--magenta); margin-bottom:4px;">
     Things Worth Exploring
   </div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:11px; color:var(--muted);
+              margin-bottom:12px;">Based on what you actually answered — not just your archetype.</div>
   {recs_html}
 </div>
 """)
@@ -1457,14 +1621,19 @@ def render_result():
     share = (
         f"Read Between The Lines — Vice Vault\n\n"
         f"Result: {result_type['name']}\n\"{result_type['meta']}\"\n"
-        f"Openness Index: {pct}%\n\n{result_type['desc']}\n\n"
+        f"Openness Index: {pct}%\n\n"
+        f"{result_type.get('hook','')}\n"
+        f"{result_type.get('signal','')}\n"
+        f"{result_type.get('tell','')}\n"
     )
+    if insight:
+        share += f"\nOne-line read: {insight}\n"
     if strong:
-        share += "Signals: " + ", ".join(q["signal"] for q in strong[:5]) + "\n\n"
+        share += "\nSignals: " + ", ".join(q["signal"] for q in strong[:5]) + "\n"
     if sel_cats:
-        share += "My categories: " + ", ".join(sel_cats[:10]) + "\n\n"
+        share += "\nMy categories: " + ", ".join(sel_cats[:10]) + "\n"
     if recs:
-        share += "Recommendations:\n" + "\n".join(f"· {r}" for r in recs[:3])
+        share += "\nRecommendations:\n" + "\n".join(f"· {r}" for r in recs[:3])
 
     col1, col2 = st.columns(2)
     with col1:
@@ -1493,6 +1662,7 @@ def what_would_you_do_page():
     if   phase == "start":              render_start()
     elif phase == "loading":            render_loading()
     elif phase == "quiz":               render_quiz()
+    elif phase == "phase_transition":   render_phase_transition()
     elif phase == "hidden_desires":     render_hidden_desires()
     elif phase == "generating_profile": render_generating_profile()
     elif phase == "category_selector":  render_category_selector()
