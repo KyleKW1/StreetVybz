@@ -1,223 +1,160 @@
 """
-auth.py — bcrypt password hashing with transparent SHA-256 migration.
+Pages/auth_page.py — uses st.html() for custom HTML (Streamlit Cloud safe)
+
 """
-import re
-import secrets
-import hashlib
 import streamlit as st
-
-try:
-    import bcrypt
-    BCRYPT_AVAILABLE = True
-except ImportError:
-    BCRYPT_AVAILABLE = False
-
-MIN_PASSWORD_LENGTH = 8  # Fix #7: standardised across all flows
+from auth import (
+    authenticate_user, register_user, validate_email,
+    validate_password, validate_username,
+)
 
 
-def _db():
-    try:
-        import database as _database
-        return _database
-    except Exception:
-        return None
+CSS = """
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0a0a0b; --card:#18181d; --border:#2a2a35;
+  --lime:#c6ff00; --text:#f0f0f5; --muted:#5a5a72; --soft:#9090aa;
+}
+.auth-card {
+  background:var(--card);
+  border:1px solid var(--border);
+  border-top:2px solid var(--lime);
+  border-radius:4px;
+  padding:32px 28px 24px;
+  animation:slideUp 0.35s cubic-bezier(0.22,1,0.36,1) both;
+}
+@keyframes slideUp {
+  from { opacity:0; transform:translateY(14px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+.auth-wordmark {
+  font-family:'Bebas Neue',sans-serif;
+  font-size:48px; letter-spacing:4px; line-height:1;
+  color:var(--text); margin-bottom:4px; text-align:center;
+}
+.auth-wordmark span { color:var(--lime); }
+.auth-tagline {
+  font-family:'Space Mono',monospace; font-size:10px;
+  color:var(--muted); letter-spacing:2px; text-transform:uppercase;
+  margin:0; text-align:center;
+}
+.auth-divider { height:1px; background:var(--border); margin:20px 0 16px; }
+.auth-section-label {
+  font-family:'Space Mono',monospace; font-size:9px;
+  text-transform:uppercase; letter-spacing:3px; color:var(--lime); margin-bottom:4px;
+}
+.auth-hint {
+  font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);
+  text-align:center; margin-top:12px;
+}
+</style>
+"""
 
 
-# ── Hashing ───────────────────────────────────────────────────────────────────
-
-def _sha256(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+def inject_auth_css():
+    st.html(CSS)
 
 
-def hash_password(password: str) -> str:
-    if BCRYPT_AVAILABLE:
-        return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-    return _sha256(password)
+def login_page():
+    inject_auth_css()
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.html("""
+<div class="auth-card">
+  <div class="auth-wordmark">VICE<span>VAULT</span></div>
+  <p class="auth-tagline">Welcome back — no judgement here</p>
+  <div class="auth-divider"></div>
+  <div class="auth-section-label">Sign in</div>
+</div>
+""")
+        username = st.text_input("Username", placeholder="Your username", key="login_username")
+        password = st.text_input("Password", type="password", placeholder="Your password", key="login_password")
+
+        st.html("<div style='height:8px'></div>")
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("Sign In →", use_container_width=True, type="primary", key="login_btn"):
+                if username and password:
+                    success, user = authenticate_user(username, password)
+                    if success:
+                        st.session_state.authenticated = True
+                        st.session_state.user = user
+                        st.success("You're in.")
+                        st.balloons()
+                        st.rerun()
+                    elif user == "locked":
+                        # Fix #7: login rate limiting
+                        st.error("Too many failed attempts. Try again in a few minutes.")
+                    else:
+                        st.error("Those credentials don't match.")
+                else:
+                    st.warning("Fill in both fields.")
+        with col_b:
+            if st.button("Create Account", use_container_width=True, type="secondary", key="go_register"):
+                st.session_state.page = 'register'
+                st.rerun()
+
+        st.html("<div style='height:4px'></div>")
+        c1, c2, c3 = st.columns([1, 2, 1])
+        with c2:
+            if st.button("Forgot password?", use_container_width=True, type="secondary", key="go_forgot"):
+                st.session_state.page = 'forgot'
+                st.rerun()
+
+        st.html('<p class="auth-hint">New here? Hit <strong>Create Account</strong> above.</p>')
 
 
-def _verify_password(password: str, stored_hash: str) -> bool:
-    """Verify against bcrypt or legacy SHA-256 hash. NO plaintext path."""
-    is_bcrypt = stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$")
-    if BCRYPT_AVAILABLE and is_bcrypt:
-        try:
-            return bcrypt.checkpw(password.encode(), stored_hash.encode())
-        except Exception:
-            return False
-    # Legacy SHA-256 path (64 hex chars) — anything else is rejected
-    if len(stored_hash) == 64:
-        return _sha256(password) == stored_hash
-    return False
+def register_page():
+    inject_auth_css()
 
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.html("""
+<div class="auth-card">
+  <div class="auth-wordmark">VICE<span>VAULT</span></div>
+  <p class="auth-tagline">Let's get you set up</p>
+  <div class="auth-divider"></div>
+  <div class="auth-section-label">Create account</div>
+</div>
+""")
+        username         = st.text_input("Username", placeholder="Letters, numbers, underscores (3–32)", key="reg_username")
+        email            = st.text_input("Email address", placeholder="you@example.com", key="reg_email")
+        password         = st.text_input("Password", type="password", placeholder="At least 8 characters", key="reg_password")
+        confirm_password = st.text_input("Confirm password", type="password", placeholder="Same again", key="reg_confirm")
 
-def _is_legacy_hash(stored_hash: str) -> bool:
-    return not (stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"))
+        st.html("<div style='height:8px'></div>")
 
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("Create Account →", use_container_width=True, type="primary", key="register_btn"):
+                ok_pw, pw_msg = validate_password(password)
+                if not username or not email or not password:
+                    st.error("All fields are required.")
+                elif not validate_username(username):
+                    # Fix #2 (supporting): usernames render in raw HTML app-wide
+                    st.error("Username must be 3–32 characters: letters, numbers, underscores only.")
+                elif not validate_email(email):
+                    st.error("That email doesn't look right.")
+                elif not ok_pw:
+                    # Fix #7: 8-character minimum everywhere
+                    st.error(pw_msg)
+                elif password != confirm_password:
+                    st.error("Passwords don't match.")
+                else:
+                    success, message = register_user(username, email, password)
+                    if success:
+                        st.success(f"You're all set! {message}")
+                        st.balloons()
+                        st.session_state.page = 'login'
+                        st.rerun()
+                    else:
+                        st.error(message)
+        with col_b:
+            if st.button("← Back", use_container_width=True, type="secondary", key="back_login"):
+                st.session_state.page = 'login'
+                st.rerun()
 
-# ── Validation ────────────────────────────────────────────────────────────────
-
-def validate_email(email: str) -> bool:
-    return bool(re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email))
-
-
-def validate_password(password: str):
-    """Returns (ok, message). Centralised so every flow enforces the same rule."""
-    if not password or len(password) < MIN_PASSWORD_LENGTH:
-        return False, f"Password needs at least {MIN_PASSWORD_LENGTH} characters."
-    return True, ""
-
-
-# ── Registration / Authentication ─────────────────────────────────────────────
-
-def register_user(username: str, email: str, password: str):
-    """Called by Pages/auth_page.py — returns (bool, str) tuple."""
-    db = _db()
-    if not db:
-        return False, "Database unavailable."
-    ok, msg = validate_password(password)
-    if not ok:
-        return False, msg
-    try:
-        uid = db.create_user(username, email, hash_password(password))
-        if uid:
-            return True, "Registration successful!"
-        return False, "Username or email already exists."
-    except Exception:
-        return False, "Registration error — please try again."
-
-
-def authenticate_user(username: str, password: str):
-    """
-    Fix #7: rate-limited. After 5 failed attempts within 10 minutes for a
-    username, login is locked. Returns (success, user_or_None) — and
-    (False, "locked") when rate limited so the UI can show a clear message.
-    """
-    db = _db()
-    if not db:
-        return False, None
-    try:
-        # Rate limit check (Fix #7)
-        try:
-            if db.is_login_locked(username):
-                return False, "locked"
-        except Exception:
-            pass
-
-        user = db.get_user_by_username(username)
-        if not user:
-            try:
-                db.record_login_attempt(username, False)
-            except Exception:
-                pass
-            return False, None
-
-        stored = user.get("password_hash", "")
-        if not _verify_password(password, stored):
-            try:
-                db.record_login_attempt(username, False)
-            except Exception:
-                pass
-            return False, None
-
-        try:
-            db.record_login_attempt(username, True)
-        except Exception:
-            pass
-
-        # Transparently migrate legacy SHA-256 → bcrypt
-        if BCRYPT_AVAILABLE and _is_legacy_hash(stored):
-            try:
-                db.update_user_password(user["id"], hash_password(password))
-            except Exception:
-                pass
-
-        try:
-            db.update_last_login(user["id"])
-        except Exception:
-            pass
-
-        # Issue session token
-        token = secrets.token_urlsafe(32)
-        try:
-            db.create_session_token(user["id"], token)
-            st.session_state.session_token = token
-        except Exception:
-            pass
-
-        return True, user
-    except Exception:
-        return False, None
-
-
-def check_session_valid() -> bool:
-    """
-    Fix #4: called on every authenticated page load (app.py main()).
-    Fails CLOSED: if the token can't be positively verified, the session
-    is invalid. Only when the database module itself isn't importable
-    (pure local dev) do we allow through.
-    """
-    db = _db()
-    if not db:
-        return True
-    token = st.session_state.get("session_token")
-    user = st.session_state.get("user", {})
-    user_id = user.get("id") if user else None
-    if not user_id:
-        return False
-    if not token:
-        # Authenticated session with no token at all — treat as invalid
-        # (every login path now issues one).
-        return False
-    try:
-        return db.verify_session_token(user_id, token)
-    except Exception:
-        return False
-
-
-# ── Password reset helper ─────────────────────────────────────────────────────
-
-def reset_user_password(user_id: int, new_password: str) -> bool:
-    db = _db()
-    if not db:
-        return False
-    ok, _ = validate_password(new_password)
-    if not ok:
-        return False
-    try:
-        return db.update_user_password(user_id, hash_password(new_password))
-    except Exception:
-        return False
-
-
-# ── Session state ─────────────────────────────────────────────────────────────
-
-def init_session_state():
-    defaults = {
-        "authenticated":        False,
-        "user":                 None,
-        "page":                 "login",
-        "selected_feature":     None,
-        "selected_sub_feature": None,
-        "file_page":            0,
-    }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
-
-
-def logout():
-    db = _db()
-    if db:
-        token = st.session_state.get("session_token")
-        if token:
-            try:
-                db.invalidate_session_token(token)
-            except Exception:
-                pass
-
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-
-    st.session_state.authenticated = False
-    st.session_state.user          = None
-    st.session_state.page          = "login"
-    st.rerun()
+        st.html('<p class="auth-hint">Already have an account? Sign in on the previous screen.</p>')
