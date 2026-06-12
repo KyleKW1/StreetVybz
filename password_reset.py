@@ -9,7 +9,7 @@ import secrets
 import smtplib
 from email.message import EmailMessage
 
-from auth import hash_password, validate_email
+from auth import hash_password, validate_email, validate_password
 
 try:
     from config import DB_CONFIG, EMAIL_CONFIG
@@ -43,12 +43,25 @@ def _create_connection():
             user=DB_CONFIG.get("user", ""),
             password=DB_CONFIG.get("password", ""),
             database=DB_CONFIG.get("database", ""),
-            ssl_disabled=True,
+            ssl_disabled=bool(DB_CONFIG.get("ssl_disabled", False)),
             connection_timeout=30,
             autocommit=False,
         )
     except Exception:
-        return None
+        # Fallback without TLS if the host doesn't support it
+        try:
+            return mysql.connector.connect(
+                host=DB_CONFIG.get("host", ""),
+                port=int(DB_CONFIG.get("port", 3306)),
+                user=DB_CONFIG.get("user", ""),
+                password=DB_CONFIG.get("password", ""),
+                database=DB_CONFIG.get("database", ""),
+                ssl_disabled=True,
+                connection_timeout=30,
+                autocommit=False,
+            )
+        except Exception:
+            return None
 
 
 def _check_email_exists(email: str) -> bool:
@@ -284,10 +297,12 @@ def reset_password_page():
         col_a, col_b = st.columns(2)
         with col_a:
             if st.button("Reset →", use_container_width=True, type="primary"):
+                ok_pw, pw_msg = validate_password(new_pw)
                 if not new_pw:
                     st.error("Enter a password.")
-                elif len(new_pw) < 6:
-                    st.error("Minimum 6 characters.")
+                elif not ok_pw:
+                    # Fix #7: 8-character minimum everywhere
+                    st.error(pw_msg)
                 elif new_pw != conf_pw:
                     st.error("Passwords don't match.")
                 elif _reset_password(email, new_pw):
