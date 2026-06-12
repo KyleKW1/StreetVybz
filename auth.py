@@ -1,13 +1,108 @@
 """
-Pages/auth_page.py — uses st.html() for custom HTML (Streamlit Cloud safe)
-
+auth.py — Core authentication functions + Auth page UI.
 """
-import streamlit as st
-from auth import (
-    authenticate_user, register_user, validate_email,
-    validate_password, validate_username,
-)
 
+import re
+import secrets
+import streamlit as st
+
+
+# ─── CORE AUTH FUNCTIONS ──────────────────────────────────────────────────────
+
+def hash_password(password: str) -> str:
+    try:
+        import bcrypt
+        return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    except ImportError:
+        import hashlib
+        return hashlib.sha256(password.encode()).hexdigest()
+
+
+def validate_email(email: str) -> bool:
+    return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email.strip()))
+
+
+def validate_password(password: str) -> tuple[bool, str]:
+    if not password or len(password) < 8:
+        return False, "Password must be at least 8 characters."
+    return True, ""
+
+
+def validate_username(username: str) -> bool:
+    return bool(re.match(r"^[a-zA-Z0-9_]{3,32}$", username.strip()))
+
+
+def authenticate_user(username: str, password: str):
+    """
+    Returns (True, user_dict) on success.
+    Returns (False, "locked") if rate-limited.
+    Returns (False, None) on bad credentials.
+    """
+    import database as db
+
+    # Rate limiting — track failed attempts in session state
+    key = f"_login_fails_{username.lower()}"
+    key_ts = f"_login_fails_ts_{username.lower()}"
+    import time
+    now = time.time()
+
+    fails = st.session_state.get(key, 0)
+    last_fail = st.session_state.get(key_ts, 0)
+
+    # Reset counter after 10 minutes
+    if now - last_fail > 600:
+        fails = 0
+
+    if fails >= 5:
+        return False, "locked"
+
+    user = db.authenticate_user(username.strip(), password)
+    if user:
+        st.session_state[key] = 0
+        # Issue a session token
+        try:
+            token = secrets.token_urlsafe(32)
+            db.create_session_token(user["id"], token)
+            st.session_state["session_token"] = token
+        except Exception:
+            pass
+        try:
+            db.update_last_login(user["id"])
+        except Exception:
+            pass
+        return True, user
+
+    # Failed attempt
+    st.session_state[key] = fails + 1
+    st.session_state[key_ts] = now
+    return False, None
+
+
+def register_user(username: str, email: str, password: str) -> tuple[bool, str]:
+    import database as db
+    try:
+        uid = db.create_user(username.strip(), email.strip(), hash_password(password))
+        if uid:
+            return True, "Account created successfully."
+        return False, "Username or email already taken."
+    except Exception as e:
+        return False, f"Registration error: {e}"
+
+
+def check_session_valid() -> bool:
+    """Returns True if the current session token is still valid (or if no token system is in use)."""
+    user = st.session_state.get("user")
+    token = st.session_state.get("session_token")
+    if not user or not token:
+        return True  # No token system — don't block
+    try:
+        import database as db
+        return db.verify_session_token(user["id"], token)
+    except Exception:
+        return True
+
+
+# ─── AUTH PAGE UI ─────────────────────────────────────────────────────────────
 
 CSS = """
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
@@ -86,7 +181,6 @@ def login_page():
                         st.balloons()
                         st.rerun()
                     elif user == "locked":
-                        # Fix #7: login rate limiting
                         st.error("Too many failed attempts. Try again in a few minutes.")
                     else:
                         st.error("Those credentials don't match.")
@@ -134,12 +228,10 @@ def register_page():
                 if not username or not email or not password:
                     st.error("All fields are required.")
                 elif not validate_username(username):
-                    # Fix #2 (supporting): usernames render in raw HTML app-wide
                     st.error("Username must be 3–32 characters: letters, numbers, underscores only.")
                 elif not validate_email(email):
                     st.error("That email doesn't look right.")
                 elif not ok_pw:
-                    # Fix #7: 8-character minimum everywhere
                     st.error(pw_msg)
                 elif password != confirm_password:
                     st.error("Passwords don't match.")
