@@ -416,49 +416,72 @@ def _score_posts(posts: list, api_key: str) -> list:
     ]
 
 
+def _get_reddit_token(client_id: str, client_secret: str) -> str:
+    import requests
+    r = requests.post(
+        "https://www.reddit.com/api/v1/access_token",
+        auth=(client_id, client_secret),
+        data={"grant_type": "client_credentials"},
+        headers={"User-Agent": "ViceVault/1.0"},
+        timeout=5
+    )
+    return r.json().get("access_token", "")
+
 def _fetch_one(sub):
     import requests
-    url     = f"https://www.reddit.com/r/{sub}/hot.json?limit=20"
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; QuizApp/1.0)", "Accept": "application/json"}
-    for fetch_url in [url, "https://api.allorigins.win/raw?url=" + url]:
-        try:
-            r = requests.get(fetch_url, headers=headers, timeout=4)
-            if not r.ok:
+    client_id     = st.secrets.get("REDDIT_CLIENT_ID", "")
+    client_secret = st.secrets.get("REDDIT_CLIENT_SECRET", "")
+    
+    if client_id and client_secret:
+        token = _get_reddit_token(client_id, client_secret)
+        url     = f"https://oauth.reddit.com/r/{sub}/hot.json?limit=25&include_over_18=1"
+        headers = {
+            "Authorization": f"bearer {token}",
+            "User-Agent": "ViceVault/1.0"
+        }
+    else:
+        # fallback to unauthenticated (clean feed, rate limited)
+        url     = f"https://www.reddit.com/r/{sub}/hot.json?limit=20"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        for fetch_url in [url, "https://api.allorigins.win/raw?url=" + url]:
+            try:
+                r = requests.get(fetch_url, headers=headers, timeout=4)
+                if not r.ok:
+                    continue
+                data = r.json()
+                if "contents" in data:
+                    data = json.loads(data["contents"])
+                children = data.get("data", {}).get("children", [])
+                posts = []
+                for item in children:
+                    pd    = item.get("data", {})
+                    body  = pd.get("selftext", "")
+                    title = pd.get("title", "")
+                    if not body or len(body) < MIN_LENGTH:     continue
+                    if pd.get("score", 0) < MIN_SCORE:         continue
+                    if pd.get("stickied") or pd.get("pinned"): continue
+                    if body in ("[deleted]", "[removed]"):      continue
+                    #if not _is_taboo(title, body):             continue
+                    snippet = body[:TEXT_CUTOFF].strip()
+                    if len(body) > TEXT_CUTOFF:
+                        snippet += "…"
+                    posts.append({
+                        "sub":      f"r/{sub}",
+                        "avatar":   (pd.get("author") or "A")[0].upper(),
+                        "user":     pd.get("author", "anonymous"),
+                        "title":    title[:120],
+                        "text":     snippet,
+                        "upvotes":  _fmt_num(pd.get("score", 0)),
+                        "comments": _fmt_num(pd.get("num_comments", 0)),
+                        "time":     _time_ago(pd.get("created_utc", time.time())),
+                        "url":      "https://reddit.com" + pd.get("permalink", ""),
+                        "flair":    pd.get("link_flair_text") or sub.replace("_", " ").title(),
+                    })
+                if posts:
+                    return posts
+            except Exception:
                 continue
-            data = r.json()
-            if "contents" in data:
-                data = json.loads(data["contents"])
-            children = data.get("data", {}).get("children", [])
-            posts = []
-            for item in children:
-                pd    = item.get("data", {})
-                body  = pd.get("selftext", "")
-                title = pd.get("title", "")
-                if not body or len(body) < MIN_LENGTH:     continue
-                if pd.get("score", 0) < MIN_SCORE:         continue
-                if pd.get("stickied") or pd.get("pinned"): continue
-                if body in ("[deleted]", "[removed]"):      continue
-                #if not _is_taboo(title, body):             continue
-                snippet = body[:TEXT_CUTOFF].strip()
-                if len(body) > TEXT_CUTOFF:
-                    snippet += "…"
-                posts.append({
-                    "sub":      f"r/{sub}",
-                    "avatar":   (pd.get("author") or "A")[0].upper(),
-                    "user":     pd.get("author", "anonymous"),
-                    "title":    title[:120],
-                    "text":     snippet,
-                    "upvotes":  _fmt_num(pd.get("score", 0)),
-                    "comments": _fmt_num(pd.get("num_comments", 0)),
-                    "time":     _time_ago(pd.get("created_utc", time.time())),
-                    "url":      "https://reddit.com" + pd.get("permalink", ""),
-                    "flair":    pd.get("link_flair_text") or sub.replace("_", " ").title(),
-                })
-            if posts:
-                return posts
-        except Exception:
-            continue
-    return []
+        return []
 
 
 @st.cache_data(ttl=600, show_spinner=False)
