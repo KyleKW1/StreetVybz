@@ -378,6 +378,43 @@ def _question_hash(prompt_text: str) -> str:
 
 
 # ─── REDDIT FETCH ─────────────────────────────────────────────────────────────
+def _score_posts(posts: list, api_key: str) -> list:
+    client = OpenAI(api_key=api_key)
+    
+    batch = "\n\n".join(
+        f"[{i}] TITLE: {p['title']}\nBODY: {p['text'][:150]}"
+        for i, p in enumerate(posts)
+    )
+    
+    prompt = (
+        "Score each Reddit post for a sexual desire quiz. Return ONLY a JSON array.\n"
+        "Each item: {\"i\": index, \"tension\": 0-10, \"desire\": 0-10}\n\n"
+        "tension = does this have a real situation with stakes? "
+        "(venting/ranting = 0, clear scenario with a decision or revelation = 10)\n"
+        "desire = does this involve attraction, fantasy, intimacy, or a sexual decision? "
+        "(completely off-topic = 0, directly about sex/desire/fantasy = 10)\n\n"
+        f"Posts:\n{batch}\n\n"
+        "Return ONLY the JSON array, nothing else."
+    )
+    
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=300,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    
+    scores = _safe_json(resp.choices[0].message.content)
+    if not isinstance(scores, list):
+        return posts  # fallback: keep all if scoring fails
+    
+    score_map = {s["i"]: s for s in scores}
+    
+    return [
+        p for i, p in enumerate(posts)
+        if score_map.get(i, {}).get("tension", 0) >= 7
+        and score_map.get(i, {}).get("desire", 0) >= 7
+    ]
+
 
 def _fetch_one(sub):
     import requests
@@ -401,7 +438,7 @@ def _fetch_one(sub):
                 if pd.get("score", 0) < MIN_SCORE:         continue
                 if pd.get("stickied") or pd.get("pinned"): continue
                 if body in ("[deleted]", "[removed]"):      continue
-                if not _is_taboo(title, body):             continue
+                #if not _is_taboo(title, body):             continue
                 snippet = body[:TEXT_CUTOFF].strip()
                 if len(body) > TEXT_CUTOFF:
                     snippet += "…"
@@ -439,13 +476,18 @@ def fetch_posts():
         pass
 
     if all_posts:
-        random.shuffle(all_posts)
-        seen, unique = set(), []
-        for p in all_posts:
-            if p["title"] not in seen:
-                seen.add(p["title"])
-                unique.append(p)
-        return unique[: POST_COUNT * 2]
+    random.shuffle(all_posts)
+    seen, unique = set(), []
+    for p in all_posts:
+        if p["title"] not in seen:
+            seen.add(p["title"])
+            unique.append(p)
+
+    api_key = st.secrets.get("OPENAI_API_KEY", "")
+    if api_key and unique:
+        unique = _score_posts(unique[:20], api_key)
+
+    return unique[: POST_COUNT * 2]
 
     pool = FALLBACK_POSTS.copy()
     random.shuffle(pool)
