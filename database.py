@@ -19,16 +19,14 @@ except ImportError:
 _pool: "pooling.MySQLConnectionPool | None" = None
 
 
-def _get_pool() -> "pooling.MySQLConnectionPool | None":
-    global _pool
-    if _pool is not None:
-        return _pool
+@st.cache_resource
+def _get_pool():
     if not MYSQL_AVAILABLE or not DB_CONFIG.get("host"):
         return None
     try:
-        _pool = pooling.MySQLConnectionPool(
+        return pooling.MySQLConnectionPool(
             pool_name="vicevault",
-            pool_size=10,
+            pool_size=3,
             pool_reset_session=True,
             host=DB_CONFIG.get("host", ""),
             port=int(DB_CONFIG.get("port", 3306)),
@@ -39,7 +37,6 @@ def _get_pool() -> "pooling.MySQLConnectionPool | None":
             autocommit=False,
             ssl_disabled=True,
         )
-        return _pool
     except Exception as e:
         st.error(f"DB pool init error: {e}")
         return None
