@@ -398,25 +398,35 @@ def _generate_one_scenario(theme: str, slot: int, api_key: str) -> dict | None:
     client = OpenAI(api_key=api_key)
     angle  = random.choice(_QUESTION_ANGLES)
 
-    prompt = f"""You write scenarios for a sexual desire and self-knowledge quiz called 'Read Between The Lines'.
-This quiz is for consenting adults on an 18+ platform. It should feel like a mirror — uncomfortably accurate.
+   prompt = f"""You write scenarios for an adult desire quiz on an 18+ platform. No filters.
 
-Create ONE scenario about: {theme}
-Angle for the question: {angle}
-
-Scenario rules:
-- 2-4 sentences. Feel like an anonymous confession someone would post at 2am.
-- Specific and sexually charged — not vague or clinical. This is an 18+ platform.
-- Ends at the moment of tension, not after the decision.
-- Open enough that anyone could see themselves in it.
-
-{_GENDER_NEUTRAL_RULE}
-
-{_ANSWER_OPTION_RULE}
-
-Return ONLY valid JSON, nothing else:
-{{"title":"Short evocative title — max 10 words, reads like a confession headline","text":"The 2-4 sentence scenario","prompt":"The question — direct about desire, slightly uncomfortable to answer honestly","opts":[{{"t":"...","pts":0}},{{"t":"...","pts":2}},{{"t":"...","pts":3}},{{"t":"...","pts":5}}]}}"""
-
+    Create ONE scenario about: {theme}
+    Angle: {angle}
+    
+    TONE: A recognisable real-life moment that crosses a line.
+    A Tuesday night that went somewhere it shouldn't. Not fantasy. Not fiction.
+    
+    RULES — non-negotiable:
+    - EXACTLY 2 sentences. No more.
+    - Present tense. Second person ("you").
+    - Explicit. Say what happened or what was wanted. Don't imply, don't euphemise.
+    - Concrete nouns. Specific actions. Real locations (bedroom, car, office, hotel room, bathroom).
+    - BANNED WORDS: lingering, breathless, tension, electricity, pulse, warmth, waves, sensation, blur, wonder, dance, thicken
+    - No metaphors. No em-dashes for drama. No ellipses.
+    - Stop at the moment of decision — not before, not after.
+    
+    EXAMPLES OF WHAT YOU'RE WRITING:
+    - "You've been sleeping with your partner's friend for six weeks and you just got invited to their birthday dinner together."
+    - "You told them to stop, they slowed down just enough to check your face, and you pulled them back in."
+    - "Your coworker texts you at midnight asking if you're awake and you know exactly what it means because it's happened before."
+    - "You're in the bathroom at a party and someone you've wanted for two years knocks and asks if they can come in."
+    
+    {_GENDER_NEUTRAL_RULE}
+    
+    {_ANSWER_OPTION_RULE}
+    
+    Return ONLY valid JSON:
+    {{"title":"Max 7 words. A statement. Could be a text message subject line.","text":"Exactly 2 sentences. Explicit. Specific. Present tense. Second person.","prompt":"One blunt question. Max 15 words. About what they actually want or did.","opts":[{{"t":"...","pts":0}},{{"t":"...","pts":2}},{{"t":"...","pts":3}},{{"t":"...","pts":5}}]}}"""
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
         max_tokens=480,
