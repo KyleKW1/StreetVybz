@@ -398,7 +398,7 @@ def _generate_one_scenario(theme: str, slot: int, api_key: str) -> dict | None:
     client = OpenAI(api_key=api_key)
     angle  = random.choice(_QUESTION_ANGLES)
 
-        prompt = f"""You write scenarios for an adult desire quiz on an 18+ platform. No filters.
+    prompt = f"""You write scenarios for an adult desire quiz on an 18+ platform. No filters.
 
 Create ONE scenario about: {theme}
 Angle: {angle}
