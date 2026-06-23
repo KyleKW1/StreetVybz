@@ -10,7 +10,6 @@ except ImportError:
     MYSQL_AVAILABLE = False
 
 try:
-    from config import DB_CONFIG
 except ImportError:
     DB_CONFIG = {}
 
@@ -1901,22 +1900,36 @@ def authenticate_user(username: str, password: str):
 
 
 # ─── FRIENDS ─────────────────────────────────────────────────────────────────
-# Stub implementations — replace with full versions if you add a friends table.
+# ─── FRIENDS ─────────────────────────────────────────────────────────────────
 
-def send_friend_request(sender_id: int, recipient_id: int, default=None):
-    return default
+def send_friend_request(sender_id: int, recipient_id: int):
+    """Stub — implement when you add friends table."""
+    return "error"  # Changed from: return default
 
-def load_friend_requests(user_id: int, default=None):
-    return default if default is not None else []
+def load_friend_requests(user_id: int):
+    """Stub — implement when you add friends table."""
+    return []
 
-def respond_friend_request(request_id, user_id: int, accept: bool):
+def respond_friend_request(request_id: int, user_id: int, accept: bool):
+    """Stub — implement when you add friends table."""
     return None
 
-def load_friends(user_id: int, default=None):
-    return default if default is not None else []
+def load_friends(user_id: int):
+    """Stub — implement when you add friends table."""
+    return []
 
 def remove_friend(user_id: int, friend_id: int):
+    """Stub — implement when you add friends table."""
     return None
 
-def get_user_public_stats(user_id: int, default=None):
-    return default if default is not None else {}
+def get_user_public_stats(user_id: int):
+    """Stub — implement when you add friends table."""
+    return {
+        "username": "User",
+        "freak_score": None,
+        "total_sessions": 0,
+        "vice_counts": {},
+        "last_per_vice": {},
+        "rbtl_name": None,
+        "rbtl_openness": None,
+    }
