@@ -10,7 +10,7 @@ except ImportError:
     MYSQL_AVAILABLE = False
 
 try:
-except ImportError:
+    except ImportError:
     DB_CONFIG = {}
 
 # ─── CONNECTION POOL ─────────────────────────────────────────────────────────
