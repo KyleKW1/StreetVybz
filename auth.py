@@ -39,17 +39,15 @@ def authenticate_user(username: str, password: str):
     Returns (False, None) on bad credentials.
     """
     import database as db
-
-    # Rate limiting — track failed attempts in session state
-    key = f"_login_fails_{username.lower()}"
-    key_ts = f"_login_fails_ts_{username.lower()}"
     import time
-    now = time.time()
 
-    fails = st.session_state.get(key, 0)
+    key    = f"_login_fails_{username.lower()}"
+    key_ts = f"_login_fails_ts_{username.lower()}"
+    now    = time.time()
+
+    fails     = st.session_state.get(key, 0)
     last_fail = st.session_state.get(key_ts, 0)
 
-    # Reset counter after 10 minutes
     if now - last_fail > 600:
         fails = 0
 
@@ -59,7 +57,6 @@ def authenticate_user(username: str, password: str):
     user = db.authenticate_user(username.strip(), password)
     if user:
         st.session_state[key] = 0
-        # Issue a session token
         try:
             token = secrets.token_urlsafe(32)
             db.create_session_token(user["id"], token)
@@ -72,29 +69,34 @@ def authenticate_user(username: str, password: str):
             pass
         return True, user
 
-    # Failed attempt
-    st.session_state[key] = fails + 1
+    st.session_state[key]    = fails + 1
     st.session_state[key_ts] = now
     return False, None
 
 
 def register_user(username: str, email: str, password: str) -> tuple[bool, str]:
     import database as db
-    try:
-        uid = db.create_user(username.strip(), email.strip(), hash_password(password))
-        if uid:
-            return True, "Account created successfully."
+
+    uid, status = db.create_user(username.strip(), email.strip(), hash_password(password))
+
+    if status == db.CREATE_USER_OK:
+        return True, "Account created successfully."
+    elif status == db.CREATE_USER_DUP_USERNAME:
+        return False, "That username is already taken — try another."
+    elif status == db.CREATE_USER_DUP_EMAIL:
+        return False, "An account with that email already exists. Try logging in."
+    elif status == db.CREATE_USER_DUP_UNKNOWN:
         return False, "Username or email already taken."
-    except Exception as e:
-        return False, f"Registration error: {e}"
+    else:
+        return False, "Registration failed — please try again in a moment."
 
 
 def check_session_valid() -> bool:
-    """Returns True if the current session token is still valid (or if no token system is in use)."""
-    user = st.session_state.get("user")
+    """Returns True if the current session token is still valid."""
+    user  = st.session_state.get("user")
     token = st.session_state.get("session_token")
     if not user or not token:
-        return True  # No token system — don't block
+        return True
     try:
         import database as db
         return db.verify_session_token(user["id"], token)
@@ -164,7 +166,7 @@ def login_page():
   <div class="auth-section-label">Sign in</div>
 </div>
 """)
-        username = st.text_input("Username", placeholder="Your username", key="login_username")
+        username = st.text_input("Username or email", placeholder="Your username or email", key="login_username")
         password = st.text_input("Password", type="password", placeholder="Your password", key="login_password")
 
         st.html("<div style='height:8px'></div>")
