@@ -10,15 +10,19 @@ except ImportError:
     MYSQL_AVAILABLE = False
 
 try:
-    DB_CONFIG = {
-        "host":     st.secrets.get("db_host"),
-        "port":     st.secrets.get("db_port", 3306),
-        "user":     st.secrets.get("db_user"),
-        "password": st.secrets.get("db_password"),
-        "database": st.secrets.get("db_name"),
-    }
+    from config import DB_CONFIG
 except Exception:
-    DB_CONFIG = {}
+    # Fallback: try both uppercase and lowercase secret key names
+    try:
+        DB_CONFIG = {
+            "host":     st.secrets.get("DB_HOST") or st.secrets.get("db_host"),
+            "port":     int(st.secrets.get("DB_PORT") or st.secrets.get("db_port") or 3306),
+            "user":     st.secrets.get("DB_USER") or st.secrets.get("db_user"),
+            "password": st.secrets.get("DB_PASSWORD") or st.secrets.get("db_password"),
+            "database": st.secrets.get("DB_NAME") or st.secrets.get("db_name"),
+        }
+    except Exception:
+        DB_CONFIG = {}
 
 # ─── CONNECTION POOL ─────────────────────────────────────────────────────────
 
@@ -36,9 +40,9 @@ def _get_pool():
             user=DB_CONFIG.get("user", ""),
             password=DB_CONFIG.get("password", ""),
             database=DB_CONFIG.get("database", ""),
-            connection_timeout=30,
+            connection_timeout=int(DB_CONFIG.get("connection_timeout", 30)),
             autocommit=False,
-            ssl_disabled=True,
+            ssl_disabled=bool(DB_CONFIG.get("ssl_disabled", True)),
         )
     except Exception as e:
         st.error(f"DB pool init error: {e}")
@@ -62,9 +66,9 @@ def create_connection():
             user=DB_CONFIG.get("user", ""),
             password=DB_CONFIG.get("password", ""),
             database=DB_CONFIG.get("database", ""),
-            connection_timeout=30,
+            connection_timeout=int(DB_CONFIG.get("connection_timeout", 30)),
             autocommit=False,
-            ssl_disabled=True,
+            ssl_disabled=bool(DB_CONFIG.get("ssl_disabled", True)),
         )
     except Exception as e:
         st.error(f"DB connection error: {e}")
