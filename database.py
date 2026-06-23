@@ -300,6 +300,25 @@ def ensure_tables():
             "ALTER TABLE confessions ADD COLUMN reveal_window_secs INT NOT NULL DEFAULT 60",
             "ALTER TABLE confessions MODIFY COLUMN recipient_id INT DEFAULT NULL",
             "ALTER TABLE confessions ADD COLUMN recipient_email VARCHAR(255) DEFAULT NULL",
+            # Friends system — runs safely on existing DBs (IF NOT EXISTS)
+            """CREATE TABLE IF NOT EXISTS friends (
+                id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                sender_id    INT NOT NULL,
+                recipient_id INT NOT NULL,
+                status       VARCHAR(16) NOT NULL DEFAULT 'pending',
+                created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_friend_pair (sender_id, recipient_id),
+                INDEX idx_friends_sender    (sender_id),
+                INDEX idx_friends_recipient (recipient_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+            # Password resets table
+            """CREATE TABLE IF NOT EXISTS password_resets (
+                email      VARCHAR(255) NOT NULL PRIMARY KEY,
+                token      VARCHAR(128) NOT NULL UNIQUE,
+                expires_at DATETIME     NOT NULL,
+                created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
         ]:
             try:
                 cur.execute(migration)
