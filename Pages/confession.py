@@ -1315,7 +1315,13 @@ def _render_friends():
             if not target:
                 st.error(f"No user found: '{uname}'")
             else:
-                result = _db("send_friend_request", uid, target["id"], default="error")
+\                try:
+                    import database as _db_mod
+                    result = _db_mod.send_friend_request(uid, target["id"])
+                except Exception as e:
+                    st.error(f"Friend request error: {e}")
+                    result = "error"
+
                 if result == "sent":
                     st.success(f"Request sent to {uname}.")
                     st.session_state.friend_add_gen += 1
@@ -1325,7 +1331,7 @@ def _render_friends():
                 elif result == "already_sent":
                     st.info("Request already pending — they haven't accepted yet.")
                 elif result == "error":
-                    st.error("Couldn't send the request. Check your connection and try again.")
+                    st.error("Friend request failed — see error above for details.")
                 else:
                     st.error(f"Unexpected response: {result}")
 
