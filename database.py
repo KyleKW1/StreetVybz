@@ -296,7 +296,7 @@ def get_user_by_username(username: str):
         st.error(f"Error fetching user: {e}")
         return None
     finally:
-        conn.close()
+        conn.close() 
 
 
 def get_user_by_email(email: str):
