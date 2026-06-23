@@ -1952,31 +1952,3 @@ def debug_list_all_users():
         return []
     finally:
         conn.close()
-
-
-def debug_search_user(username: str):
-    """Debug helper — search for user with exact and case-insensitive match."""
-    conn = create_connection()
-    if not conn:
-        return None
-    try:
-        cur = conn.cursor(dictionary=True)
-        
-        # Exact match
-        cur.execute("SELECT * FROM users WHERE username = %s", (username,))
-        exact = cur.fetchone()
-        
-        # Case-insensitive
-        cur.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
-        insensitive = cur.fetchone()
-        
-        cur.close()
-        return {
-            "search_term": username,
-            "exact_match": exact,
-            "case_insensitive_match": insensitive,
-        }
-    except Exception as e:
-        return {"error": str(e)}
-    finally:
-        conn.close()
