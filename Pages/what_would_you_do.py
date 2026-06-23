@@ -373,7 +373,7 @@ def _run_prefetch():
             with _prefetch_lock:
                 _prefetch_result = "error"
             return
-        scenarios = _generate_all_scenarios(key)
+        scenarios = _generate_all_scenarios(key, {})
         with _prefetch_lock:
             _prefetch_result = scenarios
     except Exception:
@@ -393,12 +393,37 @@ _ensure_prefetch_started()
 
 # ─── SCENARIO GENERATION ──────────────────────────────────────────────────────
 
-def _generate_one_scenario(theme: str, slot: int, api_key: str) -> dict | None:
-    """Generate a single scenario + question. Always fresh, always different."""
+def _generate_one_scenario(theme: str, slot: int, api_key: str, profile: dict = None) -> dict | None:
+    """Generate a single scenario + question. Personalized to user profile."""
+    if profile is None:
+        profile = {}
+    
     client = OpenAI(api_key=api_key)
     angle  = random.choice(_QUESTION_ANGLES)
 
+    # Build profile context for personalization
+    rel_status = profile.get("relationship_status", "")
+    rel_length = profile.get("relationship_length", "")
+    gender = profile.get("gender_identity", "")
+    attraction = profile.get("attraction", "")
+    
+    profile_context = ""
+    if rel_status:
+        profile_context += f"- Relationship: {rel_status}"
+        if rel_length:
+            profile_context += f" ({rel_length})"
+        profile_context += "\n"
+    if attraction:
+        profile_context += f"- Attraction: {attraction}\n"
+    
+    if profile_context:
+        profile_context = f"User context (for personalization):\n{profile_context}\nMake this scenario feel specifically written for someone in this situation."
+    else:
+        profile_context = "Create a universally resonant scenario."
+
     prompt = f"""You write scenarios for an adult desire quiz on an 18+ platform. No filters.
+
+{profile_context}
 
 Create ONE scenario about: {theme}
 Angle: {angle}
@@ -427,6 +452,7 @@ EXAMPLES OF WHAT YOU'RE WRITING:
 
 Return ONLY valid JSON:
 {{"title":"Max 7 words. A statement. Could be a text message subject line.","text":"Exactly 2 sentences. Explicit. Specific. Present tense. Second person.","prompt":"One blunt question. Max 15 words. About what they actually want or did.","opts":[{{"t":"...","pts":0}},{{"t":"...","pts":2}},{{"t":"...","pts":3}},{{"t":"...","pts":5}}]}}"""
+    
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
         max_tokens=480,
@@ -448,15 +474,18 @@ Return ONLY valid JSON:
     }
 
 
-def _generate_all_scenarios(api_key: str) -> list:
+def _generate_all_scenarios(api_key: str, profile: dict = None) -> list:
     """Generate all SCENARIO_COUNT scenarios in parallel."""
+    if profile is None:
+        profile = {}
+    
     themes = random.sample(_SCENARIO_THEMES, min(SCENARIO_COUNT, len(_SCENARIO_THEMES)))
 
     results = [None] * SCENARIO_COUNT
 
     def _gen(idx, theme):
         try:
-            s = _generate_one_scenario(theme, idx, api_key)
+            s = _generate_one_scenario(theme, idx, api_key, profile)
             return idx, s
         except Exception:
             return idx, None
@@ -522,7 +551,8 @@ def _fallback_scenario(idx: int) -> dict:
 
 
 def get_scenarios() -> list:
-    """Return prefetched scenarios if ready, else generate now."""
+    """Return prefetched scenarios if ready, else generate now with user profile."""
+    profile = st.session_state.get("wwyd_profile", {})
     global _prefetch_result
     deadline = time.time() + 8
     while time.time() < deadline:
@@ -541,11 +571,11 @@ def get_scenarios() -> list:
         _ensure_prefetch_started()
         return val
 
-    # Fallback: generate now
+    # Fallback: generate now with profile
     key = st.secrets.get("OPENAI_API_KEY", "")
     if key:
         try:
-            return _generate_all_scenarios(key)
+            return _generate_all_scenarios(key, profile)
         except Exception:
             pass
     return [_fallback_scenario(i) for i in range(SCENARIO_COUNT)]
@@ -706,6 +736,7 @@ _DEFAULTS = {
     "wwyd_selected_cats": [],
     "wwyd_pulse_shown":   {},
     "wwyd_insight":       "",
+    "wwyd_profile":       {},
 }
 
 def init_state():
@@ -850,6 +881,182 @@ def render_start():
 """)
     if st.button("Begin →", use_container_width=True, type="primary", key="start_btn"):
         _wipe()
+        st.session_state.wwyd_phase = "profile_intake"
+        st.rerun()
+
+
+# ─── PHASE: PROFILE INTAKE ────────────────────────────────────────────────────
+
+def render_profile_intake():
+    """Conversational profile intake — dark, bold, intimate."""
+    if st.session_state.wwyd_error:
+        st.error(st.session_state.wwyd_error)
+        st.session_state.wwyd_error = ""
+
+    st.html("""
+<div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:32px;">
+  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:4px;
+              text-transform:uppercase; color:var(--muted); margin-bottom:8px;">
+    One quick step
+  </div>
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(32px,7vw,52px);
+              color:var(--text); letter-spacing:3px; line-height:0.95; margin-bottom:8px;">
+    HELP US KNOW<br><span style="color:var(--magenta);">YOUR WORLD</span>
+  </div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-top:6px;">
+    These answers personalize what you see. Not stored beyond this session.
+  </div>
+</div>
+""")
+
+    profile = st.session_state.wwyd_profile or {}
+
+    # Q1: Relationship Status
+    st.html("""
+<div style="margin-bottom:28px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--cyan); margin-bottom:12px;">
+    Relationship Status
+  </div>
+""")
+    rel_opts = [
+        ("single", "Single"),
+        ("dating", "Dating"),
+        ("partnered", "In a relationship"),
+        ("married", "Married / Life partner"),
+        ("poly", "Poly / Non-monogamous"),
+        ("complicated", "It's complicated"),
+    ]
+    rel_val = profile.get("relationship_status", "")
+    rel_chosen = st.radio(
+        label="relationship",
+        options=[o[0] for o in rel_opts],
+        format_func=lambda x: next(o[1] for o in rel_opts if o[0] == x),
+        index=[o[0] for o in rel_opts].index(rel_val) if rel_val in [o[0] for o in rel_opts] else 0,
+        key="intake_rel",
+        horizontal=False,
+    )
+    if rel_chosen != rel_val:
+        profile["relationship_status"] = rel_chosen
+        st.session_state.wwyd_profile = profile
+    st.html("</div>")
+
+    # Q2: Gender Identity
+    st.html("""
+<div style="margin-bottom:28px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--magenta); margin-bottom:12px;">
+    Your Gender
+  </div>
+""")
+    gnd_opts = [
+        ("m", "Man"),
+        ("f", "Woman"),
+        ("nb", "Non-binary"),
+        ("other", "Something else"),
+        ("prefer_not", "Prefer not to say"),
+    ]
+    gnd_val = profile.get("gender_identity", "")
+    gnd_chosen = st.radio(
+        label="gender",
+        options=[o[0] for o in gnd_opts],
+        format_func=lambda x: next(o[1] for o in gnd_opts if o[0] == x),
+        index=[o[0] for o in gnd_opts].index(gnd_val) if gnd_val in [o[0] for o in gnd_opts] else 0,
+        key="intake_gnd",
+        horizontal=False,
+    )
+    if gnd_chosen != gnd_val:
+        profile["gender_identity"] = gnd_chosen
+        st.session_state.wwyd_profile = profile
+    st.html("</div>")
+
+    # Q3: Attraction
+    st.html("""
+<div style="margin-bottom:28px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--amber); margin-bottom:12px;">
+    Who You're Into
+  </div>
+""")
+    att_opts = [
+        ("men", "Men"),
+        ("women", "Women"),
+        ("all", "All genders"),
+        ("varies", "It depends / varies"),
+        ("unclear", "Still figuring it out"),
+    ]
+    att_val = profile.get("attraction", "")
+    att_chosen = st.radio(
+        label="attraction",
+        options=[o[0] for o in att_opts],
+        format_func=lambda x: next(o[1] for o in att_opts if o[0] == x),
+        index=[o[0] for o in att_opts].index(att_val) if att_val in [o[0] for o in att_opts] else 0,
+        key="intake_att",
+        horizontal=False,
+    )
+    if att_chosen != att_val:
+        profile["attraction"] = att_chosen
+        st.session_state.wwyd_profile = profile
+    st.html("</div>")
+
+    # Q4: Relationship Length (conditional)
+    if rel_chosen in ("dating", "partnered", "married"):
+        st.html("""
+<div style="margin-bottom:28px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--lime); margin-bottom:12px;">
+    How Long?
+  </div>
+""")
+        rel_len_opts = [
+            ("new", "New (under 6 months)"),
+            ("medium", "A few years"),
+            ("long", "Long-term (3+ years)"),
+        ]
+        rel_len_val = profile.get("relationship_length", "")
+        rel_len_chosen = st.radio(
+            label="rel_length",
+            options=[o[0] for o in rel_len_opts],
+            format_func=lambda x: next(o[1] for o in rel_len_opts if o[0] == x),
+            index=[o[0] for o in rel_len_opts].index(rel_len_val) if rel_len_val in [o[0] for o in rel_len_opts] else 0,
+            key="intake_rel_len",
+            horizontal=False,
+        )
+        if rel_len_chosen != rel_len_val:
+            profile["relationship_length"] = rel_len_chosen
+            st.session_state.wwyd_profile = profile
+        st.html("</div>")
+
+    # Q5: Comfort with desire talk
+    st.html("""
+<div style="margin-bottom:28px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--cyan); margin-bottom:12px;">
+    Being Honest About Desire
+  </div>
+""")
+    hon_opts = [
+        ("private", "I keep it to myself"),
+        ("sometimes", "I open up sometimes"),
+        ("open", "I'm pretty open about it"),
+        ("very_open", "I'm fully transparent"),
+    ]
+    hon_val = profile.get("honesty_level", "")
+    hon_chosen = st.radio(
+        label="honesty",
+        options=[o[0] for o in hon_opts],
+        format_func=lambda x: next(o[1] for o in hon_opts if o[0] == x),
+        index=[o[0] for o in hon_opts].index(hon_val) if hon_val in [o[0] for o in hon_opts] else 0,
+        key="intake_hon",
+        horizontal=False,
+    )
+    if hon_chosen != hon_val:
+        profile["honesty_level"] = hon_chosen
+        st.session_state.wwyd_profile = profile
+    st.html("</div>")
+
+    st.html("<br>")
+    if st.button("Start Quiz →", use_container_width=True, type="primary", key="profile_intake_btn"):
         st.session_state.wwyd_phase = "loading"
         st.rerun()
 
@@ -869,7 +1076,7 @@ def render_loading():
         ph_status.caption(msg)
 
     try:
-        upd(10, "Generating scenarios…")
+        upd(10, "Generating personalized scenarios…")
         scenarios = get_scenarios()
 
         upd(100, "Ready.")
@@ -1400,6 +1607,7 @@ def what_would_you_do_page():
     phase = st.session_state.wwyd_phase
 
     if   phase == "start":              render_start()
+    elif phase == "profile_intake":     render_profile_intake()
     elif phase == "loading":            render_loading()
     elif phase == "quiz":               render_quiz()
     elif phase == "phase_transition":   render_phase_transition()
