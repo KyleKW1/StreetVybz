@@ -161,7 +161,42 @@ def _reset_password(email: str, new_password: str) -> bool:
 
 
 # ─── EMAIL ────────────────────────────────────────────────────────────────────
+def _send_email(to_email: str, token=None, reset_type="password") -> bool:
+    if not APP_EMAIL or not APP_EMAIL_PASSWORD:
+        st.warning("Email not configured — check secrets.")
+        return False
+    try:
+        msg = EmailMessage()
+        msg["From"] = APP_EMAIL
+        msg["To"]   = to_email
+        if reset_type == "password":
+            msg["Subject"] = "ViceVault — Password Reset"
+            reset_url = f"https://testrun01.streamlit.app/?reset_token={token}"
+            body = (
+                f"Click the link below to reset your password (valid 1 hour):\n\n"
+                f"{reset_url}\n\n"
+                "If you didn't request this, ignore this email."
+            )
+        else:
+            username = _get_username_by_email(to_email)
+            if not username:
+                return False
+            msg["Subject"] = "ViceVault — Username Recovery"
+            body = f"Your ViceVault username is: {username}"
+        msg.set_content(body)
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(APP_EMAIL, APP_EMAIL_PASSWORD)
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        print(f"EMAIL ERROR: {str(e)}")  # ← ADD THIS
+        st.error(f"Email send failed: {str(e)}")  # ← SHOW THE ERROR
+        return False
 
+'''
 def _send_email(to_email: str, token=None, reset_type="password") -> bool:
     if not APP_EMAIL or not APP_EMAIL_PASSWORD:
         st.warning("Email not configured — check secrets.")
@@ -195,6 +230,7 @@ def _send_email(to_email: str, token=None, reset_type="password") -> bool:
     except Exception as e:
         st.error("Email send failed — check your email configuration.")
         return False
+        '''
 
 
 # ─── QUERY PARAM HANDLER ──────────────────────────────────────────────────────
