@@ -1,6 +1,5 @@
 """
 app.py — ViceVault main entry point.
-
 """
 
 import streamlit as st
@@ -45,7 +44,6 @@ def is_authenticated() -> bool:
 
 
 def logout():
-    # Invalidate the server-side token too (was previously session-state only)
     try:
         import database as db
         token = st.session_state.get("session_token")
@@ -75,7 +73,6 @@ def _prewarm_quiz():
     return []
 
 
-# ─── Full original labels — font scaled down to fit ───────────────────────────
 NAV_SECTIONS = [
     {
         "label": "Vault",
@@ -108,8 +105,8 @@ NAV_SECTIONS = [
 def _render_sidebar():
     with st.sidebar:
         import html as _html
-        user   = st.session_state.get("user", {})
-        uname  = _html.escape(user.get("username", "—"))
+        user     = st.session_state.get("user", {})
+        uname    = _html.escape(user.get("username", "—"))
         initials = uname[:2].upper()
 
         st.html(f"""
@@ -127,7 +124,6 @@ def _render_sidebar():
 </div>
 """)
 
-        # Scale down font so long labels fit on one line without truncation
         st.html("""
 <style>
 section[data-testid="stSidebar"] .stButton > button {
@@ -205,10 +201,28 @@ def _render_feature(feature: str):
 
 def _render_auth():
     inject_page_css()
+    # Handle reset token in URL before rendering auth pages
+    try:
+        from password_reset import handle_reset_token_from_url
+        handle_reset_token_from_url()
+    except Exception:
+        pass
+
     page = st.session_state.get("page", "login")
-    if page == "login":      _login_page()
-    elif page == "register": _register_page()
-    elif page == "forgot":   _forgot_page()
+    if page == "login":
+        _login_page()
+    elif page == "register":
+        _register_page()
+    elif page == "forgot":
+        _forgot_page()
+    elif page == "reset_password":
+        try:
+            from password_reset import reset_password_page
+            reset_password_page()
+        except Exception as e:
+            st.error(f"Reset page error: {e}")
+            st.session_state.page = "login"
+            st.rerun()
 
 
 def _login_page():
@@ -224,7 +238,7 @@ def _login_page():
 """)
     _, c, _ = st.columns([1, 2, 1])
     with c:
-        username = st.text_input("Username", key="login_username", placeholder="your_username")
+        username = st.text_input("Username or email", key="login_username", placeholder="your_username")
         password = st.text_input("Password", type="password", key="login_password")
         st.html("<div style='height:6px'></div>")
         if st.button("Log In →", type="primary", use_container_width=True, key="login_btn"):
@@ -232,9 +246,6 @@ def _login_page():
                 st.error("Enter username and password.")
             else:
                 try:
-                    # Fix #1: route through auth.authenticate_user —
-                    # bcrypt verification, legacy-hash migration, session token,
-                    # and rate limiting (Fix #7). No plaintext path.
                     from auth import authenticate_user
                     success, user = authenticate_user(username.strip(), password)
                     if success and user:
@@ -276,21 +287,27 @@ def _register_page():
         pw       = st.text_input("Password",         type="password", key="reg_pw")
         pw2      = st.text_input("Confirm password", type="password", key="reg_pw2")
         if st.button("Create Account →", type="primary", use_container_width=True, key="reg_btn"):
-            from auth import validate_password, validate_email as _validate_email
+            from auth import validate_password, validate_email as _ve, hash_password
+            import database as db
+            import secrets as _secrets
+
             ok_pw, pw_msg = validate_password(pw)
-            if pw != pw2:                       st.error("Passwords don't match.")
-            elif not ok_pw:                     st.error(pw_msg)  # Fix #7: 8-char min everywhere
-            elif not username.strip():          st.error("Enter a username.")
-            elif not _validate_email(email.strip()): st.error("That email doesn't look right.")
+            if not username.strip():
+                st.error("Enter a username.")
+            elif not _ve(email.strip()):
+                st.error("That email doesn't look right.")
+            elif not ok_pw:
+                st.error(pw_msg)
+            elif pw != pw2:
+                st.error("Passwords don't match.")
             else:
                 try:
-                    import database as db
-                    from auth import hash_password
-                    uid = db.create_user(username.strip(), email.strip(), hash_password(pw))
-                    if uid:
-                        user = db.get_user_by_id(uid)
-                        # Issue a session token for the fresh account too
-                        import secrets as _secrets
+                    # create_user now returns (uid, status_code)
+                    uid, status = db.create_user(
+                        username.strip(), email.strip(), hash_password(pw)
+                    )
+                    if status == db.CREATE_USER_OK:
+                        user  = db.get_user_by_id(uid)
                         token = _secrets.token_urlsafe(32)
                         try:
                             db.create_session_token(uid, token)
@@ -302,34 +319,63 @@ def _register_page():
                         st.session_state.vice_log         = []
                         st.session_state.selected_feature = "onboarding"
                         st.rerun()
+                    elif status == db.CREATE_USER_DUP_USERNAME:
+                        st.error("That username is already taken — try another.")
+                    elif status == db.CREATE_USER_DUP_EMAIL:
+                        st.error("An account with that email already exists. Try logging in.")
                     else:
-                        st.error("Username or email already taken.")
+                        st.error("Registration failed — please try again.")
                 except Exception as e:
                     st.error(f"Registration error: {e}")
+
         if st.button("← Back to login", use_container_width=True, key="reg_back"):
             st.session_state.page = "login"; st.rerun()
 
 
 def _forgot_page():
     inject_page_css()
-    st.html("""
-<div style="max-width:400px; margin:60px auto 0; text-align:center; margin-bottom:32px;">
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:40px; color:var(--text);
-              letter-spacing:3px;">RESET PASSWORD</div>
-</div>
-""")
-    _, c, _ = st.columns([1, 2, 1])
-    with c:
-        email = st.text_input("Email address", key="forgot_email")
-        if st.button("Send reset link →", type="primary", use_container_width=True, key="forgot_btn"):
-            st.success("If that email is registered, a reset link is on its way.")
-        if st.button("← Back to login", use_container_width=True, key="forgot_back"):
-            st.session_state.page = "login"; st.rerun()
+    # Delegate entirely to password_reset.py which has the real implementation
+    try:
+        from password_reset import forgot_password_page
+        forgot_password_page()
+    except Exception as e:
+        st.error(f"Password reset error: {e}")
+        if st.button("← Back to login"):
+            st.session_state.page = "login"
+            st.rerun()
 
 
 def _bootstrap_db():
     try:
-        import database as db; db.ensure_tables()
+        import database as db
+        db.ensure_tables()
+        # Also ensure the password_resets table exists
+        _ensure_password_resets_table()
+    except Exception:
+        pass
+
+
+def _ensure_password_resets_table():
+    """Create password_resets table if it doesn't exist yet."""
+    try:
+        import database as db
+        conn = db.create_connection()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    email      VARCHAR(255) NOT NULL PRIMARY KEY,
+                    token      VARCHAR(128) NOT NULL UNIQUE,
+                    expires_at DATETIME     NOT NULL,
+                    created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
     except Exception:
         pass
 
@@ -350,9 +396,7 @@ def main():
         _render_auth()
         return
 
-    # Fix #4: validate the session token on every authenticated page load.
-    # If it's been invalidated (screenshot logout, password reset, etc.),
-    # the user is actually logged out now.
+    # Validate session token on every authenticated page load
     try:
         from auth import check_session_valid
         if not check_session_valid():
@@ -367,10 +411,14 @@ def main():
     st.session_state.setdefault("selected_feature", "stats")
     st.session_state.setdefault("onboarding_done", False)
 
-    
+    # ── THIS WAS MISSING — nothing rendered after login ──
+    _inject_floating_log_btn()
+    _render_sidebar()
+    feature = st.session_state.get("selected_feature", "stats")
+    _render_feature(feature)
+
 
 if __name__ == "__main__":
     main()
-
 
 
