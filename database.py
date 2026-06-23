@@ -258,6 +258,19 @@ def ensure_tables():
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """,
         """
+        CREATE TABLE IF NOT EXISTS friends (
+            id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            sender_id    INT NOT NULL,
+            recipient_id INT NOT NULL,
+            status       VARCHAR(16) NOT NULL DEFAULT 'pending',
+            created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_friend_pair (sender_id, recipient_id),
+            INDEX idx_friends_sender    (sender_id),
+            INDEX idx_friends_recipient (recipient_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
+        """
         CREATE TABLE IF NOT EXISTS deleted_user_archive (
             id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             original_user_id INT NOT NULL,
@@ -1930,39 +1943,295 @@ def authenticate_user(username_or_email: str, password: str):
         conn.close()
 
 
-# ─── FRIENDS (stubs) ──────────────────────────────────────────────────────────
+# ─── FRIENDS ─────────────────────────────────────────────────────────────────
 
-def send_friend_request(sender_id: int, recipient_id: int):
-    """Stub — implement when you add friends table."""
-    return "error"
+def send_friend_request(sender_id: int, recipient_id: int) -> str:
+    """
+    Returns: "sent", "already_friends", "already_sent", "they_sent_first", or "error"
+    "they_sent_first" means the recipient already sent a request — auto-accept.
+    """
+    conn = create_connection()
+    if not conn:
+        return "error"
+    try:
+        cur = conn.cursor(dictionary=True)
+        # Check existing relationship in either direction
+        cur.execute(
+            """SELECT id, sender_id, status FROM friends
+               WHERE (sender_id = %s AND recipient_id = %s)
+                  OR (sender_id = %s AND recipient_id = %s)""",
+            (sender_id, recipient_id, recipient_id, sender_id)
+        )
+        existing = cur.fetchone()
 
-def load_friend_requests(user_id: int):
-    """Stub — implement when you add friends table."""
-    return []
+        if existing:
+            if existing["status"] == "accepted":
+                cur.close()
+                return "already_friends"
+            if existing["status"] == "pending":
+                if existing["sender_id"] == sender_id:
+                    cur.close()
+                    return "already_sent"
+                # They already sent us a request — auto-accept both sides
+                cur.execute(
+                    "UPDATE friends SET status = 'accepted' WHERE id = %s",
+                    (existing["id"],)
+                )
+                conn.commit()
+                cur.close()
+                return "sent"  # treated as accepted on UI side
 
-def respond_friend_request(request_id: int, user_id: int, accept: bool):
-    """Stub — implement when you add friends table."""
-    return None
+        cur.execute(
+            "INSERT INTO friends (sender_id, recipient_id, status) VALUES (%s, %s, 'pending')",
+            (sender_id, recipient_id)
+        )
+        conn.commit()
+        cur.close()
+        return "sent"
+    except Exception:
+        try: conn.rollback()
+        except Exception: pass
+        return "error"
+    finally:
+        conn.close()
 
-def load_friends(user_id: int):
-    """Stub — implement when you add friends table."""
-    return []
 
-def remove_friend(user_id: int, friend_id: int):
-    """Stub — implement when you add friends table."""
-    return None
+def load_friend_requests(user_id: int) -> list:
+    """Pending requests sent TO this user."""
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT f.id, f.sender_id, f.created_at, u.username AS sender_username
+               FROM friends f
+               JOIN users u ON u.id = f.sender_id
+               WHERE f.recipient_id = %s AND f.status = 'pending'
+               ORDER BY f.created_at DESC""",
+            (user_id,)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+    except Exception:
+        return []
+    finally:
+        conn.close()
 
-def get_user_public_stats(user_id: int):
-    """Stub — implement when you add friends table."""
-    return {
-        "username":      "User",
-        "freak_score":   None,
-        "total_sessions": 0,
-        "vice_counts":   {},
-        "last_per_vice": {},
-        "rbtl_name":     None,
-        "rbtl_openness": None,
-    }
+
+def respond_friend_request(request_id: int, user_id: int, accept: bool) -> bool:
+    """Accept or decline a friend request. user_id must be the recipient."""
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        if accept:
+            cur.execute(
+                """UPDATE friends SET status = 'accepted'
+                   WHERE id = %s AND recipient_id = %s AND status = 'pending'""",
+                (request_id, user_id)
+            )
+        else:
+            cur.execute(
+                "DELETE FROM friends WHERE id = %s AND recipient_id = %s AND status = 'pending'",
+                (request_id, user_id)
+            )
+        conn.commit()
+        changed = cur.rowcount > 0
+        cur.close()
+        return changed
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def load_friends(user_id: int) -> list:
+    """
+    Returns accepted friends with basic stats pulled inline.
+    Each dict has: user_id, username, freak_score, top_vice,
+                   session_count, rbtl_name, request_id
+    """
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        # Get all accepted friendships where this user is either side
+        cur.execute(
+            """SELECT
+                 f.id AS request_id,
+                 CASE WHEN f.sender_id = %s THEN f.recipient_id ELSE f.sender_id END AS friend_id
+               FROM friends f
+               WHERE (f.sender_id = %s OR f.recipient_id = %s)
+                 AND f.status = 'accepted'""",
+            (user_id, user_id, user_id)
+        )
+        rows = cur.fetchall()
+        if not rows:
+            cur.close()
+            return []
+
+        friend_ids = [r["friend_id"] for r in rows]
+        request_ids = {r["friend_id"]: r["request_id"] for r in rows}
+
+        placeholders = ",".join(["%s"] * len(friend_ids))
+
+        # Basic user info
+        cur.execute(
+            f"SELECT id, username FROM users WHERE id IN ({placeholders})",
+            friend_ids
+        )
+        users_map = {r["id"]: r["username"] for r in cur.fetchall()}
+
+        # Freak scores
+        cur.execute(
+            f"SELECT user_id, freak_score FROM shadow_scores WHERE user_id IN ({placeholders})",
+            friend_ids
+        )
+        freak_map = {r["user_id"]: r["freak_score"] for r in cur.fetchall()}
+
+        # Session counts + top vice (last 30 days)
+        cur.execute(
+            f"""SELECT user_id, vice, COUNT(*) AS cnt
+                FROM vice_log
+                WHERE user_id IN ({placeholders})
+                  AND logged_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                GROUP BY user_id, vice""",
+            friend_ids
+        )
+        vice_rows = cur.fetchall()
+        session_counts = {}
+        top_vice_map = {}
+        for r in vice_rows:
+            uid = r["user_id"]
+            session_counts[uid] = session_counts.get(uid, 0) + r["cnt"]
+            if uid not in top_vice_map or r["cnt"] > top_vice_map[uid][1]:
+                top_vice_map[uid] = (r["vice"], r["cnt"])
+
+        # Latest RBTL result name
+        cur.execute(
+            f"""SELECT qr.user_id, qr.result_name
+                FROM quiz_results qr
+                INNER JOIN (
+                    SELECT user_id, MAX(completed_at) AS max_at
+                    FROM quiz_results
+                    WHERE user_id IN ({placeholders})
+                      AND quiz_type LIKE 'rbtl_v4_%'
+                    GROUP BY user_id
+                ) latest ON qr.user_id = latest.user_id AND qr.completed_at = latest.max_at""",
+            friend_ids
+        )
+        rbtl_map = {r["user_id"]: r["result_name"] for r in cur.fetchall()}
+
+        cur.close()
+
+        result = []
+        for fid in friend_ids:
+            result.append({
+                "user_id":       fid,
+                "username":      users_map.get(fid, "?"),
+                "freak_score":   freak_map.get(fid),
+                "top_vice":      top_vice_map.get(fid, (None,))[0],
+                "session_count": session_counts.get(fid, 0),
+                "rbtl_name":     rbtl_map.get(fid),
+                "request_id":    request_ids[fid],
+            })
+        return result
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+def remove_friend(user_id: int, friend_id: int) -> bool:
+    """Remove friendship in either direction."""
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """DELETE FROM friends
+               WHERE (sender_id = %s AND recipient_id = %s)
+                  OR (sender_id = %s AND recipient_id = %s)""",
+            (user_id, friend_id, friend_id, user_id)
+        )
+        conn.commit()
+        deleted = cur.rowcount > 0
+        cur.close()
+        return deleted
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def get_user_public_stats(user_id: int) -> dict:
+    """
+    Stats visible to friends on the Compare screen.
+    Returns: username, freak_score, total_sessions, vice_counts,
+             last_per_vice, rbtl_name, rbtl_openness
+    """
+    conn = create_connection()
+    if not conn:
+        return {}
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        cur.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+        user_row = cur.fetchone()
+        if not user_row:
+            cur.close()
+            return {}
+
+        cur.execute(
+            "SELECT freak_score FROM shadow_scores WHERE user_id = %s", (user_id,)
+        )
+        shadow = cur.fetchone() or {}
+
+        cur.execute(
+            """SELECT vice, COUNT(*) AS cnt
+               FROM vice_log
+               WHERE user_id = %s AND logged_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+               GROUP BY vice""",
+            (user_id,)
+        )
+        vice_rows = cur.fetchall()
+        vice_counts = {r["vice"]: r["cnt"] for r in vice_rows}
+        total = sum(vice_counts.values())
+
+        cur.execute(
+            """SELECT vice, MAX(logged_at) AS last_logged
+               FROM vice_log WHERE user_id = %s GROUP BY vice""",
+            (user_id,)
+        )
+        last_per_vice = {r["vice"]: r["last_logged"] for r in cur.fetchall()}
+
+        cur.execute(
+            """SELECT result_name, openness_pct FROM quiz_results
+               WHERE user_id = %s AND quiz_type LIKE 'rbtl_v4_%'
+               ORDER BY completed_at DESC LIMIT 1""",
+            (user_id,)
+        )
+        rbtl = cur.fetchone() or {}
+
+        cur.close()
+        return {
+            "username":       user_row["username"],
+            "freak_score":    shadow.get("freak_score"),
+            "total_sessions": total,
+            "vice_counts":    vice_counts,
+            "last_per_vice":  last_per_vice,
+            "rbtl_name":      rbtl.get("result_name"),
+            "rbtl_openness":  rbtl.get("openness_pct"),
+        }
+    except Exception:
+        return {}
+    finally:
+        conn.close()
 
 
 # ─── DEBUG ───────────────────────────────────────────────────────────────────
