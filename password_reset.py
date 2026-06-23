@@ -7,7 +7,6 @@ import re
 import secrets
 import smtplib
 from email.message import EmailMessage
-from styles import apply_custom_styles, inject_page_css, reset_css_flag
 from auth import hash_password, validate_email, validate_password
 
 try:
