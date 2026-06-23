@@ -288,7 +288,7 @@ def get_user_by_username(username: str):
         return None
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+        cur.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
         user = cur.fetchone()
         cur.close()
         return user
