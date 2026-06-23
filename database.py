@@ -1872,7 +1872,7 @@ def authenticate_user(username: str, password: str):
         return None
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+        cur.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
         user = cur.fetchone()
         cur.close()
         if not user:
