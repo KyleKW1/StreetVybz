@@ -4,16 +4,16 @@ import streamlit as st
 
 try:
     import mysql.connector
-    from mysql.connector import pooling
+    from mysql.connector import pooling, errorcode
     MYSQL_AVAILABLE = True
 except ImportError:
     MYSQL_AVAILABLE = False
 
 try:
     DB_CONFIG = {
-        "host": st.secrets.get("db_host"),
-        "port": st.secrets.get("db_port", 3306),
-        "user": st.secrets.get("db_user"),
+        "host":     st.secrets.get("db_host"),
+        "port":     st.secrets.get("db_port", 3306),
+        "user":     st.secrets.get("db_user"),
         "password": st.secrets.get("db_password"),
         "database": st.secrets.get("db_name"),
     }
@@ -21,9 +21,6 @@ except Exception:
     DB_CONFIG = {}
 
 # ─── CONNECTION POOL ─────────────────────────────────────────────────────────
-
-_pool: "pooling.MySQLConnectionPool | None" = None
-
 
 @st.cache_resource
 def _get_pool():
@@ -80,6 +77,18 @@ def ensure_tables():
         return
 
     ddl_statements = [
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            username      VARCHAR(128) NOT NULL,
+            email         VARCHAR(255) NOT NULL,
+            password_hash VARCHAR(255) NOT NULL,
+            created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_login    DATETIME DEFAULT NULL,
+            UNIQUE KEY uq_username (username),
+            UNIQUE KEY uq_email    (email)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """,
         """
         CREATE TABLE IF NOT EXISTS vice_log (
             id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -279,13 +288,14 @@ def ensure_tables():
                 cur.execute(migration)
                 conn.commit()
             except Exception:
-                pass
+                conn.rollback()
 
         cur.close()
     except Exception as e:
         st.error(f"Schema bootstrap error: {e}")
     finally:
         conn.close()
+
 
 # ─── USERS ────────────────────────────────────────────────────────────────────
 
@@ -312,7 +322,7 @@ def get_user_by_email(email: str):
         return None
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+        cur.execute("SELECT * FROM users WHERE LOWER(email) = LOWER(%s)", (email.strip(),))
         user = cur.fetchone()
         cur.close()
         return user
@@ -341,31 +351,69 @@ def get_user_by_id(user_id: int):
         conn.close()
 
 
+# Return codes for create_user so callers can give specific error messages
+CREATE_USER_OK           = "ok"
+CREATE_USER_DUP_USERNAME = "duplicate_username"
+CREATE_USER_DUP_EMAIL    = "duplicate_email"
+CREATE_USER_DUP_UNKNOWN  = "duplicate_unknown"
+CREATE_USER_ERROR        = "error"
+
+
 def create_user(username: str, email: str, password_hash: str):
     """
     Insert a new user row.
-    Returns the new user's integer ID on success, None on failure
-    (duplicate username/email or DB error).
 
-    NOTE: app.py calls this directly and expects an int ID back.
-          auth.py's register_user() wraps this and converts to (bool, str).
+    Returns:
+        (int, CREATE_USER_OK)           — success; int is the new user ID
+        (None, CREATE_USER_DUP_USERNAME) — username already taken
+        (None, CREATE_USER_DUP_EMAIL)    — email already taken
+        (None, CREATE_USER_DUP_UNKNOWN)  — other uniqueness conflict
+        (None, CREATE_USER_ERROR)        — DB unavailable or unexpected error
+
+    auth.py should pattern-match on the second element to show the right message.
     """
+    # ── pre-flight: check for duplicates with friendly queries so we can give
+    #    a precise message even if the DB raises a generic IntegrityError ──────
+    existing_user  = get_user_by_username(username)
+    if existing_user:
+        return None, CREATE_USER_DUP_USERNAME
+
+    existing_email = get_user_by_email(email)
+    if existing_email:
+        return None, CREATE_USER_DUP_EMAIL
+
     conn = create_connection()
     if not conn:
-        return None
+        return None, CREATE_USER_ERROR
+
     try:
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s)",
-            (username, email, password_hash)
+            (username.strip(), email.strip().lower(), password_hash),
         )
         conn.commit()
         new_id = cur.lastrowid
         cur.close()
-        return new_id
+        return new_id, CREATE_USER_OK
+
+    except mysql.connector.IntegrityError as e:
+        # Catch the race-condition case (two concurrent signups with same creds)
+        conn.rollback()
+        msg = str(e).lower()
+        if "username" in msg:
+            return None, CREATE_USER_DUP_USERNAME
+        if "email" in msg:
+            return None, CREATE_USER_DUP_EMAIL
+        return None, CREATE_USER_DUP_UNKNOWN
+
     except Exception:
-        # IntegrityError = duplicate; any other exception = real error
-        return None
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return None, CREATE_USER_ERROR
+
     finally:
         conn.close()
 
@@ -427,7 +475,7 @@ def create_session_token(user_id: int, token: str) -> bool:
 def verify_session_token(user_id: int, token: str) -> bool:
     conn = create_connection()
     if not conn:
-        return True
+        return True   # fail-open keeps existing sessions alive when DB is down
     try:
         cur = conn.cursor()
         cur.execute(
@@ -1221,44 +1269,9 @@ def dismiss_screenshot_alert(alert_id: int) -> bool:
 
 # ─── INTERACTIONS ─────────────────────────────────────────────────────────────
 
-INTERACTIONS_DDL = """
-CREATE TABLE IF NOT EXISTS interactions (
-    id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id          INT NOT NULL,
-    interaction_type VARCHAR(32)  NOT NULL,
-    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    payload          JSON,
-    INDEX idx_int_user (user_id),
-    INDEX idx_int_type (user_id, interaction_type),
-    INDEX idx_int_time (user_id, created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-"""
-
-SHADOW_SCORE_DDL = """
-CREATE TABLE IF NOT EXISTS shadow_scores (
-    user_id          INT NOT NULL PRIMARY KEY,
-    hypocrisy_idx    TINYINT UNSIGNED DEFAULT 0,
-    conflict_idx     TINYINT UNSIGNED DEFAULT 0,
-    freak_score      TINYINT UNSIGNED DEFAULT 0,
-    updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-"""
-
-
 def ensure_interactions_table():
-    conn = create_connection()
-    if not conn:
-        return
-    try:
-        cur = conn.cursor()
-        cur.execute(INTERACTIONS_DDL)
-        cur.execute(SHADOW_SCORE_DDL)
-        conn.commit()
-        cur.close()
-    except Exception:
-        pass
-    finally:
-        conn.close()
+    """No-op: interactions table is now created in ensure_tables()."""
+    pass
 
 
 def save_interaction(user_id: int, interaction_type: str, payload: dict) -> bool:
@@ -1530,6 +1543,7 @@ def create_dod_room(host_id: int, host_username: str, mode: str) -> str | None:
                 cur.close()
                 return code
             except mysql.connector.IntegrityError:
+                conn.rollback()
                 continue
         cur.close()
         return None
@@ -1799,9 +1813,7 @@ def delete_user_account(user_id: int) -> bool:
                 "payload": p,
             })
 
-        cur.execute(
-            "SELECT * FROM shadow_scores WHERE user_id = %s", (user_id,)
-        )
+        cur.execute("SELECT * FROM shadow_scores WHERE user_id = %s", (user_id,))
         shadow_row = cur.fetchone() or {}
 
         cur.close()
@@ -1866,14 +1878,22 @@ def delete_user_account(user_id: int) -> bool:
 
 # ─── AUTHENTICATE USER ────────────────────────────────────────────────────────
 
-def authenticate_user(username: str, password: str):
+def authenticate_user(username_or_email: str, password: str):
+    """
+    Accept either a username or an email address in the first field.
+    Returns the user dict on success, None on failure.
+    """
     conn = create_connection()
     if not conn:
         return None
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
+        # Try username first, then email
+        cur.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(%s)", (username_or_email,))
         user = cur.fetchone()
+        if not user:
+            cur.execute("SELECT * FROM users WHERE LOWER(email) = LOWER(%s)", (username_or_email.strip(),))
+            user = cur.fetchone()
         cur.close()
         if not user:
             return None
@@ -1906,12 +1926,11 @@ def authenticate_user(username: str, password: str):
         conn.close()
 
 
-# ─── FRIENDS ─────────────────────────────────────────────────────────────────
-# ─── FRIENDS ─────────────────────────────────────────────────────────────────
+# ─── FRIENDS (stubs) ──────────────────────────────────────────────────────────
 
 def send_friend_request(sender_id: int, recipient_id: int):
     """Stub — implement when you add friends table."""
-    return "error"  # Changed from: return default
+    return "error"
 
 def load_friend_requests(user_id: int):
     """Stub — implement when you add friends table."""
@@ -1932,16 +1951,17 @@ def remove_friend(user_id: int, friend_id: int):
 def get_user_public_stats(user_id: int):
     """Stub — implement when you add friends table."""
     return {
-        "username": "User",
-        "freak_score": None,
+        "username":      "User",
+        "freak_score":   None,
         "total_sessions": 0,
-        "vice_counts": {},
+        "vice_counts":   {},
         "last_per_vice": {},
-        "rbtl_name": None,
+        "rbtl_name":     None,
         "rbtl_openness": None,
     }
 
 
+# ─── DEBUG ───────────────────────────────────────────────────────────────────
 
 def debug_list_all_users():
     """Debug helper — shows all usernames in database."""
@@ -1950,7 +1970,7 @@ def debug_list_all_users():
         return []
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT id, username FROM users ORDER BY created_at DESC LIMIT 50")
+        cur.execute("SELECT id, username, email FROM users ORDER BY id DESC LIMIT 50")
         users = cur.fetchall()
         cur.close()
         return users
