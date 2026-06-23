@@ -10,7 +10,14 @@ except ImportError:
     MYSQL_AVAILABLE = False
 
 try:
-    except ImportError:
+    DB_CONFIG = {
+        "host": st.secrets.get("db_host"),
+        "port": st.secrets.get("db_port", 3306),
+        "user": st.secrets.get("db_user"),
+        "password": st.secrets.get("db_password"),
+        "database": st.secrets.get("db_name"),
+    }
+except Exception:
     DB_CONFIG = {}
 
 # ─── CONNECTION POOL ─────────────────────────────────────────────────────────
