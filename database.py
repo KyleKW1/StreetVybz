@@ -1933,3 +1933,50 @@ def get_user_public_stats(user_id: int):
         "rbtl_name": None,
         "rbtl_openness": None,
     }
+
+
+
+def debug_list_all_users():
+    """Debug helper — shows all usernames in database."""
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT id, username FROM users ORDER BY created_at DESC LIMIT 50")
+        users = cur.fetchall()
+        cur.close()
+        return users
+    except Exception as e:
+        print(f"Debug error: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def debug_search_user(username: str):
+    """Debug helper — search for user with exact and case-insensitive match."""
+    conn = create_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor(dictionary=True)
+        
+        # Exact match
+        cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+        exact = cur.fetchone()
+        
+        # Case-insensitive
+        cur.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
+        insensitive = cur.fetchone()
+        
+        cur.close()
+        return {
+            "search_term": username,
+            "exact_match": exact,
+            "case_insensitive_match": insensitive,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        conn.close()
