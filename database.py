@@ -55,7 +55,8 @@ def create_connection():
         try:
             return pool.get_connection()
         except Exception:
-            pass
+            # Pool may be stale — clear cache and try a direct connection
+            _get_pool.clear()
 
     if not MYSQL_AVAILABLE or not DB_CONFIG.get("host"):
         return None
@@ -2007,9 +2008,10 @@ def send_friend_request(sender_id: int, recipient_id: int) -> str:
         conn.commit()
         cur.close()
         return "sent"
-    except Exception:
+    except Exception as e:
         try: conn.rollback()
         except Exception: pass
+        st.error(f"Friend request DB error: {e}")
         return "error"
     finally:
         conn.close()
