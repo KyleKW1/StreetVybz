@@ -367,35 +367,7 @@ def main():
     st.session_state.setdefault("selected_feature", "stats")
     st.session_state.setdefault("onboarding_done", False)
 
-    from Pages.onboarding import should_show_onboarding
-    if should_show_onboarding() and not st.session_state.onboarding_done:
-        _render_sidebar()
-        _inject_floating_log_btn()
-        _render_feature("onboarding")
-        return
-
-    _render_sidebar()
-    _inject_floating_log_btn()
-    _render_feature(st.session_state.selected_feature)
-
-    from database import debug_list_all_users, debug_search_user
     
-    st.title("Debug: User Lookup")
-    
-    st.header("All Users in Database")
-    all_users = debug_list_all_users()
-    if all_users:
-        for u in all_users:
-            st.write(f"ID: {u['id']} | Username: `{u['username']}`")
-    else:
-        st.warning("No users found")
-    
-    st.header("Search for User")
-    search_name = st.text_input("Username to search:", value="ClosedGarden")
-    if search_name:
-        result = debug_search_user(search_name)
-        st.json(result)
-
 
 if __name__ == "__main__":
     main()
