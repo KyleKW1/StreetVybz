@@ -176,7 +176,7 @@ def render_quick_log():
                     maybe_render_hot_take(vice=vk, user_id=_current_user_id())
                 except Exception:
                     pass
-                st.toast(f"{v['icon']} Logged!", icon="✓")
+                st.toast(f"{v['icon']} Logged!")
                 st.rerun()
 
     st.html("<div style='height:1px; background:var(--border); margin:16px 0;'></div>")
@@ -555,7 +555,7 @@ def render_log_form(vice_key: str):
                  type="primary", use_container_width=True):
         entry_dt = datetime.combine(log_date, log_time)
         add_entry(vice_key, form_data, entry_dt)
-        st.success(f"Logged. {v['icon']}")
+        st.toast(f"{v['icon']} Logged.")
         st.session_state.ht_fresh = True
         try:
             from Pages.vice_hot_takes import maybe_render_hot_take
