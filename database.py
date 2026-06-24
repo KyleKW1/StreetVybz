@@ -33,14 +33,14 @@ def _get_pool():
     try:
         return pooling.MySQLConnectionPool(
             pool_name="vicevault",
-            pool_size=3,
+            pool_size=5,
             pool_reset_session=True,
             host=DB_CONFIG.get("host", ""),
             port=int(DB_CONFIG.get("port", 3306)),
             user=DB_CONFIG.get("user", ""),
             password=DB_CONFIG.get("password", ""),
             database=DB_CONFIG.get("database", ""),
-            connection_timeout=int(DB_CONFIG.get("connection_timeout", 30)),
+            connection_timeout=int(DB_CONFIG.get("connection_timeout", 5)),
             autocommit=False,
             ssl_disabled=bool(DB_CONFIG.get("ssl_disabled", True)),
         )
@@ -67,7 +67,7 @@ def create_connection():
             user=DB_CONFIG.get("user", ""),
             password=DB_CONFIG.get("password", ""),
             database=DB_CONFIG.get("database", ""),
-            connection_timeout=int(DB_CONFIG.get("connection_timeout", 30)),
+            connection_timeout=int(DB_CONFIG.get("connection_timeout", 5)),
             autocommit=False,
             ssl_disabled=bool(DB_CONFIG.get("ssl_disabled", True)),
         )

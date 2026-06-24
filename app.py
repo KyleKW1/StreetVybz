@@ -110,19 +110,54 @@ def _render_sidebar():
         user     = st.session_state.get("user", {})
         uname    = _html.escape(user.get("username", "—"))
         initials = uname[:2].upper()
+        uid      = user.get("id")
+
+        freak_score = st.session_state.get("_sidebar_freak_score")
+        freak_color = st.session_state.get("_sidebar_freak_color", "var(--lime)")
+        freak_label = st.session_state.get("_sidebar_freak_label", "")
+        if freak_score is None and uid:
+            try:
+                from Pages.vice_hot_takes import compute_freak_score
+                fk = compute_freak_score(uid)
+                if fk:
+                    freak_score = fk["freak_pct"]
+                    freak_color = fk["color"]
+                    freak_label = fk["label"]
+                    st.session_state["_sidebar_freak_score"] = freak_score
+                    st.session_state["_sidebar_freak_color"] = freak_color
+                    st.session_state["_sidebar_freak_label"] = freak_label
+            except Exception:
+                pass
+
+        meter_pct  = freak_score if freak_score else 0
+        avatar_col = freak_color if freak_score else "var(--lime)"
+        freak_html = ""
+        if freak_score is not None:
+            freak_html = f"""
+<div style="margin-top:8px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+    <div style="font-family:'Space Mono',monospace;font-size:7px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);">Freak Score</div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;color:{freak_color};line-height:1;">{freak_score}<span style="font-size:8px;color:var(--muted);"> /100</span></div>
+  </div>
+  <div style="height:2px;background:var(--border);border-radius:1px;">
+    <div style="width:{meter_pct}%;height:100%;background:{freak_color};border-radius:1px;transition:width 0.6s ease;"></div>
+  </div>
+  <div style="font-family:'Space Mono',monospace;font-size:7px;color:{freak_color};text-transform:uppercase;letter-spacing:1px;margin-top:2px;">{freak_label}</div>
+</div>"""
 
         st.html(f"""
 <div style="padding:16px 0 20px; border-bottom:1px solid var(--border); margin-bottom:20px;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:26px; color:var(--lime);
               letter-spacing:3px; line-height:1;">VICEVAULT</div>
   <div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
-    <div style="width:28px; height:28px; border-radius:50%; background:var(--lime);
+    <div style="width:28px; height:28px; border-radius:50%; background:{avatar_col};
                 display:flex; align-items:center; justify-content:center; flex-shrink:0;">
       <span style="font-family:'Bebas Neue',sans-serif; font-size:12px; color:#0a0a0b;">{initials}</span>
     </div>
     <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--soft);
                 letter-spacing:1px; text-transform:uppercase;">{uname}</div>
   </div>
+  {freak_html}
 </div>
 """)
 
