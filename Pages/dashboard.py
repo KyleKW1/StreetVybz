@@ -171,15 +171,20 @@ def render_quick_log():
             if st.button("＋ Log", key=f"ql_{vk}", use_container_width=True):
                 add_entry(vk, {"method": "Quick log"}, datetime.now())
                 st.session_state.ht_fresh = True
-                try:
-                    from Pages.vice_hot_takes import maybe_render_hot_take
-                    maybe_render_hot_take(vice=vk, user_id=_current_user_id())
-                except Exception:
-                    pass
                 st.toast(f"{v['icon']} Logged!")
                 st.rerun()
 
     st.html("<div style='height:1px; background:var(--border); margin:16px 0;'></div>")
+
+    # Hot take card — rendered here so it survives the rerun after logging
+    uid = _current_user_id()
+    if uid:
+        try:
+            from Pages.vice_hot_takes import maybe_render_hot_take
+            vice = (st.session_state.get("ht_scenario") or {}).get("vice", "other")
+            maybe_render_hot_take(vice=vice, user_id=uid)
+        except Exception:
+            pass
 
     # First-time callout — explains hot takes exist
     uid = _current_user_id()
@@ -583,12 +588,16 @@ def render_log_form(vice_key: str):
         add_entry(vice_key, form_data, entry_dt)
         st.toast(f"{v['icon']} Logged.")
         st.session_state.ht_fresh = True
+        st.rerun()
+
+    # Hot take card — outside button handler so it renders after the rerun
+    uid = _current_user_id()
+    if uid:
         try:
             from Pages.vice_hot_takes import maybe_render_hot_take
-            maybe_render_hot_take(vice=vice_key, user_id=_current_user_id())
+            maybe_render_hot_take(vice=vice_key, user_id=uid)
         except Exception:
             pass
-        st.rerun()
 
 
 def log_session_page():
