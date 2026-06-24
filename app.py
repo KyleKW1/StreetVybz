@@ -91,7 +91,6 @@ NAV_SECTIONS = [
             ("dod",         "🃏  Do or Drink"),
             ("confess",     "◎  Confessions"),
             ("freak_match", "⬡  Freak Match"),
-            ("heat_rooms",  "◎  Heat Rooms"),
         ],
     },
     {
