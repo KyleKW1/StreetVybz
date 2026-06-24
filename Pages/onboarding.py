@@ -86,6 +86,30 @@ def _step_0():
       Do or Drink, Confessions, Read Between The Lines — the vault feeds all of it.
     </div>
   </div>
+  <div style="background:var(--card); border:1px solid var(--border);
+              border-left:3px solid #00e5ff; border-radius:4px; padding:14px 18px;">
+    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+                text-transform:uppercase; color:#00e5ff; margin-bottom:4px;">Track your patterns</div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
+      History logs every session. Analytics surfaces patterns — your peak days, streaks, and habits you haven't noticed yet.
+    </div>
+  </div>
+  <div style="background:var(--card); border:1px solid var(--border);
+              border-left:3px solid var(--lime); border-radius:4px; padding:14px 18px;">
+    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+                text-transform:uppercase; color:var(--lime); margin-bottom:4px;">Where To Go Tonight</div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
+      Find venues and spots near you based on your vice. Real places, filtered to what you're actually into.
+    </div>
+  </div>
+  <div style="background:var(--card); border:1px solid var(--border);
+              border-left:3px solid var(--amber); border-radius:4px; padding:14px 18px;">
+    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+                text-transform:uppercase; color:var(--amber); margin-bottom:4px;">Profile</div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
+      Your full picture — vice breakdown, Freak Score, RBTL history, and a shareable stats card.
+    </div>
+  </div>
 </div>
 """)
 
