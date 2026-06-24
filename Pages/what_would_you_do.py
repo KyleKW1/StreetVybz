@@ -787,6 +787,8 @@ def _save_to_db(phase: str):
             recommendations=st.session_state.get("wwyd_recs",[]),
         )
         st.session_state.wwyd_db_error = "" if saved else f"DB save returned False ({phase})."
+        if saved and isinstance(saved, int):
+            st.session_state.wwyd_last_quiz_id = saved
     except Exception as e:
         st.session_state.wwyd_db_error = f"DB exception ({phase}): {e}"
 
@@ -824,6 +826,116 @@ def _render_header():
     _show_persistent_db_error()
 
 
+# ─── COMPAT DROP LOOKUP ──────────────────────────────────────────────────────
+
+def _render_drop_code_lookup():
+    with st.expander("◈ Enter a Drop Code", expanded=False):
+        code_input = st.text_input(
+            "Drop Code",
+            max_chars=8,
+            key="wwyd_drop_code_input",
+            label_visibility="collapsed",
+            placeholder="Enter 6-character code…"
+        ).strip().upper()
+
+        if st.button("Compare →", key="wwyd_drop_compare"):
+            if not code_input:
+                return
+            import database as db
+            drop = db.get_compat_drop(code_input)
+            if not drop:
+                st.html("""
+<div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--magenta);
+            letter-spacing:1px;text-transform:uppercase;margin-top:8px;">
+  Code not found or expired.
+</div>
+""")
+                return
+
+            uid = _uid()
+            if uid and drop.get("status") == "open" and drop.get("creator_id") != uid:
+                latest = db.load_latest_rbtl_result(uid)
+                if latest and latest.get("id"):
+                    db.link_compat_drop(code_input, uid, latest["id"])
+                    drop = db.get_compat_drop(code_input) or drop
+
+            c_name   = drop.get("creator_result_name") or "—"
+            c_open   = drop.get("creator_openness_pct") or 0
+            c_ds     = drop.get("creator_dim_scores") or {}
+            p_name   = drop.get("partner_result_name") or "—"
+            p_open   = drop.get("partner_openness_pct") or 0
+            p_ds     = drop.get("partner_dim_scores") or {}
+
+            c_sigs = _extract_signals(c_ds)
+            p_sigs = _extract_signals(p_ds)
+
+            shared    = [s for s in c_sigs if s in p_sigs][:3]
+            diverging = [s for s in c_sigs if s not in p_sigs][:3]
+
+            open_diff   = abs(c_open - p_open)
+            signal_overlap = len(shared)
+            match_pct = max(0, min(100, round(100 - open_diff * 0.5 + signal_overlap * 8)))
+
+            shared_html = "".join(
+                f'<span style="background:rgba(198,255,0,0.1);border:1px solid var(--lime);border-radius:2px;'
+                f'font-family:\'Space Mono\',monospace;font-size:7px;padding:2px 6px;margin:2px;color:var(--lime);">{s}</span>'
+                for s in shared
+            ) or '<span style="font-family:\'Space Mono\',monospace;font-size:8px;color:var(--muted);">None</span>'
+
+            div_html = "".join(
+                f'<span style="background:rgba(255,45,120,0.1);border:1px solid var(--magenta);border-radius:2px;'
+                f'font-family:\'Space Mono\',monospace;font-size:7px;padding:2px 6px;margin:2px;color:var(--magenta);">{s}</span>'
+                for s in diverging
+            ) or '<span style="font-family:\'Space Mono\',monospace;font-size:8px;color:var(--muted);">None</span>'
+
+            st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:18px 20px; margin-top:12px;">
+  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--muted); margin-bottom:14px;">Compatibility Drop — Results</div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px; padding:12px;">
+      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+                  text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Them</div>
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; color:var(--text);
+                  letter-spacing:1px; margin-bottom:4px;">{c_name}</div>
+      <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--amber);">{c_open}% open</div>
+    </div>
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px; padding:12px;">
+      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+                  text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">You</div>
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; color:var(--text);
+                  letter-spacing:1px; margin-bottom:4px;">{p_name}</div>
+      <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--amber);">{p_open}% open</div>
+    </div>
+  </div>
+  <div style="text-align:center; margin-bottom:16px;">
+    <div style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:var(--lime);
+                letter-spacing:2px; line-height:1;">{match_pct}%</div>
+    <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);
+                text-transform:uppercase; letter-spacing:2px;">Match</div>
+  </div>
+  <div style="margin-bottom:10px;">
+    <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--lime);
+                letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Shared Signals</div>
+    <div style="display:flex; flex-wrap:wrap; gap:4px;">{shared_html}</div>
+  </div>
+  <div>
+    <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--magenta);
+                letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Diverging</div>
+    <div style="display:flex; flex-wrap:wrap; gap:4px;">{div_html}</div>
+  </div>
+</div>
+""")
+
+
+def _extract_signals(dim_scores: dict) -> list:
+    hd = dim_scores.get("hd_signals", "")
+    if hd:
+        return [s.strip() for s in hd.split(",") if s.strip()]
+    return []
+
+
 # ─── PHASE: START ─────────────────────────────────────────────────────────────
 
 def render_start():
@@ -833,6 +945,8 @@ def render_start():
 
     if not _uid():
         st.warning("Not logged in — results won't save to your profile.")
+
+    _render_drop_code_lookup()
 
     st.html("""
 <div class="enter-card">
@@ -1595,6 +1709,50 @@ def render_result():
     with col2:
         st.download_button("↓ Save Result", data=share, file_name="rbtl_result.txt",
                            mime="text/plain", use_container_width=True, key="save_result")
+
+    _render_compat_drop_section()
+
+
+def _render_compat_drop_section():
+    uid = _uid()
+    if not uid:
+        return
+
+    quiz_id = st.session_state.get("wwyd_last_quiz_id")
+
+    st.html("""
+<div style="border-top:1px solid var(--border); margin-top:28px; padding-top:24px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
+              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Compatibility Drop</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-bottom:16px;
+              line-height:1.65;">
+    Generate a 6-character code. Share it. Someone enters it and sees how your results compare.
+  </div>
+</div>
+""")
+
+    existing_code = st.session_state.get("wwyd_compat_code")
+
+    if existing_code:
+        st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-top:2px solid var(--lime); border-radius:4px;
+            padding:18px 20px; margin-bottom:12px; text-align:center;">
+  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--muted); margin-bottom:10px;">Your Drop Code</div>
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:42px; color:var(--lime);
+              letter-spacing:8px; line-height:1;">{existing_code}</div>
+  <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+              margin-top:8px; letter-spacing:1px; text-transform:uppercase;">Valid for 7 days</div>
+</div>
+""")
+    elif quiz_id:
+        if st.button("◈ Drop Compatibility Code →", use_container_width=True, key="gen_compat_code"):
+            import database as db
+            code = db.create_compat_drop(uid, quiz_id)
+            if code:
+                st.session_state.wwyd_compat_code = code
+                st.rerun()
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────

@@ -86,10 +86,12 @@ NAV_SECTIONS = [
     {
         "label": "Features",
         "items": [
-            ("rbtl",      "⚡  Read Between The Lines"),
-            ("hotspots",  "📍  Where To Go Tonight"),
-            ("dod",       "🃏  Do or Drink"),
-            ("confess",   "◎  Confessions"),
+            ("rbtl",        "⚡  Read Between The Lines"),
+            ("hotspots",    "📍  Where To Go Tonight"),
+            ("dod",         "🃏  Do or Drink"),
+            ("confess",     "◎  Confessions"),
+            ("freak_match", "⬡  Freak Match"),
+            ("heat_rooms",  "◎  Heat Rooms"),
         ],
     },
     {
@@ -195,6 +197,12 @@ def _render_feature(feature: str):
         from Pages.onboarding import onboarding_page; onboarding_page()
     elif feature == "quick_log":
         from Pages.dashboard import log_session_page; log_session_page()
+    elif feature == "freak_match":
+        uid = st.session_state.get("user", {}).get("id")
+        from Pages.freak_match import freak_match_page; freak_match_page(uid)
+    elif feature == "heat_rooms":
+        uid = st.session_state.get("user", {}).get("id")
+        from Pages.heat_rooms import heat_rooms_page; heat_rooms_page(uid)
     else:
         from Pages.dashboard import stats_page; stats_page()
 
