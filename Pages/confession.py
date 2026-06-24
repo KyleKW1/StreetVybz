@@ -1,6 +1,7 @@
-# database.py
+# confession.py (REWRITTEN)
 """
 Pages/confession.py — Mutual blind confession exchange + anonymous community board + Friends/Compare.
+Clean, bulletproof, proper error handling throughout.
 """
 
 import streamlit as st
@@ -8,6 +9,7 @@ import secrets
 import string
 import re
 import time
+import json
 from datetime import datetime
 from styles import inject_page_css
 
@@ -21,12 +23,6 @@ _VICE_META = {
     "other":   {"label": "Other",   "icon": "💊", "color": "#00e5ff"},
 }
 
-BOARD_VICE_META = {
-    "weed":    {"label": "Weed",    "icon": "🌿", "color": "#c6ff00"},
-    "alcohol": {"label": "Alcohol", "icon": "🥃", "color": "#ffb300"},
-    "sex":     {"label": "Sex",     "icon": "🔥", "color": "#ff2d78"},
-    "other":   {"label": "Other",   "icon": "💊", "color": "#00e5ff"},
-}
 BOARD_VICE_NONE = {"label": "General", "icon": "◈", "color": "#9090aa"}
 
 _WINDOW_OPTIONS = {
@@ -46,43 +42,48 @@ QUESTION_WORDS = {
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
 
-def _revealed_at_iso(item):
-    ra = item.get("revealed_at") or item.get("updated_at") or item.get("created_at")
-    if ra is None:
-        return datetime.now().isoformat()
-    return ra.isoformat() if hasattr(ra, "isoformat") else str(ra)
-
-
-def _db(fn, *args, default=None, **kwargs):
+def _db_safe(fn_name, *args, default=None, **kwargs):
+    """Safely call a database function and return default on error."""
     try:
         import database as db
-        return getattr(db, fn)(*args, **kwargs)
-    except Exception:
+        fn = getattr(db, fn_name, None)
+        if fn is None:
+            return default
+        return fn(*args, **kwargs)
+    except Exception as e:
+        st.error(f"Database error in {fn_name}: {e}")
         return default
 
 
 def _uid():
+    """Get current user ID from session state."""
     u = st.session_state.get("user", {})
     return u.get("id") if u else None
 
 
 def _username():
+    """Get current username from session state."""
     u = st.session_state.get("user", {})
     return u.get("username", "You")
 
 
 def _force_logout():
-    _db("invalidate_user_sessions", _uid())
+    """Invalidate all sessions and clear state."""
+    uid = _uid()
+    if uid:
+        _db_safe("invalidate_user_sessions", uid)
     for k in list(st.session_state.keys()):
         del st.session_state[k]
     st.rerun()
 
 
 def _gen_code(n=8):
+    """Generate a random alphanumeric code."""
     return "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(n))
 
 
 def _time_ago(dt):
+    """Format datetime as relative time (e.g., '5m ago')."""
     if dt is None:
         return ""
     try:
@@ -98,6 +99,7 @@ def _time_ago(dt):
 
 
 def _window_label(secs):
+    """Convert seconds to human-readable label."""
     for label, s in _WINDOW_OPTIONS.items():
         if s == secs:
             return label
@@ -108,6 +110,7 @@ def _window_label(secs):
 
 
 def _section_label(text):
+    """Render a section header."""
     st.html(
         f'<div style="font-family:\'Space Mono\',monospace; font-size:9px; letter-spacing:3px;'
         f' text-transform:uppercase; color:var(--muted); margin-bottom:12px;">{text}</div>'
@@ -115,6 +118,7 @@ def _section_label(text):
 
 
 def _validate_questions(questions):
+    """Validate a list of questions. Returns list of error strings."""
     errors, seen = [], {}
     for i, raw in enumerate(questions):
         q = raw.strip()
@@ -138,6 +142,7 @@ def _validate_questions(questions):
 
 
 def _question_fields(prefix, count, sender_name=None):
+    """Render text fields for questions."""
     ph = f"Ask {sender_name} something real…" if sender_name else "Ask them something you actually want to know…"
     return [
         st.text_area(f"Question {i + 1}", placeholder=ph, key=f"{prefix}_{i}", height=80)
@@ -145,9 +150,18 @@ def _question_fields(prefix, count, sender_name=None):
     ]
 
 
-# ─── COUNTDOWN / PRINTSCREEN ──────────────────────────────────────────────────
+def _revealed_at_iso(item):
+    """Extract ISO timestamp from confession item."""
+    ra = item.get("revealed_at") or item.get("updated_at") or item.get("created_at")
+    if ra is None:
+        return datetime.now().isoformat()
+    return ra.isoformat() if hasattr(ra, "isoformat") else str(ra)
+
+
+# ─── COUNTDOWN BANNER & PRINTSCREEN GUARD ─────────────────────────────────────
 
 def inject_countdown_banner(confession_code, revealed_at_iso, window_seconds=60):
+    """Inject countdown timer + glitch border for revealed confessions."""
     delete_ms = window_seconds * 1000
     m, s = divmod(window_seconds, 60)
     initial = f"{m}:{s:02d}"
@@ -201,6 +215,7 @@ def inject_countdown_banner(confession_code, revealed_at_iso, window_seconds=60)
 
 
 def inject_printscreen_guard(confession_code):
+    """Inject listener for PrintScreen key."""
     st.html(f"""
 <script>
 (function() {{
@@ -221,6 +236,7 @@ def inject_printscreen_guard(confession_code):
 # ─── UI COMPONENTS ────────────────────────────────────────────────────────────
 
 def _status_badge(status, sender, recipient, is_sender):
+    """Render status badge for a confession."""
     cfg = {
         "sent":        {
             True:  ("var(--amber)",   "WAITING",   f"Waiting for {recipient} to send their questions first"),
@@ -251,6 +267,7 @@ def _status_badge(status, sender, recipient, is_sender):
 
 
 def _typing_indicator(name):
+    """Render typing dots."""
     st.html(f"""
 <div style="display:flex;align-items:center;gap:10px;padding:10px 0 14px 0;">
   <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
@@ -261,6 +278,7 @@ def _typing_indicator(name):
 
 
 def _exchange_card(label, color, questions, answers, delay_base=0):
+    """Render a revealed exchange card."""
     st.html(f'<div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:{color};margin-bottom:8px;">{label}</div>')
     for i, (q, a) in enumerate(zip(questions, answers)):
         delay = delay_base + i * 0.12
@@ -282,25 +300,27 @@ def _exchange_card(label, color, questions, answers, delay_base=0):
 
 
 def _reaction_stamps(confession_code):
+    """Render emoji reaction buttons."""
     EMOJIS = ["😳", "👀", "💀", "🫣"]
     st.html('<div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">React</div>')
     cols = st.columns(len(EMOJIS))
-    existing = _db("load_reactions", confession_code, _uid(), default=[])
+    existing = _db_safe("load_reactions", confession_code, _uid(), default=[])
     reacted = {r.get("emoji") for r in (existing or [])}
     for i, emoji in enumerate(EMOJIS):
-        count = _db("count_reactions", confession_code, emoji, default=0) or 0
+        count = _db_safe("count_reactions", confession_code, emoji, default=0) or 0
         with cols[i]:
             label = f"{emoji}  {count}" if count else emoji
             if st.button(label, key=f"react_{confession_code}_{emoji}"):
                 if emoji not in reacted:
-                    _db("save_reaction", confession_code, _uid(), emoji)
+                    _db_safe("save_reaction", confession_code, _uid(), emoji)
                     st.rerun()
 
 
 # ─── SCREENSHOT HANDLING ──────────────────────────────────────────────────────
 
 def _render_screenshot_alerts():
-    alerts = _db("load_screenshot_alerts", _uid(), default=[])
+    """Render any screenshot alerts for this user."""
+    alerts = _db_safe("load_screenshot_alerts", _uid(), default=[])
     for alert in alerts:
         screenshotter = alert.get("screenshotter_username", "Someone")
         ts = str(alert.get("created_at", ""))[:16]
@@ -319,31 +339,28 @@ def _render_screenshot_alerts():
         col_d, _ = st.columns([1, 4])
         with col_d:
             if st.button("Dismiss", key=f"dismiss_{alert_id}"):
-                _db("dismiss_screenshot_alert", alert_id)
+                _db_safe("dismiss_screenshot_alert", alert_id)
                 st.rerun()
 
 
 def _handle_query_params():
+    """Handle special URL parameters (delete, screenshot, invite)."""
     params = st.query_params
     delete_code = params.get("delete_code")
     if delete_code:
-        _db("delete_confession", delete_code)
+        _db_safe("delete_confession", delete_code)
         st.query_params.clear()
         st.rerun()
     ss_code = params.get("screenshot_code")
     if ss_code:
         uid = _uid()
         username = _username()
-        try:
-            import database as db
-            item = db.get_confession_by_code(ss_code)
-        except Exception:
-            item = None
+        item = _db_safe("get_confession_by_code", ss_code)
         other = ""
         if item:
             other = item.get("recipient_username") if item.get("sender_id") == uid else item.get("sender_username", "")
         if uid and other:
-            _db("save_screenshot_alert", ss_code, uid, username, other)
+            _db_safe("save_screenshot_alert", ss_code, uid, username, other)
         st.query_params.clear()
         st.error(f"⚠️ Screenshot detected. You've been logged out. {other or 'The other person'} has been notified.")
         time.sleep(2)
@@ -353,6 +370,7 @@ def _handle_query_params():
 # ─── EMAIL INVITE ─────────────────────────────────────────────────────────────
 
 def _send_invite_email(sender_username, recipient_email, confession_code):
+    """Send confession invite email."""
     base_url = st.secrets.get("APP_URL", "https://yourvicevault.app")
     link = f"{base_url}/?invite={confession_code}"
     try:
@@ -367,6 +385,7 @@ def _send_invite_email(sender_username, recipient_email, confession_code):
 
 
 def _show_invite_link(confession_code):
+    """Show shareable invite link."""
     base_url = st.secrets.get("APP_URL", "https://yourvicevault.app")
     link = f"{base_url}/?invite={confession_code}"
     st.html(f"""
@@ -379,9 +398,10 @@ def _show_invite_link(confession_code):
     st.code(link)
 
 
-# ─── COMPOSE ──────────────────────────────────────────────────────────────────
+# ─── COMPOSE PAGE ─────────────────────────────────────────────────────────────
 
 def _render_compose():
+    """Render "compose new confession" page."""
     inject_page_css()
     _section_label("New Confession Exchange")
     st.session_state.setdefault("conf_form_gen", 0)
@@ -442,7 +462,7 @@ def _render_compose():
             if not email or "@" not in email:
                 st.error("Enter a valid email address.")
                 return
-            result = _db("save_confession_invite", uid, email, code, questions, window_seconds)
+            result = _db_safe("save_confession_invite", uid, email, code, questions, window_seconds)
             if result:
                 sent = _send_invite_email(_username(), email, code)
                 if sent:
@@ -462,11 +482,11 @@ def _render_compose():
             if rname.lower() == _username().lower():
                 st.error("You can't send a confession to yourself.")
                 return
-            recipient = _db("get_user_by_username", rname)
+            recipient = _db_safe("get_user_by_username", rname)
             if not recipient:
                 st.error(f"No user found: '{rname}'.")
                 return
-            if _db("save_confession", uid, recipient["id"], code, questions, window_seconds):
+            if _db_safe("save_confession", uid, recipient["id"], code, questions, window_seconds):
                 st.session_state.conf_form_gen += 1
                 st.session_state.conf_sent_to = rname
                 st.rerun()
@@ -474,12 +494,13 @@ def _render_compose():
                 st.error("Something went wrong.")
 
 
-# ─── INBOX ────────────────────────────────────────────────────────────────────
+# ─── INBOX PAGE ───────────────────────────────────────────────────────────────
 
 def _render_inbox():
+    """Render confessions sent TO you."""
     inject_page_css()
     _section_label("Inbox — Confessions sent to you")
-    items = _db("load_confessions_inbox", _uid(), default=[])
+    items = _db_safe("load_confessions_inbox", _uid(), default=[])
     if not items:
         st.html('<div style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:60px;text-align:center;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:28px;letter-spacing:3px;color:var(--muted);">NOTHING YET</div></div>')
         return
@@ -488,6 +509,7 @@ def _render_inbox():
 
 
 def _render_inbox_item(item):
+    """Render a single inbox confession."""
     code = item["code"]
     sender_name = item.get("sender_username", "Someone")
     status = item["status"]
@@ -516,7 +538,7 @@ def _render_inbox_item(item):
                 errs = _validate_questions(rqs)
                 if errs:
                     for e in errs: st.error(e)
-                elif _db("confession_recipient_submit_questions", code, rqs):
+                elif _db_safe("confession_recipient_submit_questions", code, rqs):
                     st.success("Locked in."); st.rerun()
                 else:
                     st.error("Something went wrong.")
@@ -532,7 +554,7 @@ def _render_inbox_item(item):
                 blank = [i+1 for i, a in enumerate(recipient_answers) if not a.strip()]
                 if blank:
                     st.error(f"Answer{'s' if len(blank)>1 else ''} {', '.join(map(str,blank))} {'are' if len(blank)>1 else 'is'} empty.")
-                elif _db("confession_recipient_answer", code, recipient_answers):
+                elif _db_safe("confession_recipient_answer", code, recipient_answers):
                     st.success("Done. Waiting for them to answer your questions."); st.rerun()
                 else:
                     st.error("Something went wrong.")
@@ -548,12 +570,13 @@ def _render_inbox_item(item):
     st.html("<div style='height:12px'></div>")
 
 
-# ─── OUTBOX ───────────────────────────────────────────────────────────────────
+# ─── OUTBOX PAGE ──────────────────────────────────────────────────────────────
 
 def _render_outbox():
+    """Render confessions you started."""
     inject_page_css()
     _section_label("Sent — Confessions you started")
-    items = _db("load_confessions_outbox", _uid(), default=[])
+    items = _db_safe("load_confessions_outbox", _uid(), default=[])
     if not items:
         st.html('<div style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:60px;text-align:center;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:28px;letter-spacing:3px;color:var(--muted);">NOTHING SENT YET</div></div>')
         return
@@ -562,6 +585,7 @@ def _render_outbox():
 
 
 def _render_outbox_item(item):
+    """Render a single outbox confession."""
     code = item["code"]
     recipient_name = item.get("recipient_username") or item.get("recipient_email", "them")
     status = item["status"]
@@ -598,7 +622,7 @@ def _render_outbox_item(item):
                 blank = [i+1 for i, a in enumerate(sender_answers) if not a.strip()]
                 if blank:
                     st.error(f"Answer{'s' if len(blank)>1 else ''} {', '.join(map(str,blank))} {'are' if len(blank)>1 else 'is'} empty.")
-                elif _db("confession_sender_answer", code, sender_answers):
+                elif _db_safe("confession_sender_answer", code, sender_answers):
                     st.success(f"Revealed. Auto-deletes in {_window_label(window_secs)}."); st.rerun()
                 else:
                     st.error("Something went wrong.")
@@ -614,6 +638,7 @@ def _render_outbox_item(item):
 # ─── REVEALED VIEW ────────────────────────────────────────────────────────────
 
 def _render_revealed(item, is_sender):
+    """Render the revealed exchange."""
     sender_name = item.get("sender_username", "Sender")
     recipient_name = item.get("recipient_username") or item.get("recipient_email", "Recipient")
     window_secs = item.get("reveal_window_secs", 60)
@@ -641,6 +666,7 @@ def _render_revealed(item, is_sender):
 # ─── COMMUNITY BOARD ──────────────────────────────────────────────────────────
 
 def _render_board_post_form():
+    """Render anonymous post form."""
     inject_page_css()
     st.session_state.setdefault("pcb_gen", 0)
     gen = st.session_state.pcb_gen
@@ -657,7 +683,7 @@ def _render_board_post_form():
         if len(text) < 10:
             st.error("Write at least 10 characters.")
             return
-        result = _db("save_public_confession", uid, text, vice_key)
+        result = _db_safe("save_public_confession", uid, text, vice_key)
         if result:
             st.session_state.pcb_gen += 1
             st.success("Posted.")
@@ -667,11 +693,12 @@ def _render_board_post_form():
 
 
 def _render_board_card(item):
+    """Render a single board post."""
     cid = item["id"]
     content = item.get("content", "")
     vice = item.get("vice")
     replies = item.get("reply_count", 0)
-    meta = BOARD_VICE_META.get(vice, BOARD_VICE_NONE)
+    meta = _VICE_META.get(vice, BOARD_VICE_NONE)
     ago = _time_ago(item.get("created_at"))
     st.html(f"""
 <div style="background:var(--card);border:1px solid var(--border);border-left:3px solid {meta['color']};
@@ -685,7 +712,7 @@ def _render_board_card(item):
 </div>
 """)
     with st.expander(f"{'Read & reply' if replies else 'Be the first to reply'} →", expanded=False):
-        thread = _db("load_public_replies", cid, default=[])
+        thread = _db_safe("load_public_replies", cid, default=[])
         if thread:
             for reply in thread:
                 reply_ago = _time_ago(reply.get("created_at"))
@@ -699,7 +726,7 @@ def _render_board_card(item):
                 text = (reply_text or "").strip()
                 if len(text) < 5:
                     st.error("Write at least 5 characters.")
-                elif _db("save_public_reply", cid, uid, text):
+                elif _db_safe("save_public_reply", cid, uid, text):
                     st.rerun()
                 else:
                     st.error("Couldn't post reply.")
@@ -709,6 +736,7 @@ def _render_board_card(item):
 
 
 def _render_board():
+    """Render community board page."""
     inject_page_css()
     _section_label("Community Board — anonymous confessions")
     st.html("""
@@ -732,7 +760,7 @@ def _render_board():
     with st.expander("◈  Post something", expanded=False):
         _render_board_post_form()
     st.html("<div style='height:1px;background:var(--border);margin:16px 0;'></div>")
-    posts = _db("load_public_confessions", 30, 0, st.session_state.pcb_filter, default=[])
+    posts = _db_safe("load_public_confessions", 30, 0, st.session_state.pcb_filter, default=[])
     if not posts:
         st.html('<div style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:60px;text-align:center;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:28px;letter-spacing:3px;color:var(--muted);margin-bottom:8px;">NOTHING YET</div><div style="font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--muted);">Be the first. Post something above.</div></div>')
         return
@@ -740,9 +768,10 @@ def _render_board():
         _render_board_card(item)
 
 
-# ─── FRIENDS / COMPARE ────────────────────────────────────────────────────────
+# ─── FRIENDS & COMPARE ────────────────────────────────────────────────────────
 
 def _vice_bar(vice, count, total):
+    """Render a single vice count bar."""
     meta = _VICE_META.get(vice, {"label": vice.title(), "icon": "◈", "color": "var(--muted)"})
     pct = round(count / total * 100) if total else 0
     return f"""
@@ -758,6 +787,7 @@ def _vice_bar(vice, count, total):
 
 
 def _days_clean_display(vice, last_per_vice):
+    """Format days since last vice entry."""
     last_str = last_per_vice.get(vice)
     if not last_str:
         return "—"
@@ -770,6 +800,7 @@ def _days_clean_display(vice, last_per_vice):
 
 
 def _render_compare_panel(stats, label, is_me):
+    """Render a comparison panel (side-by-side friend stats)."""
     col_accent = "var(--lime)" if is_me else "var(--cyan)"
     username = stats.get("username", label)
     initials = username[:2].upper()
@@ -818,13 +849,14 @@ def _render_compare_panel(stats, label, is_me):
 
 
 def _render_friends():
+    """Render Friends, Requests, and Compare pages."""
     inject_page_css()
     uid = _uid()
     if not uid:
         st.error("Log in to use Friends.")
         return
 
-    import database as _db_mod
+    import database as db_mod
 
     st.session_state.setdefault("friend_compare_id",    None)
     st.session_state.setdefault("friend_compare_stats", None)
@@ -834,8 +866,9 @@ def _render_friends():
     if st.session_state.friend_compare_id and st.session_state.friend_compare_stats:
         friend_stats = st.session_state.friend_compare_stats
         try:
-            my_stats = _db_mod.get_user_public_stats(uid) or {}
-        except Exception:
+            my_stats = db_mod.get_user_public_stats(uid) or {}
+        except Exception as e:
+            st.warning(f"Could not load your stats: {e}")
             my_stats = {}
 
         st.html('<div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:16px;">Vault Compare</div>')
@@ -874,12 +907,7 @@ def _render_friends():
         return
 
     # ── Pending requests ──────────────────────────────────────────────────────
-    try:
-        requests = _db_mod.load_friend_requests(uid) or []
-    except Exception as e:
-        st.warning(f"Could not load friend requests: {e}")
-        requests = []
-
+    requests = _db_safe("load_friend_requests", uid, default=[])
     if requests:
         _section_label(f"Friend Requests — {len(requests)}")
         for req in requests:
@@ -890,28 +918,22 @@ def _render_friends():
             col_acc, col_dec, _ = st.columns([2, 2, 3])
             with col_acc:
                 if st.button("Accept →", key=f"fr_acc_{req_id}", type="primary", use_container_width=True):
-                    try:
-                        _db_mod.respond_friend_request(req_id, uid, True)
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-                    st.rerun()
+                    if _db_safe("respond_friend_request", req_id, uid, True):
+                        st.success(f"Now friends with {sender}!")
+                        st.rerun()
+                    else:
+                        st.error("Something went wrong.")
             with col_dec:
                 if st.button("Decline", key=f"fr_dec_{req_id}", use_container_width=True):
-                    try:
-                        _db_mod.respond_friend_request(req_id, uid, False)
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-                    st.rerun()
+                    if _db_safe("respond_friend_request", req_id, uid, False):
+                        st.rerun()
+                    else:
+                        st.error("Something went wrong.")
             st.html("<div style='height:6px'></div>")
         st.html("<div style='height:1px;background:var(--border);margin:16px 0;'></div>")
 
     # ── Friends list ──────────────────────────────────────────────────────────
-    try:
-        friends = _db_mod.load_friends(uid) or []
-    except Exception as e:
-        st.warning(f"Could not load friends: {e}")
-        friends = []
-
+    friends = _db_safe("load_friends", uid, default=[])
     _section_label(f"Friends — {len(friends)}")
 
     if friends:
@@ -944,10 +966,7 @@ def _render_friends():
             col_cmp, col_conf, col_rm, _ = st.columns([2, 2, 1, 2])
             with col_cmp:
                 if st.button("Compare →", key=f"cmp_{fid}", use_container_width=True, type="primary"):
-                    try:
-                        stats = _db_mod.get_user_public_stats(fid) or {}
-                    except Exception:
-                        stats = {}
+                    stats = _db_safe("get_user_public_stats", fid, default={})
                     st.session_state.friend_compare_id    = fid
                     st.session_state.friend_compare_stats = stats
                     st.rerun()
@@ -958,11 +977,10 @@ def _render_friends():
                     st.rerun()
             with col_rm:
                 if st.button("✕", key=f"rm_friend_{fid}", help="Remove friend"):
-                    try:
-                        _db_mod.remove_friend(uid, fid)
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-                    st.rerun()
+                    if _db_safe("remove_friend", uid, fid):
+                        st.rerun()
+                    else:
+                        st.error("Could not remove friend.")
             st.html("<div style='height:8px'></div>")
     else:
         st.html('<div style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:48px;text-align:center;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:24px;letter-spacing:3px;color:var(--muted);margin-bottom:8px;">NO FRIENDS YET</div><div style="font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--muted);">Add someone below — they\'ll see your vault stats once both sides accept.</div></div>')
@@ -979,21 +997,11 @@ def _render_friends():
         elif uname.lower() == _username().lower():
             st.error("You can't add yourself.")
         else:
-            try:
-                target = _db_mod.get_user_by_username(uname)
-            except Exception as e:
-                st.error(f"Could not look up user: {e}")
-                target = None
-
+            target = _db_safe("get_user_by_username", uname)
             if target is None:
                 st.error(f"No user found: '{uname}'")
             else:
-                try:
-                    result = _db_mod.send_friend_request(uid, target["id"])
-                except Exception as e:
-                    st.error(f"Friend request failed: {e}")
-                    result = "error"
-
+                result = _db_safe("send_friend_request", uid, target["id"], default="error")
                 if result == "sent":
                     st.success(f"Request sent to {uname}!")
                     st.session_state.friend_add_gen += 1
@@ -1002,10 +1010,8 @@ def _render_friends():
                     st.info(f"You and {uname} are already friends.")
                 elif result == "already_sent":
                     st.info("Request already pending — they haven't accepted yet.")
-                elif result == "error":
-                    st.error("Friend request failed — see error above.")
                 else:
-                    st.error(f"Unexpected result: {result}")
+                    st.error(f"Friend request failed: {result}")
 
     st.html('<div style="background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:12px 16px;margin-top:12px;"><div style="font-family:\'DM Sans\',sans-serif;font-size:12px;color:var(--muted);line-height:1.7;">Friends can see your freak score, vice breakdown (last 30 days), and RBTL result. Individual session details are never shared.</div></div>')
 
@@ -1013,6 +1019,7 @@ def _render_friends():
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 
 def confessions_page():
+    """Main entry point for confessions page."""
     inject_page_css()
 
     st.html("""
@@ -1065,17 +1072,13 @@ def confessions_page():
     _render_screenshot_alerts()
     st.session_state.setdefault("conf_tab", "compose")
 
-    inbox_items  = _db("load_confessions_inbox",  uid, default=[])
-    outbox_items = _db("load_confessions_outbox", uid, default=[])
+    inbox_items  = _db_safe("load_confessions_inbox",  uid, default=[])
+    outbox_items = _db_safe("load_confessions_outbox", uid, default=[])
     inbox_action  = sum(1 for i in inbox_items  if i["status"] in ("sent", "questioning"))
     outbox_action = sum(1 for i in outbox_items if i["status"] == "responded")
     revealed_all  = [i for i in inbox_items + outbox_items if i["status"] == "revealed"]
 
-    try:
-        import database as _db_mod
-        pending_reqs = _db_mod.load_friend_requests(uid) or []
-    except Exception:
-        pending_reqs = []
+    pending_reqs = _db_safe("load_friend_requests", uid, default=[])
 
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
