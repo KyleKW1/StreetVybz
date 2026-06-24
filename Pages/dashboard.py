@@ -120,13 +120,14 @@ def all_entries(days: int = 30):
 # ─── SHARED COMPONENTS ────────────────────────────────────────────────────────
 
 def page_masthead(title, subtitle=""):
+    sub_html = f'<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--muted); margin-top:6px;">{subtitle}</div>' if subtitle else ''
     st.html(f"""
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
               text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Vice Vault</div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:var(--text);
               letter-spacing:3px; line-height:0.95;">{title}</div>
-  {'<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--muted); margin-top:6px;">' + subtitle + '</div>' if subtitle else ''}
+  {sub_html}
 </div>
 """)
 
@@ -641,6 +642,7 @@ def history_page():
         notes    = e["data"].get("notes", "")
         entry_id = e.get("id")
 
+        notes_html = f'<div style="font-family:\'DM Sans\',sans-serif; font-size:11px; color:var(--muted); margin-top:4px; font-style:italic;">"{notes}"</div>' if notes else ''
         col_card, col_del = st.columns([10, 1])
         with col_card:
             st.html(f"""
@@ -655,7 +657,7 @@ def history_page():
   <div style="font-family:'Space Mono',monospace; font-size:10px; color:{v['color']};
               letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">{v['label']}</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft);">{data_str}</div>
-  {f'<div style="font-family:\'DM Sans\',sans-serif; font-size:11px; color:var(--muted); margin-top:4px; font-style:italic;">"{notes}"</div>' if notes else ''}
+  {notes_html}
 </div>
 """)
         with col_del:
@@ -823,6 +825,8 @@ def goals_page():
         over  = current_limit and used > current_limit
         bar_c = "var(--magenta)" if over else color
 
+        progress_bar_html = f'<div style="height:4px; background:var(--border); border-radius:2px; margin-bottom:8px;"><div style="width:{pct:.0f}%; height:100%; background:{bar_c}; border-radius:2px;"></div></div>' if current_limit else ''
+        over_warning_html = '<div style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--magenta); letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">&#9888; Over limit this week</div>' if over else ''
         st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:2px solid {color}; border-radius:4px; padding:14px 16px; margin-bottom:8px;">
@@ -834,8 +838,8 @@ def goals_page():
       <span style="font-size:11px; color:var(--muted);">{v['unit']}</span>
     </div>
   </div>
-  {f'<div style="height:4px; background:var(--border); border-radius:2px; margin-bottom:8px;"><div style="width:{pct:.0f}%; height:100%; background:{bar_c}; border-radius:2px;"></div></div>' if current_limit else ''}
-  {'<div style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--magenta); letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">⚠ Over limit this week</div>' if over else ''}
+  {progress_bar_html}
+  {over_warning_html}
 </div>
 """)
         updated[vk] = st.number_input(

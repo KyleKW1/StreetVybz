@@ -601,12 +601,13 @@ def render_game():
             d      = h["dare"]["dare"][:80] + ("…" if len(h["dare"]["dare"]) > 80 else "")
             result = h.get("result", "done")
             r_icon, r_col = {"done": ("✓", "var(--lime)"), "drink": ("🍹", "var(--magenta)"), "skipped": ("↺", "var(--muted)")}.get(result, ("✓", "var(--lime)"))
+            skipped_badge = '<span style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--muted); margin-left:6px; border:1px solid var(--border); padding:1px 5px; border-radius:2px;">SKIPPED</span>' if result == "skipped" else ''
             st.html(f"""
 <div style="display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--border);">
   <div style="font-family:'Space Mono',monospace; font-size:14px; color:{r_col}; flex-shrink:0;">{r_icon}</div>
   <div>
     <span style="font-family:'Space Mono',monospace; font-size:9px; color:var(--soft); letter-spacing:1px; text-transform:uppercase;">{p}</span>
-    {'<span style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--muted); margin-left:6px; border:1px solid var(--border); padding:1px 5px; border-radius:2px;">SKIPPED</span>' if result == "skipped" else ''}
+    {skipped_badge}
     <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted); line-height:1.5;">{d}</div>
   </div>
 </div>
@@ -628,6 +629,9 @@ def render_game_over():
     winner  = max(scores, key=lambda u: scores[u]["done"])   if scores else "—"
     drinker = max(scores, key=lambda u: scores[u]["drinks"]) if scores else "—"
 
+    drinker_drinks = scores.get(drinker, {}).get("drinks", 0)
+    drinker_html = f'<div style="margin-top:12px;font-family:DM Sans,sans-serif;font-size:12px;color:var(--magenta);">🍹 {drinker} drank the most — {drinker_drinks} times</div>' if winner != drinker else ''
+    winner_done = scores.get(winner, {}).get('done', 0)
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-top:3px solid var(--lime); border-radius:4px;
@@ -637,9 +641,9 @@ def render_game_over():
   <div style="font-family:'Bebas Neue',sans-serif; font-size:52px; color:var(--lime);
               letter-spacing:3px; line-height:0.9; margin-bottom:8px;">{winner.upper()}</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--soft);">
-    held it down the most — {scores.get(winner, {}).get('done', 0)} dares completed
+    held it down the most — {winner_done} dares completed
   </div>
-  {'<div style="margin-top:12px;font-family:\'DM Sans\',sans-serif;font-size:12px;color:var(--magenta);">🍹 ' + drinker + ' drank the most — ' + str(scores.get(drinker,{}).get("drinks",0)) + ' times</div>' if winner != drinker else ''}
+  {drinker_html}
 </div>
 """)
 

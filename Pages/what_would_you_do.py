@@ -1501,6 +1501,11 @@ def render_category_selector():
     result_type = st.session_state.get("wwyd_result_type", {})
     insight     = st.session_state.get("wwyd_insight", "")
 
+    insight_html = ('<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--amber); font-style:italic; line-height:1.6; border-left:2px solid var(--amber); padding-left:12px; margin-bottom:12px;">' + insight + '</div>') if insight else ''
+    rt_icon = result_type.get('icon', '')
+    rt_name = result_type.get('name', '')
+    rt_meta = result_type.get('meta', '')
+    sel_count = len(selected)
     st.html(f"""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
             text-transform:uppercase; color:var(--muted); margin-bottom:6px;">
@@ -1511,11 +1516,11 @@ def render_category_selector():
   <div style="display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
     <div style="flex:1; min-width:200px;">
       <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--text); letter-spacing:2px;">
-        {result_type.get('icon','')} {result_type.get('name','')}
+        {rt_icon} {rt_name}
       </div>
       <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--magenta);
                   letter-spacing:1px; text-transform:uppercase; margin-top:2px;">
-        {result_type.get('meta','')}
+        {rt_meta}
       </div>
     </div>
     <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px;
@@ -1525,7 +1530,7 @@ def render_category_selector():
                   text-transform:uppercase; letter-spacing:1px;">openness %</div>
     </div>
   </div>
-  {f'<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--amber); font-style:italic; line-height:1.6; border-left:2px solid var(--amber); padding-left:12px; margin-bottom:12px;">{insight}</div>' if insight else ''}
+  {insight_html}
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted); line-height:1.65;">
     Every real platform category scored against your answers.
     <span style="color:var(--lime);">Lime = AI top 25 picks for you.</span>
@@ -1534,7 +1539,7 @@ def render_category_selector():
 </div>
 <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
             text-transform:uppercase; color:var(--muted); margin-bottom:14px;">
-  {len(selected)} selected
+  {sel_count} selected
 </div>
 """)
 
@@ -1583,28 +1588,40 @@ def render_result():
     hd_ans      = st.session_state.get("wwyd_hd_answers", {})
     insight     = st.session_state.get("wwyd_insight", "")
 
+    one_line_read_html = (
+        '<div style="background:var(--surface); border:1px solid var(--amber); border-radius:3px; padding:14px 16px; margin-top:4px;">'
+        '<div style="font-family:\'Space Mono\',monospace; font-size:8px; letter-spacing:2px; text-transform:uppercase; color:var(--amber); margin-bottom:6px;">One-line read</div>'
+        f'<div style="font-family:\'DM Sans\',sans-serif; font-size:14px; color:var(--text); font-style:italic; line-height:1.65;">{insight}</div>'
+        '</div>'
+    ) if insight else ''
+    rt_icon = result_type['icon']
+    rt_name = result_type['name'].upper()
+    rt_meta = result_type['meta']
+    rt_hook = result_type.get('hook', '')
+    rt_signal = result_type.get('signal', '')
+    rt_tell = result_type.get('tell', '')
     st.html(f"""
 <div class="enter-card" style="background:var(--card); border:1px solid var(--border);
             border-top:3px solid var(--magenta); border-radius:4px; padding:28px 24px; margin-bottom:14px;">
-  <div style="font-size:42px; margin-bottom:10px;">{result_type['icon']}</div>
+  <div style="font-size:42px; margin-bottom:10px;">{rt_icon}</div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(28px,6vw,46px);
               letter-spacing:3px; color:var(--text); line-height:1.05; margin-bottom:4px;">
-    {result_type['name'].upper()}
+    {rt_name}
   </div>
   <div style="font-family:'Space Mono',monospace; font-size:10px; letter-spacing:2px;
               color:var(--magenta); text-transform:uppercase; margin-bottom:24px;">
-    {result_type['meta']}
+    {rt_meta}
   </div>
   <div style="border-top:1px solid var(--border); padding-top:18px; margin-bottom:16px;">
     <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text);
-                line-height:1.75; margin-bottom:14px;">{result_type.get('hook','')}</div>
+                line-height:1.75; margin-bottom:14px;">{rt_hook}</div>
     <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
                 line-height:1.75; margin-bottom:14px; border-left:2px solid var(--border);
-                padding-left:12px;">{result_type.get('signal','')}</div>
+                padding-left:12px;">{rt_signal}</div>
     <div style="font-family:'Space Mono',monospace; font-size:10px; color:var(--amber);
-                line-height:1.65; letter-spacing:0.5px;">{result_type.get('tell','')}</div>
+                line-height:1.65; letter-spacing:0.5px;">{rt_tell}</div>
   </div>
-  {f'<div style="background:var(--surface); border:1px solid var(--amber); border-radius:3px; padding:14px 16px; margin-top:4px;"><div style="font-family:\'Space Mono\',monospace; font-size:8px; letter-spacing:2px; text-transform:uppercase; color:var(--amber); margin-bottom:6px;">One-line read</div><div style="font-family:\'DM Sans\',sans-serif; font-size:14px; color:var(--text); font-style:italic; line-height:1.65;">{insight}</div></div>' if insight else ''}
+  {one_line_read_html}
   <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px;
               padding:14px; margin-top:16px;">
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
