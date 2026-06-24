@@ -389,11 +389,13 @@ def _forgot_page():
 
 
 def _bootstrap_db():
+    if st.session_state.get("_db_bootstrapped"):
+        return
     try:
         import database as db
         db.ensure_tables()
-        # Also ensure the password_resets table exists
         _ensure_password_resets_table()
+        st.session_state["_db_bootstrapped"] = True
     except Exception:
         pass
 
@@ -439,17 +441,20 @@ def main():
         _render_auth()
         return
 
-    # Validate session token on every authenticated page load
-    try:
-        from auth import check_session_valid
-        if not check_session_valid():
-            for k in list(st.session_state.keys()):
-                del st.session_state[k]
-            st.warning("Your session has ended. Please log in again.")
-            _render_auth()
-            return
-    except Exception:
-        pass
+    import time as _t
+    _now = _t.time()
+    if _now - st.session_state.get("_session_checked_at", 0) > 300:
+        try:
+            from auth import check_session_valid
+            if not check_session_valid():
+                for k in list(st.session_state.keys()):
+                    del st.session_state[k]
+                st.warning("Your session has ended. Please log in again.")
+                _render_auth()
+                return
+            st.session_state["_session_checked_at"] = _now
+        except Exception:
+            pass
 
     st.session_state.setdefault("selected_feature", "stats")
     st.session_state.setdefault("onboarding_done", False)
