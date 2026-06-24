@@ -91,6 +91,7 @@ NAV_SECTIONS = [
             ("dod",         "🃏  Do or Drink"),
             ("confess",     "◎  Confessions"),
             ("freak_match", "⬡  Freak Match"),
+            ("heat_rooms",  "◎  Heat Rooms"),
         ],
     },
     {
@@ -183,8 +184,11 @@ section[data-testid="stSidebar"] .stButton > button {
 """)
             for key, label in section["items"]:
                 is_active = selected == key
-                if st.button(label, key=f"nav_{key}", use_container_width=True,
-                             type="primary" if is_active else "secondary"):
+                coming_soon = key in ("heat_rooms",)
+                btn_label = label + "  · soon" if coming_soon else label
+                if st.button(btn_label, key=f"nav_{key}", use_container_width=True,
+                             type="primary" if is_active else "secondary",
+                             disabled=coming_soon):
                     st.session_state.selected_feature = key
                     if key != "onboarding":
                         st.session_state.onboarding_done = True
