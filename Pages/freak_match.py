@@ -38,9 +38,16 @@ def freak_match_page(user_id: int):
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:3px solid var(--amber); border-radius:4px; padding:20px 22px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--amber); margin-bottom:8px;">NOT ENOUGH DATA</div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text); line-height:1.65;">
-    Answer at least 5 hot takes first. Log a session and respond to the scenario cards that appear.
+              text-transform:uppercase; color:var(--amber); margin-bottom:8px;">NOT ENOUGH DATA YET</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text); line-height:1.65; margin-bottom:14px;">
+    Your Freak Score needs at least 5 responses to activate.
+  </div>
+  <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted); letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">How to unlock:</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); line-height:1.8;">
+    1. Go to <strong style="color:var(--text);">Dashboard → Log Session</strong> (or hit the ＋ button)<br>
+    2. Submit a log — a scenario card appears below it<br>
+    3. Answer <strong style="color:var(--text);">That's me</strong> or <strong style="color:var(--text);">Nah</strong> — that's one hot take<br>
+    4. Repeat across 5 sessions. Your Freak Score builds automatically.
   </div>
 </div>
 """)

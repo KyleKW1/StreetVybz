@@ -292,6 +292,13 @@ def maybe_render_hot_take(vice: str, user_id: int):
             st.session_state.shadow_mode_on = not st.session_state.get("shadow_mode_on", False)
             st.session_state.ht_scenario    = None
             st.rerun()
+    elif freak_pct >= 40:
+        st.html(f"""
+<div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:8px;">
+  🔒 Shadow Mode unlocks at Freak Score 60 — you're at {freak_pct}
+</div>
+""")
 
     if st.session_state.get("ht_dismissed"):
         return

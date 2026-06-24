@@ -181,6 +181,32 @@ def render_quick_log():
 
     st.html("<div style='height:1px; background:var(--border); margin:16px 0;'></div>")
 
+    # First-time callout — explains hot takes exist
+    uid = _current_user_id()
+    if uid and not st.session_state.get("ht_answered") and not st.session_state.get("_ht_hint_dismissed"):
+        try:
+            import database as db
+            rows = db.load_interactions(uid, "hot_take")
+            answered = len(rows)
+        except Exception:
+            answered = 0
+        if answered < 5:
+            remaining = 5 - answered
+            st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-left:3px solid var(--magenta); border-radius:4px;
+            padding:14px 18px; margin-bottom:16px; display:flex; gap:14px; align-items:flex-start;">
+  <div style="font-size:20px; flex-shrink:0;">🔥</div>
+  <div>
+    <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+                text-transform:uppercase; color:var(--magenta); margin-bottom:4px;">Hot Takes · {answered}/5 answered</div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.6;">
+      Log a session above — a scenario card drops below it. Answer it honestly.
+      {remaining} more to unlock your Freak Score and Freak Match.
+    </div>
+  </div>
+</div>
+""")
 
 # ─── AI WEEKLY REFLECTION ─────────────────────────────────────────────────────
 
