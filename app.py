@@ -462,6 +462,15 @@ def main():
     st.session_state.setdefault("selected_feature", "stats")
     st.session_state.setdefault("onboarding_done", False)
 
+    # Route new/empty users to onboarding automatically
+    if not st.session_state.get("onboarding_done"):
+        try:
+            from Pages.onboarding import should_show_onboarding
+            if should_show_onboarding():
+                st.session_state.selected_feature = "onboarding"
+        except Exception:
+            pass
+
     # ── THIS WAS MISSING — nothing rendered after login ──
     _inject_floating_log_btn()
     _render_sidebar()
