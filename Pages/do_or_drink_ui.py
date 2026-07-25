@@ -71,14 +71,14 @@ def render_setup():
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
               text-transform:uppercase; color:var(--muted); margin-bottom:6px;">
-    Vice Vault · Party Mode
+    Hidden · Party Mode
   </div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:56px; color:var(--text);
               letter-spacing:3px; line-height:0.9;">
     DO OR<br><span style="color:var(--lime);">DRINK</span>
   </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-top:8px;">
-    AI reads your vault. Your habits become the dares. Yuh brave?
+    AI reads your logs. Your habits become the dares. Yuh brave?
   </div>
 </div>
 """)
@@ -280,7 +280,7 @@ def render_setup():
             vice_parts = [f"{_VICE_LABELS.get(vk, vk)}: *hidden*" for vk in counts.keys()]
             if quiz.get("profile_name"):
                 vice_parts.append(f"profile: {quiz['profile_name']}")
-            vice_str   = "  ·  ".join(vice_parts) if vice_parts else "No vault data — generic dares"
+            vice_str   = "  ·  ".join(vice_parts) if vice_parts else "No log data — generic dares"
             host_badge = " · HOST" if p.get("is_host") else ""
             d_color    = "var(--lime)" if has_d else "var(--muted)"
             st.html(f"""
@@ -303,7 +303,7 @@ def render_setup():
 
     st.html("<div style='height:6px'></div>")
     new_username = st.text_input(
-        "Add player by username", placeholder="Their ViceVault username", key="dod_add_input")
+        "Add player by username", placeholder="Their Hidden username", key="dod_add_input")
     if st.button("Add Player →", key="dod_add_btn"):
         uname = new_username.strip()
         if not uname:
@@ -313,7 +313,7 @@ def render_setup():
         else:
             user = _db("get_user_by_username", uname)
             if not user:
-                st.error(f"Can't find '{uname}' — they need a ViceVault account.")
+                st.error(f"Can't find '{uname}' — they need a Hidden account.")
             else:
                 uid = user["id"]
                 st.session_state.dod_players.append({
@@ -332,12 +332,12 @@ def render_setup():
         all_have     = len(with_data) == n_players
         any_have     = len(with_data) > 0
         if all_have:
-            smsg, scol = "✓ All players have vault data — fully personalised dares.", "var(--lime)"
+            smsg, scol = "✓ All players have log data — fully personalised dares.", "var(--lime)"
         elif any_have:
             names      = ", ".join(p["username"] for p in with_data)
             smsg, scol = f"◈ {names} {'has' if len(with_data)==1 else 'have'} data — shaping the whole game.", "var(--amber)"
         else:
-            smsg, scol = "◇ No vault data — sharp generic Caribbean dares for everyone.", "var(--muted)"
+            smsg, scol = "◇ No log data — sharp generic Caribbean dares for everyone.", "var(--muted)"
 
         st.html(f"""
 <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px;
@@ -367,7 +367,7 @@ def render_setup():
             border:1px solid var(--border); border-radius:3px; text-align:center;">
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted); line-height:1.9;">
-    12 dares per player · AI reads each player's vault and desire profile.<br>
+    12 dares per player · AI reads each player's logs and desire profile.<br>
     30-second dare timer · Skipped cards return to the deck.
   </div>
 </div>

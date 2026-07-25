@@ -371,13 +371,13 @@ def _handle_query_params():
 
 def _send_invite_email(sender_username, recipient_email, confession_code):
     """Send confession invite email."""
-    base_url = st.secrets.get("APP_URL", "https://yourvicevault.app")
+    base_url = st.secrets.get("APP_URL", "https://vivevaultapps.streamlit.app")
     link = f"{base_url}/?invite={confession_code}"
     try:
         import email_service
         return email_service.send_transactional_email(
             to=recipient_email,
-            subject=f"{sender_username} sent you a confession on Vice Vault",
+            subject=f"{sender_username} sent you a confession on Hidden",
             html=f'<p>{sender_username} wants to exchange confessions. <a href="{link}">Accept here</a></p>',
         )
     except Exception:
@@ -386,7 +386,7 @@ def _send_invite_email(sender_username, recipient_email, confession_code):
 
 def _show_invite_link(confession_code):
     """Show shareable invite link."""
-    base_url = st.secrets.get("APP_URL", "https://yourvicevault.app")
+    base_url = st.secrets.get("APP_URL", "https://vivevaultapps.streamlit.app")
     link = f"{base_url}/?invite={confession_code}"
     st.html(f"""
 <div style="background:#0f1a10;border:1px solid var(--lime);border-radius:4px;padding:16px 18px;margin-top:12px;">
@@ -423,7 +423,7 @@ def _render_compose():
 </div>
 """)
 
-    invite_mode = st.toggle("Recipient isn't on ViceVault? Invite by email",
+    invite_mode = st.toggle("Recipient isn't on Hidden? Invite by email",
                              key=f"conf_invite_toggle_{gen}", value=st.session_state.conf_invite_mode)
     st.session_state.conf_invite_mode = invite_mode
 
@@ -433,7 +433,7 @@ def _render_compose():
     else:
         _prefill = st.session_state.pop("conf_prefill", "") or ""
         recipient_username = st.text_input("Send to (username)", value=_prefill,
-                                            placeholder="Their ViceVault username", key=f"conf_recipient_{gen}")
+                                            placeholder="Their Hidden username", key=f"conf_recipient_{gen}")
         recipient_email = None
 
     window_label = st.selectbox("Auto-delete after reveal", list(_WINDOW_OPTIONS.keys()),
@@ -871,7 +871,7 @@ def _render_friends():
             st.warning(f"Could not load your stats: {e}")
             my_stats = {}
 
-        st.html('<div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:16px;">Vault Compare</div>')
+        st.html('<div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:16px;">Stats Compare</div>')
         col_me, col_them = st.columns(2)
         with col_me:
             _render_compare_panel(my_stats or {"username": _username()}, "You", is_me=True)
@@ -983,13 +983,13 @@ def _render_friends():
                         st.error("Could not remove friend.")
             st.html("<div style='height:8px'></div>")
     else:
-        st.html('<div style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:48px;text-align:center;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:24px;letter-spacing:3px;color:var(--muted);margin-bottom:8px;">NO FRIENDS YET</div><div style="font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--muted);">Add someone below — they\'ll see your vault stats once both sides accept.</div></div>')
+        st.html('<div style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:48px;text-align:center;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:24px;letter-spacing:3px;color:var(--muted);margin-bottom:8px;">NO FRIENDS YET</div><div style="font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--muted);">Add someone below — they\'ll see your stats once both sides accept.</div></div>')
 
     # ── Add friend ────────────────────────────────────────────────────────────
     st.html("<div style='height:1px;background:var(--border);margin:20px 0;'></div>")
     _section_label("Add a Friend")
     gen = st.session_state.friend_add_gen
-    uname_input = st.text_input("Username", placeholder="Their ViceVault username", key=f"friend_add_input_{gen}")
+    uname_input = st.text_input("Username", placeholder="Their Hidden username", key=f"friend_add_input_{gen}")
     if st.button("Send Friend Request →", type="primary", use_container_width=True, key=f"friend_add_btn_{gen}"):
         uname = (uname_input or "").strip()
         if not uname:
@@ -1058,7 +1058,7 @@ def confessions_page():
 
     st.html("""
 <div style="border-bottom:1px solid var(--border);padding-bottom:20px;margin-bottom:28px;">
-  <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:4px;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Vice Vault · Social</div>
+  <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:4px;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Hidden · Social</div>
   <div class="glitch-wrap" data-text="CONFESSIONS" style="font-family:'Bebas Neue',sans-serif;font-size:48px;color:var(--text);letter-spacing:3px;line-height:0.95;">CONFESSIONS</div>
   <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--muted);margin-top:6px;">Mutual. Blind. Nobody blinks first — because neither of you can.</div>
 </div>

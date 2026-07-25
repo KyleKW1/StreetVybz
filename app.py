@@ -1,12 +1,12 @@
 """
-app.py — ViceVault main entry point.
+app.py — Hidden main entry point.
 """
 
 import streamlit as st
 from styles import apply_custom_styles, inject_page_css, reset_css_flag
 
 st.set_page_config(
-    page_title="ViceVault",
+    page_title="Hidden",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -64,7 +64,7 @@ def _prewarm_quiz():
         sub  = random.choice(subs)
         r    = requests.get(
             f"https://www.reddit.com/r/{sub}/hot.json?limit=10",
-            headers={"User-Agent": "ViceVault/1.0"}, timeout=5,
+            headers={"User-Agent": "Hidden/1.0"}, timeout=5,
         )
         if r.ok:
             return [p["data"] for p in r.json()["data"]["children"] if not p["data"].get("over_18")]
@@ -75,7 +75,7 @@ def _prewarm_quiz():
 
 NAV_SECTIONS = [
     {
-        "label": "Vault",
+        "label": "Your Log",
         "items": [
             ("stats",     "◈  Dashboard"),
             ("log",       "＋  Log Session"),
@@ -148,7 +148,7 @@ def _render_sidebar():
         st.html(f"""
 <div style="padding:16px 0 20px; border-bottom:1px solid var(--border); margin-bottom:20px;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:26px; color:var(--lime);
-              letter-spacing:3px; line-height:1;">VICEVAULT</div>
+              letter-spacing:3px; line-height:1;">HIDDEN</div>
   <div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
     <div style="width:28px; height:28px; border-radius:50%; background:{avatar_col};
                 display:flex; align-items:center; justify-content:center; flex-shrink:0;">
@@ -275,7 +275,7 @@ def _login_page():
     st.html("""
 <div style="max-width:400px; margin:60px auto 0; text-align:center; margin-bottom:32px;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:60px; color:var(--lime);
-              letter-spacing:4px; line-height:0.9;">VICE<br>VAULT</div>
+              letter-spacing:4px; line-height:0.9;">HID<br>DEN</div>
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted); margin-top:10px;">
     Your vice. Your data. Private.

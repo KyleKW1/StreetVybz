@@ -273,7 +273,7 @@ def patch_dod():
         '''            vice_parts = [f"{_VICE_LABELS.get(vk, vk)}: *hidden*" for vk in counts.keys()]
             if quiz.get("profile_name"):
                 vice_parts.append(f"profile: {quiz['profile_name']}")
-            vice_str   = "  ·  ".join(vice_parts) if vice_parts else "No vault data — generic dares"
+            vice_str   = "  ·  ".join(vice_parts) if vice_parts else "No log data — generic dares"
             host_badge = " · HOST" if p.get("is_host") else ""
             d_color    = "var(--lime)" if has_d else "var(--muted)"
             st.html(f"""
@@ -287,7 +287,7 @@ def patch_dod():
         '''            vice_parts = [f"{_VICE_LABELS.get(vk, vk)}: *hidden*" for vk in counts.keys()]
             if quiz.get("profile_name"):
                 vice_parts.append(f"profile: {_html.escape(str(quiz['profile_name']))}")
-            vice_str   = "  ·  ".join(vice_parts) if vice_parts else "No vault data — generic dares"
+            vice_str   = "  ·  ".join(vice_parts) if vice_parts else "No log data — generic dares"
             host_badge = " · HOST" if p.get("is_host") else ""
             d_color    = "var(--lime)" if has_d else "var(--muted)"
             uname_safe = _html.escape(p['username'])

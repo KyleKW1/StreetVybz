@@ -32,7 +32,7 @@ def _get_pool():
         return None
     try:
         return pooling.MySQLConnectionPool(
-            pool_name="vicevault",
+            pool_name="hidden",
             pool_size=5,
             pool_reset_session=True,
             host=DB_CONFIG.get("host", ""),

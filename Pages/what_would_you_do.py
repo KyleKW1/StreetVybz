@@ -7,7 +7,7 @@ All scenarios, questions, and answers are gender-neutral and orientation-inclusi
 No he/she/him/her/boyfriend/girlfriend anywhere.
 
 Community Pulse: after answering each question the user sees an anonymous
-breakdown of how other ViceVault users responded.
+breakdown of how other Hidden users responded.
 """
 
 import hashlib
@@ -605,7 +605,7 @@ def generate_profile_and_categories(result_type, openness_pct, hd_answers,
     mild_signals   = [q["signal"] for q in HIDDEN_DESIRE_QUESTIONS if hd_answers.get(q["id"]) == "yes"]
 
     prompt = (
-        f"You are a desire profile analyst for an 18+ adult platform called Vice Vault.\n"
+        f"You are a desire profile analyst for an 18+ adult platform called Hidden.\n"
         f"Write a profile that feels uncomfortably accurate — like it was written specifically for this person.\n\n"
         f"User data:\n"
         f"- Openness archetype: {result_type['name']} ({openness_pct}% openness index)\n"
@@ -812,7 +812,7 @@ def _render_header():
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
               text-transform:uppercase; color:var(--muted); margin-bottom:6px;">
-    Vice Vault · Desire Quiz
+    Hidden · Desire Quiz
   </div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(44px,9vw,68px);
               color:var(--text); letter-spacing:3px; line-height:0.92; margin-bottom:6px;">
@@ -1253,7 +1253,7 @@ def render_quiz():
                 color:#fff; display:flex; align-items:center; justify-content:center;
                 font-family:'DM Sans',sans-serif; font-size:12px; font-weight:700; flex-shrink:0;">V</div>
     <div style="flex:1; min-width:0;">
-      <div style="font-family:'Space Mono',monospace; font-size:10px; color:var(--magenta);">Vice Vault</div>
+      <div style="font-family:'Space Mono',monospace; font-size:10px; color:var(--magenta);">Hidden</div>
       <div style="font-family:'DM Sans',sans-serif; font-size:10px; color:var(--muted);">anonymous · now</div>
     </div>
     <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
@@ -1709,7 +1709,7 @@ def render_result():
 """)
 
     share = (
-        f"Read Between The Lines — Vice Vault\n\n"
+        f"Read Between The Lines — Hidden\n\n"
         f"Result: {result_type['name']}\n\"{result_type['meta']}\"\n"
         f"Openness Index: {pct}%\n\n"
         f"{result_type.get('hook','')}\n{result_type.get('signal','')}\n{result_type.get('tell','')}\n"

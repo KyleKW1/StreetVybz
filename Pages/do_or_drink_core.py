@@ -311,7 +311,7 @@ def _dare_json_schema(mode: str) -> str:
 
 def _prompt_personalised(player_name: str, vice_summary: dict, mode: str, n: int = 12) -> str:
     return (
-        f"You write dare cards for ViceVault 'Do or Drink' — a Caribbean party game "
+        f"You write dare cards for Hidden 'Do or Drink' — a Caribbean party game "
         f"(Jamaica/English Caribbean).\n"
         f"Tone: direct, seductive where needed, a little savage, real. "
         f"Natural Caribbean cadence where it fits — not forced patois.\n\n"
@@ -327,7 +327,7 @@ def _prompt_personalised(player_name: str, vice_summary: dict, mode: str, n: int
 
 def _prompt_group_shaped(player_name: str, group_profile: dict, mode: str, n: int = 12) -> str:
     return (
-        f"You write dare cards for ViceVault 'Do or Drink' — a Caribbean party game "
+        f"You write dare cards for Hidden 'Do or Drink' — a Caribbean party game "
         f"(Jamaica/English Caribbean).\n"
         f"Tone: direct, seductive where needed, a little savage, real.\n\n"
         f"Player: {player_name}\n"
@@ -344,7 +344,7 @@ def _prompt_group_shaped(player_name: str, group_profile: dict, mode: str, n: in
 
 def _prompt_generic(player_name: str, mode: str, n: int = 12) -> str:
     return (
-        f"You write dare cards for ViceVault 'Do or Drink' — a Caribbean party game "
+        f"You write dare cards for Hidden 'Do or Drink' — a Caribbean party game "
         f"(Jamaica/English Caribbean).\n"
         f"Tone: direct, seductive where needed, a little savage, real.\n\n"
         f"Player: {player_name}\n"

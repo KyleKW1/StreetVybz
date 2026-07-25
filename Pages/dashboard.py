@@ -124,7 +124,7 @@ def page_masthead(title, subtitle=""):
     st.html(f"""
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Vice Vault</div>
+              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Hidden</div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:var(--text);
               letter-spacing:3px; line-height:0.95;">{title}</div>
   {sub_html}
@@ -218,7 +218,7 @@ def render_quick_log():
 
 _STATIC_NUDGES = [
     "Patterns become visible when there's data to read. The first few logs are the hardest — after that it runs itself.",
-    "The vault only works if you're honest with it. Nothing here gets shared.",
+    "Hidden only works if you're honest with it. Nothing here gets shared.",
     "You're tracking something most people don't even admit to themselves. That's already something.",
 ]
 

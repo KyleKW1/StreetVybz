@@ -62,7 +62,7 @@ def profile_page():
                 letter-spacing:2px; line-height:1;">{username.upper()}</div>
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
                 text-transform:uppercase; color:var(--muted); margin-top:4px;">
-      Vice Vault · {len(log)} sessions logged
+      Hidden · {len(log)} sessions logged
     </div>
   </div>
 </div>
@@ -72,7 +72,7 @@ def profile_page():
     if log:
         st.html("""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Vault</div>
+            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">Your Log</div>
 """)
         counts = {}
         for e in log:
@@ -217,7 +217,7 @@ def profile_page():
         top_vice  = max(counts, key=counts.get) if counts else None
         top_icon  = VICE_META.get(top_vice, {}).get("icon", "◈") if top_vice else "◈"
 
-        share_text = f"ViceVault — {username}\n"
+        share_text = f"Hidden — {username}\n"
         share_text += f"Sessions logged: {len(log)}\n"
         if top_vice:
             share_text += f"Most logged: {top_icon} {VICE_META[top_vice]['label']}\n"
@@ -232,7 +232,7 @@ def profile_page():
         st.download_button(
             "↓ Share my stats",
             data=share_text,
-            file_name="vicevault_profile.txt",
+            file_name="hidden_profile.txt",
             mime="text/plain",
             use_container_width=True,
         )

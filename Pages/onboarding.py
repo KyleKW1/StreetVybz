@@ -45,7 +45,7 @@ def _step_0():
 <div style="text-align:center; padding:20px 0 32px;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:56px; color:var(--lime);
               letter-spacing:4px; line-height:0.9; margin-bottom:12px;">
-    VICE<span style="color:var(--text);">VAULT</span>
+    HID<span style="color:var(--text);">DEN</span>
   </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:16px; color:var(--soft);
               line-height:1.8; max-width:420px; margin:0 auto 28px;">
@@ -83,7 +83,7 @@ def _step_0():
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
                 text-transform:uppercase; color:var(--soft); margin-bottom:4px;">Play</div>
     <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
-      Do or Drink, Confessions, Read Between The Lines — the vault feeds all of it.
+      Do or Drink, Confessions, Read Between The Lines — your logs feed all of it.
     </div>
   </div>
   <div style="background:var(--card); border:1px solid var(--border);
@@ -189,7 +189,7 @@ def _step_2():
               letter-spacing:3px; margin-bottom:12px;">YOU'RE IN</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:15px; color:var(--soft);
               line-height:1.8; max-width:400px; margin:0 auto 32px;">
-    Your vault is open. Log whenever, as honest as you like.
+    Hidden is yours now. Log whenever, as honest as you like.
   </div>
 </div>
 
@@ -210,7 +210,7 @@ def _step_2():
   </div>
   <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
               padding:12px 16px; font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
-    🃏 <strong style="color:var(--text);">Do or Drink</strong> — AI turns your vault into personalised dares
+    🃏 <strong style="color:var(--text);">Do or Drink</strong> — AI turns your logs into personalised dares
   </div>
 </div>
 """)

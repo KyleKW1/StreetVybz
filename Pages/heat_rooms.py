@@ -7,7 +7,7 @@ ROOMS = [
     {"key": "room_weed",    "label": "Hotbox",       "vice": "weed",    "icon": "🌿", "color": "var(--lime)",    "desc": "Weed talk. Stay paranoid."},
     {"key": "room_sex",     "label": "The Suite",    "vice": "sex",     "icon": "🔥", "color": "var(--magenta)", "desc": "18+. Anonymous. Honest."},
     {"key": "room_other",   "label": "The Drop",     "vice": "other",   "icon": "💊", "color": "#00e5ff",        "desc": "Everything else."},
-    {"key": "room_vault",   "label": "The Vault",    "vice": None,      "icon": "◈",  "color": "var(--lime)",    "desc": "General. For the bold."},
+    {"key": "room_vault",   "label": "The Hideout",    "vice": None,      "icon": "◈",  "color": "var(--lime)",    "desc": "General. For the bold."},
 ]
 
 
@@ -46,7 +46,7 @@ def _render_room_list(user_id: int, db):
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
               text-transform:uppercase; color:var(--muted); margin-bottom:6px;">
-    Vice Vault · Anonymous Rooms
+    Hidden · Anonymous Rooms
   </div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(40px,8vw,62px);
               color:var(--text); letter-spacing:3px; line-height:0.92; margin-bottom:6px;">
