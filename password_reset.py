@@ -157,7 +157,7 @@ def _send_email(to_email: str, token=None, reset_type="password") -> bool:
         msg["To"]   = to_email
         if reset_type == "password":
             msg["Subject"] = "Hidden — Password Reset"
-            reset_url = f"https://testrun01.streamlit.app/?reset_token={token}"
+            reset_url = f"https://vivevaultapps.streamlit.app/?reset_token={token}"
             body = (
                 f"Click the link below to reset your password (valid 1 hour):\n\n"
                 f"{reset_url}\n\n"
