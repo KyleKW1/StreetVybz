@@ -1,6 +1,6 @@
 """
 fix_security.py
-Security fixes for ViceVault. Run from project root, AFTER (or before —
+Security fixes for Hidden. Run from project root, AFTER (or before —
 order doesn't matter, every patch is idempotent) apply_patches.py:
 
     python apply_patches.py

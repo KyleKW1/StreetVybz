@@ -1,12 +1,12 @@
 """
-app.py — ViceVault main entry point.
+app.py — Hidden main entry point.
 """
 
 import streamlit as st
 from styles import apply_custom_styles, inject_page_css, reset_css_flag
 
 st.set_page_config(
-    page_title="ViceVault",
+    page_title="Hidden",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -64,7 +64,7 @@ def _prewarm_quiz():
         sub  = random.choice(subs)
         r    = requests.get(
             f"https://www.reddit.com/r/{sub}/hot.json?limit=10",
-            headers={"User-Agent": "ViceVault/1.0"}, timeout=5,
+            headers={"User-Agent": "Hidden/1.0"}, timeout=5,
         )
         if r.ok:
             return [p["data"] for p in r.json()["data"]["children"] if not p["data"].get("over_18")]
@@ -75,7 +75,7 @@ def _prewarm_quiz():
 
 NAV_SECTIONS = [
     {
-        "label": "Vault",
+        "label": "Your Log",
         "items": [
             ("stats",     "◈  Dashboard"),
             ("log",       "＋  Log Session"),
@@ -86,10 +86,12 @@ NAV_SECTIONS = [
     {
         "label": "Features",
         "items": [
-            ("rbtl",      "⚡  Read Between The Lines"),
-            ("hotspots",  "📍  Where To Go Tonight"),
-            ("dod",       "🃏  Do or Drink"),
-            ("confess",   "◎  Confessions"),
+            ("rbtl",        "⚡  Read Between The Lines"),
+            ("hotspots",    "📍  Where To Go Tonight"),
+            ("dod",         "🃏  Do or Drink"),
+            ("confess",     "◎  Confessions"),
+            ("freak_match", "⬡  Freak Match"),
+            ("heat_rooms",  "◎  Heat Rooms"),
         ],
     },
     {
@@ -108,19 +110,54 @@ def _render_sidebar():
         user     = st.session_state.get("user", {})
         uname    = _html.escape(user.get("username", "—"))
         initials = uname[:2].upper()
+        uid      = user.get("id")
+
+        freak_score = st.session_state.get("_sidebar_freak_score")
+        freak_color = st.session_state.get("_sidebar_freak_color", "var(--lime)")
+        freak_label = st.session_state.get("_sidebar_freak_label", "")
+        if freak_score is None and uid:
+            try:
+                from Pages.vice_hot_takes import compute_freak_score
+                fk = compute_freak_score(uid)
+                if fk:
+                    freak_score = fk["freak_pct"]
+                    freak_color = fk["color"]
+                    freak_label = fk["label"]
+                    st.session_state["_sidebar_freak_score"] = freak_score
+                    st.session_state["_sidebar_freak_color"] = freak_color
+                    st.session_state["_sidebar_freak_label"] = freak_label
+            except Exception:
+                pass
+
+        meter_pct  = freak_score if freak_score else 0
+        avatar_col = freak_color if freak_score else "var(--lime)"
+        freak_html = ""
+        if freak_score is not None:
+            freak_html = f"""
+<div style="margin-top:8px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+    <div style="font-family:'Space Mono',monospace;font-size:7px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);">Freak Score</div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;color:{freak_color};line-height:1;">{freak_score}<span style="font-size:8px;color:var(--muted);"> /100</span></div>
+  </div>
+  <div style="height:2px;background:var(--border);border-radius:1px;">
+    <div style="width:{meter_pct}%;height:100%;background:{freak_color};border-radius:1px;transition:width 0.6s ease;"></div>
+  </div>
+  <div style="font-family:'Space Mono',monospace;font-size:7px;color:{freak_color};text-transform:uppercase;letter-spacing:1px;margin-top:2px;">{freak_label}</div>
+</div>"""
 
         st.html(f"""
 <div style="padding:16px 0 20px; border-bottom:1px solid var(--border); margin-bottom:20px;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:26px; color:var(--lime);
-              letter-spacing:3px; line-height:1;">VICEVAULT</div>
+              letter-spacing:3px; line-height:1;">HIDDEN</div>
   <div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
-    <div style="width:28px; height:28px; border-radius:50%; background:var(--lime);
+    <div style="width:28px; height:28px; border-radius:50%; background:{avatar_col};
                 display:flex; align-items:center; justify-content:center; flex-shrink:0;">
       <span style="font-family:'Bebas Neue',sans-serif; font-size:12px; color:#0a0a0b;">{initials}</span>
     </div>
     <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--soft);
                 letter-spacing:1px; text-transform:uppercase;">{uname}</div>
   </div>
+  {freak_html}
 </div>
 """)
 
@@ -147,8 +184,11 @@ section[data-testid="stSidebar"] .stButton > button {
 """)
             for key, label in section["items"]:
                 is_active = selected == key
-                if st.button(label, key=f"nav_{key}", use_container_width=True,
-                             type="primary" if is_active else "secondary"):
+                coming_soon = key in ("heat_rooms",)
+                btn_label = label + "  · soon" if coming_soon else label
+                if st.button(btn_label, key=f"nav_{key}", use_container_width=True,
+                             type="primary" if is_active else "secondary",
+                             disabled=coming_soon):
                     st.session_state.selected_feature = key
                     if key != "onboarding":
                         st.session_state.onboarding_done = True
@@ -195,6 +235,12 @@ def _render_feature(feature: str):
         from Pages.onboarding import onboarding_page; onboarding_page()
     elif feature == "quick_log":
         from Pages.dashboard import log_session_page; log_session_page()
+    elif feature == "freak_match":
+        uid = st.session_state.get("user", {}).get("id")
+        from Pages.freak_match import freak_match_page; freak_match_page(uid)
+    elif feature == "heat_rooms":
+        uid = st.session_state.get("user", {}).get("id")
+        from Pages.heat_rooms import heat_rooms_page; heat_rooms_page(uid)
     else:
         from Pages.dashboard import stats_page; stats_page()
 
@@ -229,7 +275,7 @@ def _login_page():
     st.html("""
 <div style="max-width:400px; margin:60px auto 0; text-align:center; margin-bottom:32px;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:60px; color:var(--lime);
-              letter-spacing:4px; line-height:0.9;">VICE<br>VAULT</div>
+              letter-spacing:4px; line-height:0.9;">HID<br>DEN</div>
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted); margin-top:10px;">
     Your vice. Your data. Private.
@@ -346,11 +392,13 @@ def _forgot_page():
 
 
 def _bootstrap_db():
+    if st.session_state.get("_db_bootstrapped"):
+        return
     try:
         import database as db
         db.ensure_tables()
-        # Also ensure the password_resets table exists
         _ensure_password_resets_table()
+        st.session_state["_db_bootstrapped"] = True
     except Exception:
         pass
 
@@ -396,20 +444,32 @@ def main():
         _render_auth()
         return
 
-    # Validate session token on every authenticated page load
-    try:
-        from auth import check_session_valid
-        if not check_session_valid():
-            for k in list(st.session_state.keys()):
-                del st.session_state[k]
-            st.warning("Your session has ended. Please log in again.")
-            _render_auth()
-            return
-    except Exception:
-        pass
+    import time as _t
+    _now = _t.time()
+    if _now - st.session_state.get("_session_checked_at", 0) > 300:
+        try:
+            from auth import check_session_valid
+            if not check_session_valid():
+                for k in list(st.session_state.keys()):
+                    del st.session_state[k]
+                st.warning("Your session has ended. Please log in again.")
+                _render_auth()
+                return
+            st.session_state["_session_checked_at"] = _now
+        except Exception:
+            pass
 
     st.session_state.setdefault("selected_feature", "stats")
     st.session_state.setdefault("onboarding_done", False)
+
+    # Route new/empty users to onboarding automatically
+    if not st.session_state.get("onboarding_done"):
+        try:
+            from Pages.onboarding import should_show_onboarding
+            if should_show_onboarding():
+                st.session_state.selected_feature = "onboarding"
+        except Exception:
+            pass
 
     # ── THIS WAS MISSING — nothing rendered after login ──
     _inject_floating_log_btn()

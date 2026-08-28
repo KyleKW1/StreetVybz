@@ -120,13 +120,14 @@ def all_entries(days: int = 30):
 # ─── SHARED COMPONENTS ────────────────────────────────────────────────────────
 
 def page_masthead(title, subtitle=""):
+    sub_html = f'<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--muted); margin-top:6px;">{subtitle}</div>' if subtitle else ''
     st.html(f"""
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Vice Vault</div>
+              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Hidden</div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:var(--text);
               letter-spacing:3px; line-height:0.95;">{title}</div>
-  {'<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--muted); margin-top:6px;">' + subtitle + '</div>' if subtitle else ''}
+  {sub_html}
 </div>
 """)
 
@@ -171,22 +172,53 @@ def render_quick_log():
             if st.button("＋ Log", key=f"ql_{vk}", use_container_width=True):
                 add_entry(vk, {"method": "Quick log"}, datetime.now())
                 st.session_state.ht_fresh = True
-                try:
-                    from Pages.vice_hot_takes import maybe_render_hot_take
-                    maybe_render_hot_take(vice=vk, user_id=_current_user_id())
-                except Exception:
-                    pass
-                st.toast(f"{v['icon']} Logged!", icon="✓")
+                st.toast(f"{v['icon']} Logged!")
                 st.rerun()
 
     st.html("<div style='height:1px; background:var(--border); margin:16px 0;'></div>")
 
+    # Hot take card — rendered here so it survives the rerun after logging
+    uid = _current_user_id()
+    if uid:
+        try:
+            from Pages.vice_hot_takes import maybe_render_hot_take
+            vice = (st.session_state.get("ht_scenario") or {}).get("vice", "other")
+            maybe_render_hot_take(vice=vice, user_id=uid)
+        except Exception:
+            pass
+
+    # First-time callout — explains hot takes exist
+    uid = _current_user_id()
+    if uid and not st.session_state.get("ht_answered") and not st.session_state.get("_ht_hint_dismissed"):
+        try:
+            import database as db
+            rows = db.load_interactions(uid, "hot_take")
+            answered = len(rows)
+        except Exception:
+            answered = 0
+        if answered < 5:
+            remaining = 5 - answered
+            st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-left:3px solid var(--magenta); border-radius:4px;
+            padding:14px 18px; margin-bottom:16px; display:flex; gap:14px; align-items:flex-start;">
+  <div style="font-size:20px; flex-shrink:0;">🔥</div>
+  <div>
+    <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+                text-transform:uppercase; color:var(--magenta); margin-bottom:4px;">Hot Takes · {answered}/5 answered</div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.6;">
+      Log a session above — a scenario card drops below it. Answer it honestly.
+      {remaining} more to unlock your Freak Score and Freak Match.
+    </div>
+  </div>
+</div>
+""")
 
 # ─── AI WEEKLY REFLECTION ─────────────────────────────────────────────────────
 
 _STATIC_NUDGES = [
     "Patterns become visible when there's data to read. The first few logs are the hardest — after that it runs itself.",
-    "The vault only works if you're honest with it. Nothing here gets shared.",
+    "Hidden only works if you're honest with it. Nothing here gets shared.",
     "You're tracking something most people don't even admit to themselves. That's already something.",
 ]
 
@@ -555,14 +587,18 @@ def render_log_form(vice_key: str):
                  type="primary", use_container_width=True):
         entry_dt = datetime.combine(log_date, log_time)
         add_entry(vice_key, form_data, entry_dt)
-        st.success(f"Logged. {v['icon']}")
+        st.toast(f"{v['icon']} Logged.")
         st.session_state.ht_fresh = True
+        st.rerun()
+
+    # Hot take card — outside button handler so it renders after the rerun
+    uid = _current_user_id()
+    if uid:
         try:
             from Pages.vice_hot_takes import maybe_render_hot_take
-            maybe_render_hot_take(vice=vice_key, user_id=_current_user_id())
+            maybe_render_hot_take(vice=vice_key, user_id=uid)
         except Exception:
             pass
-        st.rerun()
 
 
 def log_session_page():
@@ -606,6 +642,7 @@ def history_page():
         notes    = e["data"].get("notes", "")
         entry_id = e.get("id")
 
+        notes_html = f'<div style="font-family:\'DM Sans\',sans-serif; font-size:11px; color:var(--muted); margin-top:4px; font-style:italic;">"{notes}"</div>' if notes else ''
         col_card, col_del = st.columns([10, 1])
         with col_card:
             st.html(f"""
@@ -620,7 +657,7 @@ def history_page():
   <div style="font-family:'Space Mono',monospace; font-size:10px; color:{v['color']};
               letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">{v['label']}</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft);">{data_str}</div>
-  {f'<div style="font-family:\'DM Sans\',sans-serif; font-size:11px; color:var(--muted); margin-top:4px; font-style:italic;">"{notes}"</div>' if notes else ''}
+  {notes_html}
 </div>
 """)
         with col_del:
@@ -788,6 +825,8 @@ def goals_page():
         over  = current_limit and used > current_limit
         bar_c = "var(--magenta)" if over else color
 
+        progress_bar_html = f'<div style="height:4px; background:var(--border); border-radius:2px; margin-bottom:8px;"><div style="width:{pct:.0f}%; height:100%; background:{bar_c}; border-radius:2px;"></div></div>' if current_limit else ''
+        over_warning_html = '<div style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--magenta); letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">&#9888; Over limit this week</div>' if over else ''
         st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:2px solid {color}; border-radius:4px; padding:14px 16px; margin-bottom:8px;">
@@ -799,8 +838,8 @@ def goals_page():
       <span style="font-size:11px; color:var(--muted);">{v['unit']}</span>
     </div>
   </div>
-  {f'<div style="height:4px; background:var(--border); border-radius:2px; margin-bottom:8px;"><div style="width:{pct:.0f}%; height:100%; background:{bar_c}; border-radius:2px;"></div></div>' if current_limit else ''}
-  {'<div style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--magenta); letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">⚠ Over limit this week</div>' if over else ''}
+  {progress_bar_html}
+  {over_warning_html}
 </div>
 """)
         updated[vk] = st.number_input(

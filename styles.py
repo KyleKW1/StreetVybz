@@ -1,4 +1,4 @@
-# styles.py — ViceVault base styles
+# styles.py — Hidden base styles
 # CSS is injected at most once per Streamlit rerun.
 # Call apply_custom_styles() / inject_page_css() as many times as you like —
 # only the first call in each render cycle actually writes to the DOM.

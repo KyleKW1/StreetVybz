@@ -1,6 +1,6 @@
 # config.py
 """
-Configuration file for ViceVault.
+Configuration file for Hidden.
 Uses Streamlit secrets — NEVER commit credentials!
 """
 
@@ -38,5 +38,5 @@ except Exception:
         'smtp_server': 'smtp.gmail.com', 'smtp_port': 587,
     }
 
-APP_TITLE = "ViceVault"
+APP_TITLE = "Hidden"
 APP_ICON  = "⚡"

@@ -33,7 +33,7 @@ def settings_page():
     st.html("""
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Vice Vault</div>
+              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Hidden</div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:var(--text);
               letter-spacing:3px; line-height:0.95;">SETTINGS</div>
 </div>
@@ -65,7 +65,7 @@ def settings_page():
             st.download_button(
                 "↓ Download data.json",
                 data=json.dumps(data, indent=2, default=str),
-                file_name="vicevault_data.json",
+                file_name="hidden_data.json",
                 mime="application/json",
                 use_container_width=True,
                 key="download_export",

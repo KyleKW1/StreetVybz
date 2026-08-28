@@ -32,15 +32,15 @@ def _get_pool():
         return None
     try:
         return pooling.MySQLConnectionPool(
-            pool_name="vicevault",
-            pool_size=3,
+            pool_name="hidden",
+            pool_size=5,
             pool_reset_session=True,
             host=DB_CONFIG.get("host", ""),
             port=int(DB_CONFIG.get("port", 3306)),
             user=DB_CONFIG.get("user", ""),
             password=DB_CONFIG.get("password", ""),
             database=DB_CONFIG.get("database", ""),
-            connection_timeout=int(DB_CONFIG.get("connection_timeout", 30)),
+            connection_timeout=int(DB_CONFIG.get("connection_timeout", 5)),
             autocommit=False,
             ssl_disabled=bool(DB_CONFIG.get("ssl_disabled", True)),
         )
@@ -67,7 +67,7 @@ def create_connection():
             user=DB_CONFIG.get("user", ""),
             password=DB_CONFIG.get("password", ""),
             database=DB_CONFIG.get("database", ""),
-            connection_timeout=int(DB_CONFIG.get("connection_timeout", 30)),
+            connection_timeout=int(DB_CONFIG.get("connection_timeout", 5)),
             autocommit=False,
             ssl_disabled=bool(DB_CONFIG.get("ssl_disabled", True)),
         )
@@ -779,8 +779,9 @@ def save_read_between_lines_v4(
             )
         )
         conn.commit()
+        new_id = cur.lastrowid
         cur.close()
-        return True
+        return new_id or True
     except Exception as e:
         st.error(f"DB save error (rbtl_v4/{phase}): {e}")
         return False
@@ -2249,6 +2250,357 @@ def get_user_public_stats(user_id: int) -> dict:
             "rbtl_name":      rbtl.get("result_name"),
             "rbtl_openness":  rbtl.get("openness_pct"),
         }
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+
+
+# ─── FREAK MATCH ─────────────────────────────────────────────────────────────
+
+def set_match_visible(user_id: int, visible: bool) -> bool:
+    import json as _json
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute("ALTER TABLE shadow_scores ADD COLUMN IF NOT EXISTS match_visible TINYINT(1) DEFAULT 0")
+            cur.execute("ALTER TABLE shadow_scores ADD COLUMN IF NOT EXISTS match_signals JSON")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        signals = []
+        try:
+            cur.execute(
+                """SELECT dim_scores FROM quiz_results
+                   WHERE user_id = %s AND quiz_type LIKE 'rbtl_v4_%'
+                   ORDER BY completed_at DESC LIMIT 1""",
+                (user_id,)
+            )
+            row = cur.fetchone()
+            if row:
+                ds = row.get("dim_scores") or {}
+                if isinstance(ds, str):
+                    try:
+                        ds = _json.loads(ds)
+                    except Exception:
+                        ds = {}
+                hd = ds.get("hd_signals", "")
+                if hd:
+                    signals = [s.strip() for s in hd.split(",") if s.strip()][:3]
+        except Exception:
+            pass
+
+        cur.execute(
+            """INSERT INTO shadow_scores (user_id, match_visible, match_signals)
+               VALUES (%s, %s, %s)
+               ON DUPLICATE KEY UPDATE
+                 match_visible  = VALUES(match_visible),
+                 match_signals  = VALUES(match_signals)""",
+            (user_id, 1 if visible else 0, _json.dumps(signals))
+        )
+        conn.commit()
+        cur.close()
+        load_freak_matches.clear()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_freak_matches(user_id: int, freak_score: int) -> list:
+    import json as _json
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        lo = max(0, freak_score - 20)
+        hi = min(100, freak_score + 20)
+        cur.execute(
+            """SELECT ss.user_id, ss.freak_score, ss.conflict_idx, ss.match_signals,
+                      u.username
+               FROM shadow_scores ss
+               JOIN users u ON u.id = ss.user_id
+               WHERE ss.match_visible = 1
+                 AND ss.freak_score BETWEEN %s AND %s
+                 AND ss.user_id != %s
+               LIMIT 12""",
+            (lo, hi, user_id)
+        )
+        rows = cur.fetchall()
+        cur.close()
+
+        thresholds = [
+            (20,  "The Innocent",   "var(--lime)"),
+            (40,  "The Curious",    "var(--lime)"),
+            (60,  "The Candid",     "var(--amber)"),
+            (78,  "The Unfiltered", "var(--amber)"),
+            (101, "The Unhinged",   "var(--magenta)"),
+        ]
+
+        result = []
+        for r in rows:
+            fs = r.get("freak_score") or 0
+            label, color = next(
+                ((l, c) for ceil, l, c in thresholds if fs <= ceil),
+                ("The Unhinged", "var(--magenta)")
+            )
+            uname = r.get("username", "?")
+            initials = uname[:2].upper()
+            sigs = r.get("match_signals") or []
+            if isinstance(sigs, str):
+                try:
+                    sigs = _json.loads(sigs)
+                except Exception:
+                    sigs = []
+            result.append({
+                "initials":      initials,
+                "freak_score":   fs,
+                "freak_label":   label,
+                "freak_color":   color,
+                "match_signals": sigs,
+                "conflict_idx":  r.get("conflict_idx") or 0,
+            })
+        return result
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+# ─── COMPATIBILITY DROP ───────────────────────────────────────────────────────
+
+def create_compat_drop(creator_id: int, quiz_result_id: int) -> str | None:
+    import secrets as _secrets
+    conn = create_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS compat_drops (
+                   id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                   code VARCHAR(8) NOT NULL UNIQUE,
+                   creator_id INT NOT NULL,
+                   creator_quiz_id BIGINT NOT NULL,
+                   partner_id INT,
+                   partner_quiz_id BIGINT,
+                   status VARCHAR(16) DEFAULT 'open',
+                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   expires_at DATETIME NOT NULL,
+                   INDEX idx_compat_code (code)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"""
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        for _ in range(10):
+            code = "".join(_secrets.choice(alphabet) for _ in range(6))
+            try:
+                cur.execute(
+                    """INSERT INTO compat_drops (code, creator_id, creator_quiz_id, expires_at)
+                       VALUES (%s, %s, %s, DATE_ADD(NOW(), INTERVAL 7 DAY))""",
+                    (code, creator_id, quiz_result_id)
+                )
+                conn.commit()
+                cur.close()
+                return code
+            except Exception:
+                conn.rollback()
+        cur.close()
+        return None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def get_compat_drop(code: str) -> dict | None:
+    import json as _json
+    conn = create_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT cd.*,
+                      cq.result_name AS creator_result_name,
+                      cq.openness_pct AS creator_openness_pct,
+                      cq.dim_scores AS creator_dim_scores,
+                      pq.result_name AS partner_result_name,
+                      pq.openness_pct AS partner_openness_pct,
+                      pq.dim_scores AS partner_dim_scores
+               FROM compat_drops cd
+               LEFT JOIN quiz_results cq ON cq.id = cd.creator_quiz_id
+               LEFT JOIN quiz_results pq ON pq.id = cd.partner_quiz_id
+               WHERE cd.code = %s""",
+            (code.upper(),)
+        )
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            return None
+        for col in ("creator_dim_scores", "partner_dim_scores"):
+            val = row.get(col)
+            if isinstance(val, str):
+                try:
+                    row[col] = _json.loads(val)
+                except Exception:
+                    row[col] = {}
+        return row
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+def link_compat_drop(code: str, partner_id: int, partner_quiz_id: int) -> bool:
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE compat_drops
+               SET partner_id = %s, partner_quiz_id = %s, status = 'matched'
+               WHERE code = %s AND status = 'open' AND expires_at > NOW()""",
+            (partner_id, partner_quiz_id, code.upper())
+        )
+        conn.commit()
+        changed = cur.rowcount > 0
+        cur.close()
+        get_compat_drop.clear()
+        return changed
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+# ─── HEAT ROOMS ───────────────────────────────────────────────────────────────
+
+def send_heat_room_message(room_key: str, user_id: int, content: str) -> bool:
+    import hashlib as _hashlib
+    conn = create_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS heat_room_messages (
+                   id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                   room_key VARCHAR(32) NOT NULL,
+                   author_hash VARCHAR(8) NOT NULL,
+                   content TEXT NOT NULL,
+                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   expires_at DATETIME NOT NULL,
+                   INDEX idx_hrm_room (room_key, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"""
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        raw = str(user_id) + "vv_salt_2025"
+        author_hash = _hashlib.sha256(raw.encode()).hexdigest()[:8]
+        cur.execute(
+            """INSERT INTO heat_room_messages (room_key, author_hash, content, expires_at)
+               VALUES (%s, %s, %s, DATE_ADD(NOW(), INTERVAL 24 HOUR))""",
+            (room_key, author_hash, content[:500])
+        )
+        conn.commit()
+        cur.close()
+        load_heat_room_messages.clear()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=10, show_spinner=False)
+def load_heat_room_messages(room_key: str, limit: int = 50) -> list:
+    conn = create_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS heat_room_messages (
+                   id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                   room_key VARCHAR(32) NOT NULL,
+                   author_hash VARCHAR(8) NOT NULL,
+                   content TEXT NOT NULL,
+                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   expires_at DATETIME NOT NULL,
+                   INDEX idx_hrm_room (room_key, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"""
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        cur.execute(
+            """SELECT author_hash, content, created_at
+               FROM heat_room_messages
+               WHERE room_key = %s AND expires_at > NOW()
+               ORDER BY created_at DESC LIMIT %s""",
+            (room_key, limit)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        rows.reverse()
+        for r in rows:
+            r["created_at"] = str(r["created_at"])
+        return rows
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_heat_room_counts() -> dict:
+    conn = create_connection()
+    if not conn:
+        return {}
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS heat_room_messages (
+                   id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                   room_key VARCHAR(32) NOT NULL,
+                   author_hash VARCHAR(8) NOT NULL,
+                   content TEXT NOT NULL,
+                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   expires_at DATETIME NOT NULL,
+                   INDEX idx_hrm_room (room_key, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"""
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        cur.execute(
+            """SELECT room_key, COUNT(*) as msg_count
+               FROM heat_room_messages
+               WHERE expires_at > NOW()
+               GROUP BY room_key"""
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return {r[0]: r[1] for r in rows}
     except Exception:
         return {}
     finally:

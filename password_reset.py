@@ -156,8 +156,8 @@ def _send_email(to_email: str, token=None, reset_type="password") -> bool:
         msg["From"] = APP_EMAIL
         msg["To"]   = to_email
         if reset_type == "password":
-            msg["Subject"] = "ViceVault — Password Reset"
-            reset_url = f"https://testrun01.streamlit.app/?reset_token={token}"
+            msg["Subject"] = "Hidden — Password Reset"
+            reset_url = f"https://vivevaultapps.streamlit.app/?reset_token={token}"
             body = (
                 f"Click the link below to reset your password (valid 1 hour):\n\n"
                 f"{reset_url}\n\n"
@@ -167,8 +167,8 @@ def _send_email(to_email: str, token=None, reset_type="password") -> bool:
             username = _get_username_by_email(to_email)
             if not username:
                 return False
-            msg["Subject"] = "ViceVault — Username Recovery"
-            body = f"Your ViceVault username is: {username}"
+            msg["Subject"] = "Hidden — Username Recovery"
+            body = f"Your Hidden username is: {username}"
         msg.set_content(body)
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10) as server:
             server.ehlo()
@@ -249,7 +249,7 @@ def forgot_password_page():
     with col:
         st.html("""
 <div class="vv-card">
-  <div class="vv-wordmark">VICE<span>VAULT</span></div>
+  <div class="vv-wordmark">HID<span>DEN</span></div>
   <p class="vv-tagline">Account Recovery</p>
   <div class="vv-divider"></div>
   <div class="vv-label">Reset password or recover username</div>
@@ -298,7 +298,7 @@ def reset_password_page():
     with col:
         st.html("""
 <div class="vv-card">
-  <div class="vv-wordmark">VICE<span>VAULT</span></div>
+  <div class="vv-wordmark">HID<span>DEN</span></div>
   <p class="vv-tagline">Choose a new password</p>
   <div class="vv-divider"></div>
   <div class="vv-label">Reset password</div>

@@ -7,7 +7,7 @@ All scenarios, questions, and answers are gender-neutral and orientation-inclusi
 No he/she/him/her/boyfriend/girlfriend anywhere.
 
 Community Pulse: after answering each question the user sees an anonymous
-breakdown of how other ViceVault users responded.
+breakdown of how other Hidden users responded.
 """
 
 import hashlib
@@ -583,8 +583,70 @@ def get_scenarios() -> list:
 
 # ─── PROFILE + CATEGORY SCORING ───────────────────────────────────────────────
 
+_SIGNAL_CATEGORY_MAP = {
+    "verbal_arousal":       ["POV", "Solo Female", "Solo Male", "Webcam"],
+    "desired_intensity":    ["Hardcore", "Rough Sex"],
+    "authentic_exposure":   ["Amateur", "Verified Amateurs", "Verified Couples", "Reality"],
+    "power_dynamic":        ["Bondage", "Role Play"],
+    "archetype_attraction": ["MILF", "Mature", "Babe", "Pornstar"],
+    "stranger_fantasy":     ["Casting", "Public", "Massage"],
+    "dom_active":           ["Bondage", "Rough Sex", "Strap On"],
+    "sub_active":           ["Bondage", "Deepthroat", "Rough Sex"],
+    "taboo_arousal":        ["Step Fantasy", "Old/Young (18+)", "Cuckold"],
+    "exhib_active":         ["Public", "Webcam", "Striptease", "Party"],
+    "secret_fantasy":       ["Fetish", "Role Play", "Cosplay"],
+    "group_sex":            ["Threesome", "Orgy", "Gangbang", "Party"],
+    "taboo_fixation":       ["Fetish", "Feet", "Bukkake"],
+    "elaborated_fantasy":   ["Role Play", "Cosplay", "Hentai", "Virtual Reality"],
+    "unnamed_fixation":     ["Fetish", "Compilation"],
+}
+
+
+def _local_profile_and_categories(result_type, openness_pct, hd_answers) -> dict:
+    """No-AI fallback: score categories from hidden-desire signals + openness.
+    Deterministic per answer set so reruns give the same profile."""
+    strong = [q["signal"] for q in HIDDEN_DESIRE_QUESTIONS if hd_answers.get(q["id"]) == "strongly"]
+    mild   = [q["signal"] for q in HIDDEN_DESIRE_QUESTIONS if hd_answers.get(q["id"]) == "yes"]
+
+    seed = hash(tuple(sorted(hd_answers.items()))) & 0xFFFF
+    rng  = random.Random(seed)
+    base = 2 + round(openness_pct / 33)          # 2–5 baseline from openness
+
+    scores = {}
+    for cat in ALL_PLATFORM_CATEGORIES:
+        s = base + rng.randint(-1, 1)
+        for sig in strong:
+            if cat in _SIGNAL_CATEGORY_MAP.get(sig, []):
+                s += 4
+        for sig in mild:
+            if cat in _SIGNAL_CATEGORY_MAP.get(sig, []):
+                s += 2
+        scores[cat] = max(0, min(10, s))
+
+    scored = sorted(
+        [{"name": c, "score": scores[c]} for c in ALL_PLATFORM_CATEGORIES],
+        key=lambda x: -x["score"],
+    )
+    top = [c["name"] for c in scored[:5]]
+    recs = [
+        f"Your strongest pull is toward {top[0]} — lean into it instead of circling it.",
+        f"{top[1]} keeps showing up in your answers. That's not an accident.",
+        f"You'd probably enjoy {top[2]} more than you'd admit out loud.",
+        f"There's a quieter interest in {top[3]} worth exploring on your own terms.",
+        f"{top[4]} is your wildcard — the one you haven't fully named yet.",
+    ]
+    return {
+        "ranked_categories": scored,
+        "top25_names":       [c["name"] for c in scored[:25]],
+        "recommendations":   recs,
+        "insight":           f"You read as {result_type['name']} — {result_type['meta'].lower().rstrip('.')}. The pattern in your answers is more consistent than you think.",
+    }
+
+
 def generate_profile_and_categories(result_type, openness_pct, hd_answers,
                                     questions, answers, client) -> dict:
+    if client is None:
+        return _local_profile_and_categories(result_type, openness_pct, hd_answers)
     pos, neg = [], []
     for qi, ai in enumerate(answers):
         if ai is None or qi >= len(questions): continue
@@ -605,7 +667,7 @@ def generate_profile_and_categories(result_type, openness_pct, hd_answers,
     mild_signals   = [q["signal"] for q in HIDDEN_DESIRE_QUESTIONS if hd_answers.get(q["id"]) == "yes"]
 
     prompt = (
-        f"You are a desire profile analyst for an 18+ adult platform called Vice Vault.\n"
+        f"You are a desire profile analyst for an 18+ adult platform called Hidden.\n"
         f"Write a profile that feels uncomfortably accurate — like it was written specifically for this person.\n\n"
         f"User data:\n"
         f"- Openness archetype: {result_type['name']} ({openness_pct}% openness index)\n"
@@ -630,15 +692,18 @@ def generate_profile_and_categories(result_type, openness_pct, hd_answers,
         f'"recommendations":["...","...","...","...","..."],'
         f'"insight":"..."}}'
     )
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        max_tokens=2200,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    raw  = resp.choices[0].message.content.strip()
-    data = _safe_json(raw)
-    if not isinstance(data, dict):
-        raise ValueError("Profile generation returned invalid JSON")
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            max_tokens=2200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw  = resp.choices[0].message.content.strip()
+        data = _safe_json(raw)
+        if not isinstance(data, dict):
+            raise ValueError("Profile generation returned invalid JSON")
+    except Exception:
+        return _local_profile_and_categories(result_type, openness_pct, hd_answers)
 
     raw_scores = data.get("ranked_categories", {})
     scored = sorted(
@@ -787,6 +852,8 @@ def _save_to_db(phase: str):
             recommendations=st.session_state.get("wwyd_recs",[]),
         )
         st.session_state.wwyd_db_error = "" if saved else f"DB save returned False ({phase})."
+        if saved and isinstance(saved, int):
+            st.session_state.wwyd_last_quiz_id = saved
     except Exception as e:
         st.session_state.wwyd_db_error = f"DB exception ({phase}): {e}"
 
@@ -810,7 +877,7 @@ def _render_header():
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
               text-transform:uppercase; color:var(--muted); margin-bottom:6px;">
-    Vice Vault · Desire Quiz
+    Hidden · Desire Quiz
   </div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(44px,9vw,68px);
               color:var(--text); letter-spacing:3px; line-height:0.92; margin-bottom:6px;">
@@ -824,6 +891,116 @@ def _render_header():
     _show_persistent_db_error()
 
 
+# ─── COMPAT DROP LOOKUP ──────────────────────────────────────────────────────
+
+def _render_drop_code_lookup():
+    with st.expander("◈ Enter a Drop Code", expanded=False):
+        code_input = st.text_input(
+            "Drop Code",
+            max_chars=8,
+            key="wwyd_drop_code_input",
+            label_visibility="collapsed",
+            placeholder="Enter 6-character code…"
+        ).strip().upper()
+
+        if st.button("Compare →", key="wwyd_drop_compare"):
+            if not code_input:
+                return
+            import database as db
+            drop = db.get_compat_drop(code_input)
+            if not drop:
+                st.html("""
+<div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--magenta);
+            letter-spacing:1px;text-transform:uppercase;margin-top:8px;">
+  Code not found or expired.
+</div>
+""")
+                return
+
+            uid = _uid()
+            if uid and drop.get("status") == "open" and drop.get("creator_id") != uid:
+                latest = db.load_latest_rbtl_result(uid)
+                if latest and latest.get("id"):
+                    db.link_compat_drop(code_input, uid, latest["id"])
+                    drop = db.get_compat_drop(code_input) or drop
+
+            c_name   = drop.get("creator_result_name") or "—"
+            c_open   = drop.get("creator_openness_pct") or 0
+            c_ds     = drop.get("creator_dim_scores") or {}
+            p_name   = drop.get("partner_result_name") or "—"
+            p_open   = drop.get("partner_openness_pct") or 0
+            p_ds     = drop.get("partner_dim_scores") or {}
+
+            c_sigs = _extract_signals(c_ds)
+            p_sigs = _extract_signals(p_ds)
+
+            shared    = [s for s in c_sigs if s in p_sigs][:3]
+            diverging = [s for s in c_sigs if s not in p_sigs][:3]
+
+            open_diff   = abs(c_open - p_open)
+            signal_overlap = len(shared)
+            match_pct = max(0, min(100, round(100 - open_diff * 0.5 + signal_overlap * 8)))
+
+            shared_html = "".join(
+                f'<span style="background:rgba(198,255,0,0.1);border:1px solid var(--lime);border-radius:2px;'
+                f'font-family:\'Space Mono\',monospace;font-size:7px;padding:2px 6px;margin:2px;color:var(--lime);">{s}</span>'
+                for s in shared
+            ) or '<span style="font-family:\'Space Mono\',monospace;font-size:8px;color:var(--muted);">None</span>'
+
+            div_html = "".join(
+                f'<span style="background:rgba(255,45,120,0.1);border:1px solid var(--magenta);border-radius:2px;'
+                f'font-family:\'Space Mono\',monospace;font-size:7px;padding:2px 6px;margin:2px;color:var(--magenta);">{s}</span>'
+                for s in diverging
+            ) or '<span style="font-family:\'Space Mono\',monospace;font-size:8px;color:var(--muted);">None</span>'
+
+            st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+            padding:18px 20px; margin-top:12px;">
+  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--muted); margin-bottom:14px;">Compatibility Drop — Results</div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px; padding:12px;">
+      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+                  text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Them</div>
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; color:var(--text);
+                  letter-spacing:1px; margin-bottom:4px;">{c_name}</div>
+      <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--amber);">{c_open}% open</div>
+    </div>
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px; padding:12px;">
+      <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+                  text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">You</div>
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; color:var(--text);
+                  letter-spacing:1px; margin-bottom:4px;">{p_name}</div>
+      <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--amber);">{p_open}% open</div>
+    </div>
+  </div>
+  <div style="text-align:center; margin-bottom:16px;">
+    <div style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:var(--lime);
+                letter-spacing:2px; line-height:1;">{match_pct}%</div>
+    <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);
+                text-transform:uppercase; letter-spacing:2px;">Match</div>
+  </div>
+  <div style="margin-bottom:10px;">
+    <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--lime);
+                letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Shared Signals</div>
+    <div style="display:flex; flex-wrap:wrap; gap:4px;">{shared_html}</div>
+  </div>
+  <div>
+    <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--magenta);
+                letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Diverging</div>
+    <div style="display:flex; flex-wrap:wrap; gap:4px;">{div_html}</div>
+  </div>
+</div>
+""")
+
+
+def _extract_signals(dim_scores: dict) -> list:
+    hd = dim_scores.get("hd_signals", "")
+    if hd:
+        return [s.strip() for s in hd.split(",") if s.strip()]
+    return []
+
+
 # ─── PHASE: START ─────────────────────────────────────────────────────────────
 
 def render_start():
@@ -833,6 +1010,8 @@ def render_start():
 
     if not _uid():
         st.warning("Not logged in — results won't save to your profile.")
+
+    _render_drop_code_lookup()
 
     st.html("""
 <div class="enter-card">
@@ -1088,8 +1267,8 @@ def render_loading():
         st.session_state.wwyd_phase       = "quiz"
         st.rerun()
 
-    except Exception as e:
-        st.session_state.wwyd_error = f"Failed to load: {e}. Please try again."
+    except Exception:
+        st.session_state.wwyd_error = "Couldn't load the scenarios — give it another try."
         st.session_state.wwyd_phase = "start"
         st.rerun()
 
@@ -1139,7 +1318,7 @@ def render_quiz():
                 color:#fff; display:flex; align-items:center; justify-content:center;
                 font-family:'DM Sans',sans-serif; font-size:12px; font-weight:700; flex-shrink:0;">V</div>
     <div style="flex:1; min-width:0;">
-      <div style="font-family:'Space Mono',monospace; font-size:10px; color:var(--magenta);">Vice Vault</div>
+      <div style="font-family:'Space Mono',monospace; font-size:10px; color:var(--magenta);">Hidden</div>
       <div style="font-family:'DM Sans',sans-serif; font-size:10px; color:var(--muted);">anonymous · now</div>
     </div>
     <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
@@ -1348,7 +1527,10 @@ def render_generating_profile():
         result_type = next((r for r in RESULT_TYPES if r["min"] <= total_pts <= r["max"]), RESULT_TYPES[-1])
 
         upd(35, "Reading your hidden desire signals…")
-        client = _get_client()
+        try:
+            client = _get_client()
+        except Exception:
+            client = None
 
         upd(55, "Scoring every category against your profile…")
         profile_data = generate_profile_and_categories(result_type, pct, hd_ans, questions, answers, client)
@@ -1370,8 +1552,8 @@ def render_generating_profile():
         st.session_state.wwyd_phase = "category_selector"
         st.rerun()
 
-    except Exception as e:
-        st.session_state.wwyd_error = f"Couldn't build your profile: {e}"
+    except Exception:
+        st.session_state.wwyd_error = "Couldn't build your profile right now — give it another try in a minute."
         st.session_state.wwyd_phase = "start"
         st.rerun()
 
@@ -1387,6 +1569,11 @@ def render_category_selector():
     result_type = st.session_state.get("wwyd_result_type", {})
     insight     = st.session_state.get("wwyd_insight", "")
 
+    insight_html = ('<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--amber); font-style:italic; line-height:1.6; border-left:2px solid var(--amber); padding-left:12px; margin-bottom:12px;">' + insight + '</div>') if insight else ''
+    rt_icon = result_type.get('icon', '')
+    rt_name = result_type.get('name', '')
+    rt_meta = result_type.get('meta', '')
+    sel_count = len(selected)
     st.html(f"""
 <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
             text-transform:uppercase; color:var(--muted); margin-bottom:6px;">
@@ -1397,11 +1584,11 @@ def render_category_selector():
   <div style="display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
     <div style="flex:1; min-width:200px;">
       <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--text); letter-spacing:2px;">
-        {result_type.get('icon','')} {result_type.get('name','')}
+        {rt_icon} {rt_name}
       </div>
       <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--magenta);
                   letter-spacing:1px; text-transform:uppercase; margin-top:2px;">
-        {result_type.get('meta','')}
+        {rt_meta}
       </div>
     </div>
     <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px;
@@ -1411,7 +1598,7 @@ def render_category_selector():
                   text-transform:uppercase; letter-spacing:1px;">openness %</div>
     </div>
   </div>
-  {f'<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--amber); font-style:italic; line-height:1.6; border-left:2px solid var(--amber); padding-left:12px; margin-bottom:12px;">{insight}</div>' if insight else ''}
+  {insight_html}
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted); line-height:1.65;">
     Every real platform category scored against your answers.
     <span style="color:var(--lime);">Lime = AI top 25 picks for you.</span>
@@ -1420,7 +1607,7 @@ def render_category_selector():
 </div>
 <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
             text-transform:uppercase; color:var(--muted); margin-bottom:14px;">
-  {len(selected)} selected
+  {sel_count} selected
 </div>
 """)
 
@@ -1469,28 +1656,40 @@ def render_result():
     hd_ans      = st.session_state.get("wwyd_hd_answers", {})
     insight     = st.session_state.get("wwyd_insight", "")
 
+    one_line_read_html = (
+        '<div style="background:var(--surface); border:1px solid var(--amber); border-radius:3px; padding:14px 16px; margin-top:4px;">'
+        '<div style="font-family:\'Space Mono\',monospace; font-size:8px; letter-spacing:2px; text-transform:uppercase; color:var(--amber); margin-bottom:6px;">One-line read</div>'
+        f'<div style="font-family:\'DM Sans\',sans-serif; font-size:14px; color:var(--text); font-style:italic; line-height:1.65;">{insight}</div>'
+        '</div>'
+    ) if insight else ''
+    rt_icon = result_type['icon']
+    rt_name = result_type['name'].upper()
+    rt_meta = result_type['meta']
+    rt_hook = result_type.get('hook', '')
+    rt_signal = result_type.get('signal', '')
+    rt_tell = result_type.get('tell', '')
     st.html(f"""
 <div class="enter-card" style="background:var(--card); border:1px solid var(--border);
             border-top:3px solid var(--magenta); border-radius:4px; padding:28px 24px; margin-bottom:14px;">
-  <div style="font-size:42px; margin-bottom:10px;">{result_type['icon']}</div>
+  <div style="font-size:42px; margin-bottom:10px;">{rt_icon}</div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(28px,6vw,46px);
               letter-spacing:3px; color:var(--text); line-height:1.05; margin-bottom:4px;">
-    {result_type['name'].upper()}
+    {rt_name}
   </div>
   <div style="font-family:'Space Mono',monospace; font-size:10px; letter-spacing:2px;
               color:var(--magenta); text-transform:uppercase; margin-bottom:24px;">
-    {result_type['meta']}
+    {rt_meta}
   </div>
   <div style="border-top:1px solid var(--border); padding-top:18px; margin-bottom:16px;">
     <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text);
-                line-height:1.75; margin-bottom:14px;">{result_type.get('hook','')}</div>
+                line-height:1.75; margin-bottom:14px;">{rt_hook}</div>
     <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
                 line-height:1.75; margin-bottom:14px; border-left:2px solid var(--border);
-                padding-left:12px;">{result_type.get('signal','')}</div>
+                padding-left:12px;">{rt_signal}</div>
     <div style="font-family:'Space Mono',monospace; font-size:10px; color:var(--amber);
-                line-height:1.65; letter-spacing:0.5px;">{result_type.get('tell','')}</div>
+                line-height:1.65; letter-spacing:0.5px;">{rt_tell}</div>
   </div>
-  {f'<div style="background:var(--surface); border:1px solid var(--amber); border-radius:3px; padding:14px 16px; margin-top:4px;"><div style="font-family:\'Space Mono\',monospace; font-size:8px; letter-spacing:2px; text-transform:uppercase; color:var(--amber); margin-bottom:6px;">One-line read</div><div style="font-family:\'DM Sans\',sans-serif; font-size:14px; color:var(--text); font-style:italic; line-height:1.65;">{insight}</div></div>' if insight else ''}
+  {one_line_read_html}
   <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px;
               padding:14px; margin-top:16px;">
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
@@ -1578,7 +1777,7 @@ def render_result():
 """)
 
     share = (
-        f"Read Between The Lines — Vice Vault\n\n"
+        f"Read Between The Lines — Hidden\n\n"
         f"Result: {result_type['name']}\n\"{result_type['meta']}\"\n"
         f"Openness Index: {pct}%\n\n"
         f"{result_type.get('hook','')}\n{result_type.get('signal','')}\n{result_type.get('tell','')}\n"
@@ -1595,6 +1794,50 @@ def render_result():
     with col2:
         st.download_button("↓ Save Result", data=share, file_name="rbtl_result.txt",
                            mime="text/plain", use_container_width=True, key="save_result")
+
+    _render_compat_drop_section()
+
+
+def _render_compat_drop_section():
+    uid = _uid()
+    if not uid:
+        return
+
+    quiz_id = st.session_state.get("wwyd_last_quiz_id")
+
+    st.html("""
+<div style="border-top:1px solid var(--border); margin-top:28px; padding-top:24px;">
+  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
+              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Compatibility Drop</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-bottom:16px;
+              line-height:1.65;">
+    Generate a 6-character code. Share it. Someone enters it and sees how your results compare.
+  </div>
+</div>
+""")
+
+    existing_code = st.session_state.get("wwyd_compat_code")
+
+    if existing_code:
+        st.html(f"""
+<div style="background:var(--card); border:1px solid var(--border);
+            border-top:2px solid var(--lime); border-radius:4px;
+            padding:18px 20px; margin-bottom:12px; text-align:center;">
+  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
+              text-transform:uppercase; color:var(--muted); margin-bottom:10px;">Your Drop Code</div>
+  <div style="font-family:'Bebas Neue',sans-serif; font-size:42px; color:var(--lime);
+              letter-spacing:8px; line-height:1;">{existing_code}</div>
+  <div style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);
+              margin-top:8px; letter-spacing:1px; text-transform:uppercase;">Valid for 7 days</div>
+</div>
+""")
+    elif quiz_id:
+        if st.button("◈ Drop Compatibility Code →", use_container_width=True, key="gen_compat_code"):
+            import database as db
+            code = db.create_compat_drop(uid, quiz_id)
+            if code:
+                st.session_state.wwyd_compat_code = code
+                st.rerun()
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
