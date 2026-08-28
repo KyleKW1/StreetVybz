@@ -387,11 +387,9 @@ def render_generating():
 
     try:
         client = get_openai_client()
-    except RuntimeError as e:
-        st.session_state.dod_error = str(e)
-        st.session_state.dod_phase = "setup"
-        st.rerun()
-        return
+    except Exception:
+        # No AI available — the game still runs on the built-in dare deck.
+        client = None
 
     any_has_data  = any(_has_data(p.get("vice_summary", {})) for p in players)
     group_profile = build_group_profile(players) if any_has_data else {}

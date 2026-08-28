@@ -512,11 +512,10 @@ def generate_dares_for_player(
         if dares:
             return dares
         raise ValueError("Parsed 0 valid dares.")
-    except Exception as e:
-        existing = st.session_state.get("dod_error", "")
-        st.session_state.dod_error = (
-            f"{existing}\n[{player_name} · {strategy}] {e}".strip()
-        )
+    except Exception:
+        # AI unavailable (no key / no credits / bad response) — the game still
+        # works on the built-in deck, so don't surface a scary error.
+        st.session_state.dod_error = ""
         return _fallback_dares(player_name, mode)
 
 

@@ -583,8 +583,70 @@ def get_scenarios() -> list:
 
 # ─── PROFILE + CATEGORY SCORING ───────────────────────────────────────────────
 
+_SIGNAL_CATEGORY_MAP = {
+    "verbal_arousal":       ["POV", "Solo Female", "Solo Male", "Webcam"],
+    "desired_intensity":    ["Hardcore", "Rough Sex"],
+    "authentic_exposure":   ["Amateur", "Verified Amateurs", "Verified Couples", "Reality"],
+    "power_dynamic":        ["Bondage", "Role Play"],
+    "archetype_attraction": ["MILF", "Mature", "Babe", "Pornstar"],
+    "stranger_fantasy":     ["Casting", "Public", "Massage"],
+    "dom_active":           ["Bondage", "Rough Sex", "Strap On"],
+    "sub_active":           ["Bondage", "Deepthroat", "Rough Sex"],
+    "taboo_arousal":        ["Step Fantasy", "Old/Young (18+)", "Cuckold"],
+    "exhib_active":         ["Public", "Webcam", "Striptease", "Party"],
+    "secret_fantasy":       ["Fetish", "Role Play", "Cosplay"],
+    "group_sex":            ["Threesome", "Orgy", "Gangbang", "Party"],
+    "taboo_fixation":       ["Fetish", "Feet", "Bukkake"],
+    "elaborated_fantasy":   ["Role Play", "Cosplay", "Hentai", "Virtual Reality"],
+    "unnamed_fixation":     ["Fetish", "Compilation"],
+}
+
+
+def _local_profile_and_categories(result_type, openness_pct, hd_answers) -> dict:
+    """No-AI fallback: score categories from hidden-desire signals + openness.
+    Deterministic per answer set so reruns give the same profile."""
+    strong = [q["signal"] for q in HIDDEN_DESIRE_QUESTIONS if hd_answers.get(q["id"]) == "strongly"]
+    mild   = [q["signal"] for q in HIDDEN_DESIRE_QUESTIONS if hd_answers.get(q["id"]) == "yes"]
+
+    seed = hash(tuple(sorted(hd_answers.items()))) & 0xFFFF
+    rng  = random.Random(seed)
+    base = 2 + round(openness_pct / 33)          # 2–5 baseline from openness
+
+    scores = {}
+    for cat in ALL_PLATFORM_CATEGORIES:
+        s = base + rng.randint(-1, 1)
+        for sig in strong:
+            if cat in _SIGNAL_CATEGORY_MAP.get(sig, []):
+                s += 4
+        for sig in mild:
+            if cat in _SIGNAL_CATEGORY_MAP.get(sig, []):
+                s += 2
+        scores[cat] = max(0, min(10, s))
+
+    scored = sorted(
+        [{"name": c, "score": scores[c]} for c in ALL_PLATFORM_CATEGORIES],
+        key=lambda x: -x["score"],
+    )
+    top = [c["name"] for c in scored[:5]]
+    recs = [
+        f"Your strongest pull is toward {top[0]} — lean into it instead of circling it.",
+        f"{top[1]} keeps showing up in your answers. That's not an accident.",
+        f"You'd probably enjoy {top[2]} more than you'd admit out loud.",
+        f"There's a quieter interest in {top[3]} worth exploring on your own terms.",
+        f"{top[4]} is your wildcard — the one you haven't fully named yet.",
+    ]
+    return {
+        "ranked_categories": scored,
+        "top25_names":       [c["name"] for c in scored[:25]],
+        "recommendations":   recs,
+        "insight":           f"You read as {result_type['name']} — {result_type['meta'].lower().rstrip('.')}. The pattern in your answers is more consistent than you think.",
+    }
+
+
 def generate_profile_and_categories(result_type, openness_pct, hd_answers,
                                     questions, answers, client) -> dict:
+    if client is None:
+        return _local_profile_and_categories(result_type, openness_pct, hd_answers)
     pos, neg = [], []
     for qi, ai in enumerate(answers):
         if ai is None or qi >= len(questions): continue
@@ -630,15 +692,18 @@ def generate_profile_and_categories(result_type, openness_pct, hd_answers,
         f'"recommendations":["...","...","...","...","..."],'
         f'"insight":"..."}}'
     )
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        max_tokens=2200,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    raw  = resp.choices[0].message.content.strip()
-    data = _safe_json(raw)
-    if not isinstance(data, dict):
-        raise ValueError("Profile generation returned invalid JSON")
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            max_tokens=2200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw  = resp.choices[0].message.content.strip()
+        data = _safe_json(raw)
+        if not isinstance(data, dict):
+            raise ValueError("Profile generation returned invalid JSON")
+    except Exception:
+        return _local_profile_and_categories(result_type, openness_pct, hd_answers)
 
     raw_scores = data.get("ranked_categories", {})
     scored = sorted(
@@ -1202,8 +1267,8 @@ def render_loading():
         st.session_state.wwyd_phase       = "quiz"
         st.rerun()
 
-    except Exception as e:
-        st.session_state.wwyd_error = f"Failed to load: {e}. Please try again."
+    except Exception:
+        st.session_state.wwyd_error = "Couldn't load the scenarios — give it another try."
         st.session_state.wwyd_phase = "start"
         st.rerun()
 
@@ -1462,7 +1527,10 @@ def render_generating_profile():
         result_type = next((r for r in RESULT_TYPES if r["min"] <= total_pts <= r["max"]), RESULT_TYPES[-1])
 
         upd(35, "Reading your hidden desire signals…")
-        client = _get_client()
+        try:
+            client = _get_client()
+        except Exception:
+            client = None
 
         upd(55, "Scoring every category against your profile…")
         profile_data = generate_profile_and_categories(result_type, pct, hd_ans, questions, answers, client)
@@ -1484,8 +1552,8 @@ def render_generating_profile():
         st.session_state.wwyd_phase = "category_selector"
         st.rerun()
 
-    except Exception as e:
-        st.session_state.wwyd_error = f"Couldn't build your profile: {e}"
+    except Exception:
+        st.session_state.wwyd_error = "Couldn't build your profile right now — give it another try in a minute."
         st.session_state.wwyd_phase = "start"
         st.rerun()
 
