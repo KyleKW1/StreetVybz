@@ -72,7 +72,7 @@ def tonight_page():
         all_spots = get_all_spots(get_api_key(), city or None,
                                   me.get("lat") if live else None, me.get("lon") if live else None)
 
-    kind = st.segmented_control("Show", ["all", "drinks", "cannabis"], default="all", key="tonight_type",
+    kind = "all" if not all_spots else st.segmented_control("Show", ["all", "drinks", "cannabis"], default="all", key="tonight_type",
                                 format_func=lambda k: {"all": "All", "drinks": "🥃 Drinks",
                                                        "cannabis": "🌿 Cannabis"}[k])
     spots = [s for s in all_spots if kind in (None, "all") or s["type"] == kind]
