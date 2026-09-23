@@ -7,7 +7,7 @@ import time
 import streamlit as st
 
 import social_db
-from matching import rank_candidates, filter_reasons, INTENTS
+from matching import rank_candidates, filter_reasons, quiz_match, INTENTS
 from ui import (esc, header, avatar, intent_chips, lifestyle_chips,
                 score_ring, open_quiz, invite_link)
 
@@ -34,7 +34,16 @@ def _load_queue(uid: int, me: dict) -> list:
     return queue
 
 
-def _card(c: dict):
+def _quiz_chip(c: dict, my_quiz) -> str:
+    """Quiz match % when both took it; otherwise flag that they took it (so you might too)."""
+    if not c.get("quiz"):
+        return ""
+    pct = quiz_match(my_quiz, c["quiz"])
+    return (f'<span class="hd-chip lime">🎯 Quiz match {pct}%</span>' if pct is not None
+            else '<span class="hd-chip lime">🎯 Took the quiz</span>')
+
+
+def _card(c: dict, my_quiz=None):
     reasons = "".join(f"<div>✦ {esc(r)}</div>" for r in c["reasons"])
     why = ('<div class="hd-why"><div class="hd-kicker" style="margin-bottom:6px;">'
            f"Why you'd vibe</div>{reasons}</div>") if reasons else ""
@@ -52,7 +61,7 @@ def _card(c: dict):
     </div>
     {score_ring(c['score'])}
   </div>
-  <div class="hd-chips">{intent_chips(c['shared_intents'])}{lifestyle_chips(c)}</div>
+  <div class="hd-chips">{_quiz_chip(c, my_quiz)}{intent_chips(c['shared_intents'])}{lifestyle_chips(c)}</div>
   {bio}
   {why}
 </div>
@@ -82,13 +91,15 @@ def _its_a_match(m: dict):
             st.rerun()
 
 
-def _quiz_nudge():
+def _quiz_nudge(c: dict):
     # One slim row (text + button side by side, even on phones) so the card stays on screen
+    line = (f"{esc(c['username'])} took it. See your quiz match" if c.get("quiz")
+            else "Take the 5-minute quiz")
     with st.container(key="qnudge"):
         c1, c2 = st.columns([3, 1.3], vertical_alignment="center")
         with c1:
             st.html('<div class="hd-sub" style="line-height:1.35;"><b style="color:var(--text);">'
-                    '🎯 Sharper matches</b><br>Take the 5-minute quiz</div>')
+                    f'🎯 Sharper matches</b><br>{line}</div>')
         with c2:
             if st.button("Take quiz", key="disc_quiz_nudge", use_container_width=True):
                 open_quiz("discover")
@@ -227,11 +238,10 @@ def discover_page():
         _nobody_yet(uid, me)
         return
 
-    if not _my_quiz(uid):
-        _quiz_nudge()
-
     c = queue[0]
-    _card(c)
+    if not _my_quiz(uid):
+        _quiz_nudge(c)
+    _card(c, _my_quiz(uid))
 
     with st.container(key="swipe"):
         col_pass, col_like = st.columns(2)

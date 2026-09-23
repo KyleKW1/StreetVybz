@@ -10,6 +10,7 @@ import random
 import streamlit as st
 
 import social_db
+from Pages.quiz_reveal import match_quiz_card, screenshot_shield
 from ui import esc, header, empty_state, waiting, avatar
 
 N_QUESTIONS = 3
@@ -247,6 +248,8 @@ def _match_detail(uid: int, match_id: int):
     st.html(f'<div style="display:flex;align-items:center;gap:14px;margin:8px 0 14px;">'
             f'{avatar(m["other_name"], m["other_id"])}<div><div class="hd-kicker">Matched</div>'
             f'<div class="hd-title" style="margin:0;">{esc(m["other_name"])}</div></div></div>')
+    screenshot_shield((st.session_state.get("user") or {}).get("username"))
+    match_quiz_card(uid, m["other_id"], m["other_name"], key=str(m["id"]))
     _progress(m["stage"])
 
     stage = m["stage"]

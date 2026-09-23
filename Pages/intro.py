@@ -67,7 +67,7 @@ _PREVIEW_SAFETY = """
   <div class="hd-why" style="margin:0;padding:0;border:0;">
     <div>👻 &nbsp;Hide from Discover any time</div>
     <div>⚑ &nbsp;Block or report from any match</div>
-    <div>🔒 &nbsp;Quiz answers are never shown</div>
+    <div>🔒 &nbsp;Only matches see your quiz result</div>
     <div>📍 &nbsp;Distances are rough, never your exact spot</div>
   </div>
 </div>
@@ -82,8 +82,8 @@ SLIDES = [
      "You only see people who fit, and they only see you if you fit them.",
      _PREVIEW_VIBE),
     ("🎯", "2 · Take the quiz",
-     "Read Between The Lines is a 5-minute scenario quiz. Your answers stay private "
-     "and only power your vibe score, so your matches get sharper.",
+     "Read Between The Lines is a 5-minute scenario quiz. It sharpens your vibe score, and once you "
+     "match you'll see each other's result, freak score and the hidden desires you share.",
      _PREVIEW_QUIZ),
     ("🔥", "3 · Discover",
      "One person at a time, best vibe first. The ring shows how alike you are. "

@@ -44,18 +44,23 @@ def _quiz_tab(uid: int):
 <div class="hd-card" style="padding:20px;">
   <div class="hd-kicker">Read Between The Lines</div>
   <div class="hd-title" style="font-size:32px;">{esc(q['result'])}</div>
-  <div class="hd-sub">Openness {int(q.get('openness') or 0)}% ·
-    {len(q.get('signals') or [])} hidden desires (private — only used for matching)</div>
+  <div class="hd-sub">Freak score {int(q.get('openness') or 0)}% ·
+    {len(q.get('signals') or [])} hidden desires. Matches see your result, your freak score and
+    only the hidden desires you both share.</div>
 </div>""")
         label = "Retake the quiz →"
     else:
         st.html('<div class="hd-card" style="padding:20px;"><div class="hd-title" style="font-size:28px;">'
                 'Boost your matches</div><div class="hd-sub">Take the quiz and your matches get smarter — '
-                'your answers count for 40% of the vibe score. Nobody sees your answers.</div></div>')
+                'it counts for 40% of the vibe score. Matches see your result, your freak score and only '
+                'the hidden desires you both share. Never your individual answers.</div></div>')
         label = "Take the quiz →"
     st.html("<div style='height:10px'></div>")
     if st.button(label, type="primary", use_container_width=True, key="me_quiz"):
         open_quiz("me")
+    if q and q.get("result"):
+        from Pages.quiz_reveal import drop_codes_section
+        drop_codes_section(uid)
 
 
 def _safety_tab(uid: int):

@@ -162,13 +162,13 @@ def setup_page():
 def quiz_offer_page():
     st.html('<div class="hd-brand" style="margin-bottom:10px;">HIDDEN</div>')
     header("Step 2 of 2", "Sharpen your matches",
-           "Read Between The Lines is a quick scenario quiz. Your answers stay private — "
-           "they only power the vibe score.")
+           "Read Between The Lines is a quick scenario quiz. It powers your vibe score, "
+           "and your matches see your result.")
     st.html("""
 <div class="hd-card" style="padding:20px 22px;">
   <div class="hd-why" style="margin:0;padding:0;border:0;">
     <div>🎭 &nbsp;Real-life scenarios — pick what you'd actually do</div>
-    <div>🔒 &nbsp;Hidden desires round — never shown to anyone</div>
+    <div>🔒 &nbsp;Hidden desires: a match only sees the ones you both share</div>
     <div>🎯 &nbsp;Worth 40% of every vibe score</div>
     <div>⏱ &nbsp;About 5 minutes</div>
   </div>
