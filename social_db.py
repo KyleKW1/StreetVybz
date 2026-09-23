@@ -90,7 +90,22 @@ _DDL = [
         PRIMARY KEY (user_id, night),
         INDEX idx_checkins_night (night, spot)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+    """CREATE TABLE IF NOT EXISTS bans (
+        user_id    INT PRIMARY KEY,
+        reason     VARCHAR(255),
+        banned_by  INT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
 ]
+
+# Added to tables that already exist on live; each fails harmlessly once applied.
+_MIGRATIONS = [
+    "ALTER TABLE reports ADD COLUMN evidence JSON",
+    "ALTER TABLE reports ADD COLUMN reviewed_at DATETIME DEFAULT NULL",
+]
+
+# SQL fragment: this user id isn't banned
+_NOT_BANNED = "NOT EXISTS (SELECT 1 FROM bans bn WHERE bn.user_id = {})"
 
 
 # ─── PLUMBING ─────────────────────────────────────────────────────────────────
@@ -185,6 +200,12 @@ def ensure_social_tables() -> bool:
         for ddl in _DDL:
             cur.execute(ddl)
         conn.commit()
+        for sql in _MIGRATIONS:
+            try:
+                cur.execute(sql)
+                conn.commit()
+            except Exception:
+                conn.rollback()
         cur.close()
         return True
     return bool(_run(q, False))
@@ -237,6 +258,7 @@ def load_candidate_pool(user_id: int, limit: int = 500) -> list:
              AND NOT EXISTS (SELECT 1 FROM blocks b
                              WHERE (b.blocker_id = %s AND b.blocked_id = p.user_id)
                                 OR (b.blocker_id = p.user_id AND b.blocked_id = %s))
+             AND """ + _NOT_BANNED.format("p.user_id") + """
            ORDER BY p.updated_at DESC
            LIMIT %s""",
         (user_id, user_id, user_id, user_id, limit),
@@ -400,7 +422,7 @@ def _load_matches(user_id: int) -> list:
            FROM matches m
            JOIN users u ON u.id = IF(m.user_a = %s, m.user_b, m.user_a)
            LEFT JOIN messages lm ON lm.id = (SELECT MAX(id) FROM messages WHERE match_id = m.id)
-           WHERE m.user_a = %s OR m.user_b = %s
+           WHERE (m.user_a = %s OR m.user_b = %s) AND """ + _NOT_BANNED.format("u.id") + """
            ORDER BY COALESCE(lm.created_at, m.created_at) DESC""",
         (user_id, user_id, user_id),
     )
@@ -412,7 +434,7 @@ def get_match(match_id: int, user_id: int) -> dict | None:
     row = _fetchone(
         """SELECT m.*, u.username AS other_name FROM matches m
            JOIN users u ON u.id = IF(m.user_a = %s, m.user_b, m.user_a)
-           WHERE m.id = %s AND (m.user_a = %s OR m.user_b = %s)""",
+           WHERE m.id = %s AND (m.user_a = %s OR m.user_b = %s) AND """ + _NOT_BANNED.format("u.id"),
         (user_id, match_id, user_id, user_id),
     )
     return match_view(row, user_id) if row else None
@@ -504,10 +526,76 @@ def load_blocked(user_id: int) -> list:
 
 
 def report_user(user_id: int, target_id: int, reason: str, details: str = "") -> bool:
+    """Save a report with the pair's recent chat attached, so it can still be reviewed
+    after a block deletes the match."""
+    a, b = sorted((user_id, target_id))
+    msgs = _fetchall(
+        """SELECT msg.sender_id, msg.body, msg.created_at FROM messages msg
+           JOIN matches m ON m.id = msg.match_id
+           WHERE m.user_a = %s AND m.user_b = %s
+           ORDER BY msg.id DESC LIMIT 50""", (a, b))
+    evidence = [{"from": "reporter" if r["sender_id"] == user_id else "reported",
+                 "body": r["body"], "at": str(r["created_at"])} for r in reversed(msgs)]
     return _write(
-        "INSERT INTO reports (reporter_id, reported_id, reason, details) VALUES (%s, %s, %s, %s)",
-        (user_id, target_id, reason[:64], (details or "")[:1000]),
+        """INSERT INTO reports (reporter_id, reported_id, reason, details, evidence)
+           VALUES (%s, %s, %s, %s, %s)""",
+        (user_id, target_id, reason[:64], (details or "")[:1000],
+         json.dumps(evidence) if evidence else None),
     ) is not None
+
+
+# ─── MODERATION (admins only; see Pages/admin.py) ───────────────────────────
+
+def is_banned(user_id: int) -> bool:
+    return bool(_fetchone("SELECT 1 AS x FROM bans WHERE user_id = %s", (user_id,)))
+
+
+def open_reports() -> list:
+    """Unreviewed reports, grouped by the person reported, most-reported first."""
+    rows = _fetchall(
+        """SELECT r.id, r.reported_id, r.reason, r.details, r.evidence, r.created_at,
+                  ru.username AS reporter, tu.username AS reported, tu.created_at AS joined,
+                  (SELECT COUNT(*) FROM reports r2 WHERE r2.reported_id = r.reported_id) AS all_time
+           FROM reports r
+           JOIN users tu ON tu.id = r.reported_id
+           LEFT JOIN users ru ON ru.id = r.reporter_id
+           WHERE r.reviewed_at IS NULL
+             AND """ + _NOT_BANNED.format("r.reported_id") + """
+           ORDER BY r.created_at DESC""")
+    people = {}
+    for r in rows:
+        p = people.setdefault(r["reported_id"], {
+            "user_id": r["reported_id"], "username": r["reported"], "joined": r["joined"],
+            "all_time": int(r["all_time"] or 0), "reports": []})
+        p["reports"].append({**r, "evidence": _json(r.get("evidence"), []) or []})
+    return sorted(people.values(), key=lambda p: -len(p["reports"]))
+
+
+def dismiss_reports(reported_id: int) -> bool:
+    return _write("UPDATE reports SET reviewed_at = NOW() WHERE reported_id = %s AND reviewed_at IS NULL",
+                  (reported_id,)) is not None
+
+
+def ban_user(user_id: int, admin_id: int, reason: str = "") -> bool:
+    """Ban someone: they can't log in and vanish from Discover, matches and Tonight.
+    Their data stays, so an unban puts everything back."""
+    ok = _write("""INSERT INTO bans (user_id, reason, banned_by) VALUES (%s, %s, %s)
+                   ON DUPLICATE KEY UPDATE reason = VALUES(reason)""",
+                (user_id, (reason or "")[:255], admin_id)) is not None
+    if ok:
+        _write("UPDATE session_tokens SET invalidated = 1 WHERE user_id = %s AND invalidated = 0", (user_id,))
+        dismiss_reports(user_id)
+    return ok
+
+
+def unban_user(user_id: int) -> bool:
+    return _write("DELETE FROM bans WHERE user_id = %s", (user_id,)) is not None
+
+
+def load_bans() -> list:
+    return _fetchall(
+        """SELECT b.user_id, b.reason, b.created_at, u.username FROM bans b
+           JOIN users u ON u.id = b.user_id ORDER BY b.created_at DESC LIMIT 100""")
 
 
 # ─── TONIGHT ─────────────────────────────────────────────────────────────────
@@ -539,7 +627,7 @@ def tonight_by_spot(user_id: int) -> dict:
                           WHERE (m.user_a = %s AND m.user_b = c.user_id)
                              OR (m.user_b = %s AND m.user_a = c.user_id)) AS is_match
            FROM checkins c JOIN users u ON u.id = c.user_id
-           WHERE c.night = %s""",
+           WHERE c.night = %s AND """ + _NOT_BANNED.format("c.user_id"),
         (user_id, user_id, tonight()),
     )
     out = {}
@@ -582,7 +670,8 @@ def community_size(user_id: int, city: str) -> dict | None:
         """SELECT COUNT(*) AS total,
                   SUM(LOWER(TRIM(city)) = LOWER(TRIM(%s))) AS in_city,
                   (SELECT COUNT(*) FROM swipes WHERE swiper_id = %s AND liked = 0) AS passed
-           FROM profiles WHERE user_id <> %s AND hidden = 0 AND intent IS NOT NULL""",
+           FROM profiles p WHERE user_id <> %s AND hidden = 0 AND intent IS NOT NULL
+             AND """ + _NOT_BANNED.format("p.user_id"),
         (city or "", user_id, user_id),
     )
     if row is None:

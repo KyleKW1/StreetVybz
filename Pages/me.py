@@ -91,7 +91,10 @@ def me_page():
     _masthead(uid, p)
     _hide_toggle(uid, p)
 
-    t_profile, t_quiz, t_safety, t_account = st.tabs(["Profile", "Quiz", "Safety", "Account"])
+    from Pages.admin import is_admin
+    admin = is_admin(st.session_state.get("user"))
+    tabs = st.tabs(["Profile", "Quiz", "Safety", "Account"] + (["Reports"] if admin else []))
+    t_profile, t_quiz, t_safety, t_account = tabs[:4]
     with t_profile:
         if profile_form(uid, p, "me", "Save changes"):
             st.toast("Saved ✨")
@@ -110,3 +113,7 @@ def me_page():
         if st.button("⎋  Log out", use_container_width=True, key="me_logout"):
             from auth import logout
             logout()
+    if admin:
+        with tabs[4]:
+            from Pages.admin import admin_page
+            admin_page(uid)

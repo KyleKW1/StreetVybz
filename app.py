@@ -146,6 +146,8 @@ def _login_page():
                         st.rerun()
                     elif user == "locked":
                         st.error("Too many failed attempts. Try again in 10 minutes.")
+                    elif user == "banned":
+                        st.error("This account has been suspended for breaking Hidden's rules.")
                     else:
                         st.error("Wrong username or password.")
                 except Exception as e:

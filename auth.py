@@ -57,6 +57,9 @@ def authenticate_user(username: str, password: str):
     user = db.authenticate_user(username.strip(), password)
     if user:
         st.session_state[key] = 0
+        import social_db
+        if social_db.is_banned(user["id"]):
+            return False, "banned"
         # Session validation fails closed, so login must fail if the token
         # can't be stored — otherwise the user is kicked out on the next check.
         token = secrets.token_urlsafe(32)
@@ -175,6 +178,10 @@ def restore_session() -> bool:
         return False
     user = db.get_user_by_id(uid) if uid else None
     if not user:
+        return False
+    import social_db
+    if social_db.is_banned(uid):
+        forget_session()
         return False
     st.session_state.authenticated = True
     st.session_state.user = user
