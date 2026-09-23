@@ -45,7 +45,7 @@ def _step_0():
 <div style="text-align:center; padding:20px 0 32px;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:56px; color:var(--lime);
               letter-spacing:4px; line-height:0.9; margin-bottom:12px;">
-    VICE<span style="color:var(--text);">VAULT</span>
+    HID<span style="color:var(--text);">DEN</span>
   </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:16px; color:var(--soft);
               line-height:1.8; max-width:420px; margin:0 auto 28px;">
@@ -59,24 +59,55 @@ def _step_0():
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
                 text-transform:uppercase; color:var(--lime); margin-bottom:4px;">Log</div>
     <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
-      Track what you actually do — weed, alcohol, sex, other substances.
-      The data feeds everything else.
+      Track what you actually do — weed, alcohol, sex, other substances. One tap, no form required.
     </div>
   </div>
   <div style="background:var(--card); border:1px solid var(--border);
               border-left:3px solid var(--amber); border-radius:4px; padding:14px 18px;">
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--amber); margin-bottom:4px;">Understand</div>
+                text-transform:uppercase; color:var(--amber); margin-bottom:4px;">Find out how freaky you are</div>
     <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
-      Analytics, patterns, and a desire profile quiz that actually says something real.
+      Answer hot takes after each log. Build your Freak Score. At 60+ unlock Shadow Mode — a darker tier of questions.
     </div>
   </div>
   <div style="background:var(--card); border:1px solid var(--border);
               border-left:3px solid var(--magenta); border-radius:4px; padding:14px 18px;">
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--magenta); margin-bottom:4px;">Play</div>
+                text-transform:uppercase; color:var(--magenta); margin-bottom:4px;">Find like-minded people</div>
     <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
-      Do or Drink — AI reads your vault and turns your habits into personalised dares.
+      Freak Match shows anonymous profiles at your level. Drop a Compatibility Code after the desire quiz to compare results with someone.
+    </div>
+  </div>
+  <div style="background:var(--card); border:1px solid var(--border);
+              border-left:3px solid var(--soft); border-radius:4px; padding:14px 18px;">
+    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+                text-transform:uppercase; color:var(--soft); margin-bottom:4px;">Play</div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
+      Do or Drink, Confessions, Read Between The Lines — your logs feed all of it.
+    </div>
+  </div>
+  <div style="background:var(--card); border:1px solid var(--border);
+              border-left:3px solid #00e5ff; border-radius:4px; padding:14px 18px;">
+    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+                text-transform:uppercase; color:#00e5ff; margin-bottom:4px;">Track your patterns</div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
+      History logs every session. Analytics surfaces patterns — your peak days, streaks, and habits you haven't noticed yet.
+    </div>
+  </div>
+  <div style="background:var(--card); border:1px solid var(--border);
+              border-left:3px solid var(--lime); border-radius:4px; padding:14px 18px;">
+    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+                text-transform:uppercase; color:var(--lime); margin-bottom:4px;">Where To Go Tonight</div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
+      Find venues and spots near you based on your vice. Real places, filtered to what you're actually into.
+    </div>
+  </div>
+  <div style="background:var(--card); border:1px solid var(--border);
+              border-left:3px solid var(--amber); border-radius:4px; padding:14px 18px;">
+    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+                text-transform:uppercase; color:var(--amber); margin-bottom:4px;">Profile</div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
+      Your full picture — vice breakdown, Freak Score, RBTL history, and a shareable stats card.
     </div>
   </div>
 </div>
@@ -158,25 +189,28 @@ def _step_2():
               letter-spacing:3px; margin-bottom:12px;">YOU'RE IN</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:15px; color:var(--soft);
               line-height:1.8; max-width:400px; margin:0 auto 32px;">
-    Your vault is open. Log whenever, as honest as you like.
-    The more you log, the better the Do or Drink dares get.
+    Hidden is yours now. Log whenever, as honest as you like.
   </div>
 </div>
 
 <div style="display:flex; flex-direction:column; gap:8px; max-width:420px; margin:0 auto 32px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:4px;">Try next</div>
+              text-transform:uppercase; color:var(--muted); margin-bottom:4px;">What happens next</div>
   <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
               padding:12px 16px; font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
-    ⚡ Read Between The Lines — desire profile quiz (15 min)
+    🔥 After each log a <strong style="color:var(--text);">hot take card</strong> drops — answer honestly to build your Freak Score
   </div>
   <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
               padding:12px 16px; font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
-    🃏 Do or Drink — invite friends and play tonight
+    ⬡ Hit 5 hot takes to unlock <strong style="color:var(--text);">Freak Match</strong> — anonymous profiles at your level
   </div>
   <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
               padding:12px 16px; font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
-    ◈ Confessions — anonymous confession exchange
+    ⚡ <strong style="color:var(--text);">Read Between The Lines</strong> — desire profile quiz, drop a code to compare with someone
+  </div>
+  <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
+              padding:12px 16px; font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">
+    🃏 <strong style="color:var(--text);">Do or Drink</strong> — AI turns your logs into personalised dares
   </div>
 </div>
 """)

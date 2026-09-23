@@ -64,6 +64,43 @@ _FALLBACK = [
     {"id": "meta_03", "text": "You've lied to someone who cares about you about what you got up to.", "heat": 2},
 ]
 
+_SHADOW_SCENARIOS = {
+    "alcohol": [
+        {"id": "sh_alc_01", "text": "You've woken up next to someone and genuinely couldn't remember how you got there.", "heat": 3},
+        {"id": "sh_alc_02", "text": "You've used being drunk as cover to do something you'd wanted to do sober.", "heat": 3},
+        {"id": "sh_alc_03", "text": "You've told someone something true while drinking that you've never acknowledged since.", "heat": 3},
+        {"id": "sh_alc_04", "text": "You've deliberately got someone drunk knowing what you wanted to happen next.", "heat": 3},
+        {"id": "sh_alc_05", "text": "You've had a blackout and had to piece together what you did from other people.", "heat": 3},
+    ],
+    "weed": [
+        {"id": "sh_wd_01", "text": "You've had sexual thoughts about someone you know while high that you've never acted on — but seriously considered it.", "heat": 3},
+        {"id": "sh_wd_02", "text": "You've been paranoid because you actually did something you shouldn't have.", "heat": 3},
+        {"id": "sh_wd_03", "text": "You've been high in a situation where, if anyone knew, it would have cost you something real.", "heat": 3},
+        {"id": "sh_wd_04", "text": "You've used being high as a reason to let something happen that you'd have stopped sober.", "heat": 3},
+        {"id": "sh_wd_05", "text": "You've gone to a family event or work situation baked because you couldn't cope otherwise.", "heat": 3},
+    ],
+    "sex": [
+        {"id": "sh_sx_01", "text": "You've fantasised in explicit detail about someone while looking them in the eye in a non-sexual context.", "heat": 3},
+        {"id": "sh_sx_02", "text": "You've done something in bed that crossed a line you'd set for yourself — and came back for more.", "heat": 3},
+        {"id": "sh_sx_03", "text": "You've wanted to be watched, or have watched, without the other person's full awareness.", "heat": 3},
+        {"id": "sh_sx_04", "text": "You've used sex to punish someone or make a point, and it worked.", "heat": 3},
+        {"id": "sh_sx_05", "text": "You've stayed in a sexual situation longer than you wanted because you didn't want to be the one to stop it.", "heat": 3},
+    ],
+    "other": [
+        {"id": "sh_ot_01", "text": "You've taken something not prescribed to you and not told a single person.", "heat": 3},
+        {"id": "sh_ot_02", "text": "You've mixed substances in a way you knew was risky and done it anyway because the outcome was worth it.", "heat": 3},
+        {"id": "sh_ot_03", "text": "You've been in an altered state during something serious — work, a relationship moment, a conversation that mattered.", "heat": 3},
+        {"id": "sh_ot_04", "text": "You've sourced something from someone you shouldn't have trusted and used it anyway.", "heat": 3},
+        {"id": "sh_ot_05", "text": "You've felt more like yourself on something than off it, and that scares you.", "heat": 3},
+    ],
+}
+
+_SHADOW_FALLBACK = [
+    {"id": "sh_meta_01", "text": "You've wanted something from someone and manipulated the situation to get it without asking directly.", "heat": 3},
+    {"id": "sh_meta_02", "text": "You've let someone believe something false about you because the truth would have ended things.", "heat": 3},
+    {"id": "sh_meta_03", "text": "You've done something you'd call disgusting if someone else described it — and you'd do it again.", "heat": 3},
+]
+
 _HEAT_COLOR = {1: "var(--lime)", 2: "var(--amber)", 3: "var(--magenta)"}
 _HEAT_LABEL = {1: "MILD", 2: "SPICY", 3: "ATOMIC"}
 
@@ -135,12 +172,17 @@ def _save(user_id: int, scenario: dict, answer: bool, ms: int):
             "answer":        answer,
             "ms_elapsed":    ms,
         })
+        st.session_state.pop(f"_freak_{user_id}", None)
+        st.session_state.pop(f"_freak_ts_{user_id}", None)
     except Exception:
         pass
 
 
-def _pick(vice: str, seen: set) -> dict | None:
-    pool = _SCENARIOS.get(vice, _FALLBACK)
+def _pick(vice: str, seen: set, shadow: bool = False) -> dict | None:
+    if shadow:
+        pool = _SHADOW_SCENARIOS.get(vice, _SHADOW_FALLBACK)
+    else:
+        pool = _SCENARIOS.get(vice, _FALLBACK)
     available = [s for s in pool if s["id"] not in seen]
     if not available:
         available = pool
@@ -152,9 +194,15 @@ def _pick(vice: str, seen: set) -> dict | None:
 def compute_freak_score(user_id: int) -> dict | None:
     """
     Returns score dict if >= 5 responses exist, else None.
-    Persists conflict_idx + freak_score to shadow_scores table.
-    Safe to call on every analytics/dashboard render.
+    Cached in session state for 5 minutes — safe to call from sidebar, dashboard, profile.
     """
+    import time as _time
+    cache_key = f"_freak_{user_id}"
+    ts_key    = f"_freak_ts_{user_id}"
+    cached    = st.session_state.get(cache_key)
+    if cached is not None and _time.time() - st.session_state.get(ts_key, 0) < 300:
+        return cached if cached != "__none__" else None
+
     try:
         import database as db
         rows = db.load_interactions(user_id, "hot_take")
@@ -203,7 +251,7 @@ def compute_freak_score(user_id: int) -> dict | None:
         ("The Unhinged", "var(--magenta)")
     )
 
-    return {
+    result = {
         "freak_pct":      freak_pct,
         "conflict_idx":   conflict_idx,
         "hesitation_pct": hes_pct,
@@ -212,6 +260,9 @@ def compute_freak_score(user_id: int) -> dict | None:
         "label":          label,
         "color":          color,
     }
+    st.session_state[cache_key] = result
+    st.session_state[ts_key]    = _time.time()
+    return result
 
 
 # ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
@@ -222,14 +273,32 @@ def maybe_render_hot_take(vice: str, user_id: int):
     Renders one contextual scenario card inline.
     Clears itself after response or skip.
     """
-    # Reset state when a new log just happened
-    # (caller should set st.session_state.ht_fresh = True before calling)
     if st.session_state.get("ht_fresh"):
         st.session_state.ht_dismissed  = False
         st.session_state.ht_answered   = False
         st.session_state.ht_scenario   = None
         st.session_state.ht_show_start = None
         st.session_state.ht_fresh      = False
+
+    freak_data = compute_freak_score(user_id)
+    freak_pct  = (freak_data or {}).get("freak_pct", 0)
+    shadow_unlocked = freak_pct >= 60
+    shadow_on = shadow_unlocked and st.session_state.get("shadow_mode_on", False)
+
+    if shadow_unlocked:
+        toggle_label = "◈ Shadow Mode ON" if shadow_on else "🔓 Shadow Mode"
+        toggle_type  = "primary" if shadow_on else "secondary"
+        if st.button(toggle_label, key="ht_shadow_toggle", type=toggle_type):
+            st.session_state.shadow_mode_on = not st.session_state.get("shadow_mode_on", False)
+            st.session_state.ht_scenario    = None
+            st.rerun()
+    elif freak_pct >= 40:
+        st.html(f"""
+<div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
+            text-transform:uppercase; color:var(--muted); margin-bottom:8px;">
+  🔒 Shadow Mode unlocks at Freak Score 60 — you're at {freak_pct}
+</div>
+""")
 
     if st.session_state.get("ht_dismissed"):
         return
@@ -244,10 +313,9 @@ def maybe_render_hot_take(vice: str, user_id: int):
 """)
         return
 
-    # Pick scenario on first render
     if not st.session_state.get("ht_scenario"):
         seen     = _seen_ids(user_id)
-        scenario = _pick(vice, seen)
+        scenario = _pick(vice, seen, shadow=shadow_on)
         if not scenario:
             return
         st.session_state.ht_scenario   = {**scenario, "vice": vice}
@@ -259,11 +327,13 @@ def maybe_render_hot_take(vice: str, user_id: int):
     heat_lbl  = _HEAT_LABEL[heat]
     show_time = st.session_state.get("ht_show_start") or time.time()
 
+    shadow_badge = '<span style="background:var(--magenta);color:#0a0a0b;font-family:\'Space Mono\',monospace;font-size:7px;letter-spacing:2px;padding:2px 6px;border-radius:2px;margin-left:8px;">SHADOW</span>' if shadow_on else ""
+
     st.html(_CSS)
     st.html(f"""
 <div class="ht-interrupt" style="border-top:2px solid {heat_col};">
   <div class="ht-eyebrow">
-    <span>While you're being honest —</span>
+    <span>While you're being honest — {shadow_badge}</span>
     <span style="color:{heat_col};">{heat_lbl}</span>
   </div>
   <div class="ht-question">"{scenario['text']}"</div>

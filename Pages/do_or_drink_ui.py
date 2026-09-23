@@ -9,6 +9,7 @@ New in this version:
 
 import random
 import time
+import html as _html
 import streamlit as st
 
 from Pages.do_or_drink_core import (
@@ -71,14 +72,14 @@ def render_setup():
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
               text-transform:uppercase; color:var(--muted); margin-bottom:6px;">
-    Vice Vault · Party Mode
+    Hidden · Party Mode
   </div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:56px; color:var(--text);
               letter-spacing:3px; line-height:0.9;">
     DO OR<br><span style="color:var(--lime);">DRINK</span>
   </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-top:8px;">
-    AI reads your vault. Your habits become the dares. Yuh brave?
+    AI reads your logs. Your habits become the dares. Yuh brave?
   </div>
 </div>
 """)
@@ -279,17 +280,18 @@ def render_setup():
             has_d      = _has_data(vs)
             vice_parts = [f"{_VICE_LABELS.get(vk, vk)}: *hidden*" for vk in counts.keys()]
             if quiz.get("profile_name"):
-                vice_parts.append(f"profile: {quiz['profile_name']}")
-            vice_str   = "  ·  ".join(vice_parts) if vice_parts else "No vault data — generic dares"
+                vice_parts.append(f"profile: {_html.escape(str(quiz['profile_name']))}")
+            vice_str   = "  ·  ".join(vice_parts) if vice_parts else "No log data — generic dares"
             host_badge = " · HOST" if p.get("is_host") else ""
             d_color    = "var(--lime)" if has_d else "var(--muted)"
+            uname_safe = _html.escape(p['username'])
             st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:2px solid {'var(--lime)' if p.get('is_host') else 'var(--border)'};
             border-radius:3px; padding:12px 14px; margin-bottom:6px;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:1px;
               color:{'var(--lime)' if p.get('is_host') else 'var(--text)'};">
-    {p['username']}{host_badge}
+    {uname_safe}{host_badge}
   </div>
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
               text-transform:uppercase; color:{d_color}; margin-top:4px;">{vice_str}</div>
@@ -303,7 +305,7 @@ def render_setup():
 
     st.html("<div style='height:6px'></div>")
     new_username = st.text_input(
-        "Add player by username", placeholder="Their ViceVault username", key="dod_add_input")
+        "Add player by username", placeholder="Their Hidden username", key="dod_add_input")
     if st.button("Add Player →", key="dod_add_btn"):
         uname = new_username.strip()
         if not uname:
@@ -313,7 +315,7 @@ def render_setup():
         else:
             user = _db("get_user_by_username", uname)
             if not user:
-                st.error(f"Can't find '{uname}' — they need a ViceVault account.")
+                st.error(f"Can't find '{uname}' — they need a Hidden account.")
             else:
                 uid = user["id"]
                 st.session_state.dod_players.append({
@@ -332,12 +334,12 @@ def render_setup():
         all_have     = len(with_data) == n_players
         any_have     = len(with_data) > 0
         if all_have:
-            smsg, scol = "✓ All players have vault data — fully personalised dares.", "var(--lime)"
+            smsg, scol = "✓ All players have log data — fully personalised dares.", "var(--lime)"
         elif any_have:
             names      = ", ".join(p["username"] for p in with_data)
             smsg, scol = f"◈ {names} {'has' if len(with_data)==1 else 'have'} data — shaping the whole game.", "var(--amber)"
         else:
-            smsg, scol = "◇ No vault data — sharp generic Caribbean dares for everyone.", "var(--muted)"
+            smsg, scol = "◇ No log data — sharp generic Caribbean dares for everyone.", "var(--muted)"
 
         st.html(f"""
 <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px;
@@ -367,7 +369,7 @@ def render_setup():
             border:1px solid var(--border); border-radius:3px; text-align:center;">
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted); line-height:1.9;">
-    12 dares per player · AI reads each player's vault and desire profile.<br>
+    12 dares per player · AI reads each player's logs and desire profile.<br>
     30-second dare timer · Skipped cards return to the deck.
   </div>
 </div>
@@ -387,11 +389,9 @@ def render_generating():
 
     try:
         client = get_openai_client()
-    except RuntimeError as e:
-        st.session_state.dod_error = str(e)
-        st.session_state.dod_phase = "setup"
-        st.rerun()
-        return
+    except Exception:
+        # No AI available — the game still runs on the built-in dare deck.
+        client = None
 
     any_has_data  = any(_has_data(p.get("vice_summary", {})) for p in players)
     group_profile = build_group_profile(players) if any_has_data else {}
@@ -534,6 +534,9 @@ def render_game():
         heat_color = _HEAT_COLORS.get(heat, "var(--amber)")
         heat_label = _HEAT_LABELS.get(heat, "spicy")
         type_icon  = _TYPE_ICONS.get(dtype, "⚡")
+        dare_text   = _html.escape(dare.get('dare', ''))
+        drink_text  = _html.escape(dare.get('drink', ''))
+        player_safe = _html.escape(player)
 
         _inject_dare_timer(30)
 
@@ -542,7 +545,7 @@ def render_game():
             border-top:3px solid {heat_color}; border-radius:4px; padding:28px 26px; margin-bottom:14px;">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
     <div style="font-family:'Bebas Neue',sans-serif; font-size:32px; letter-spacing:3px;
-                color:{heat_color}; line-height:1;">{player}</div>
+                color:{heat_color}; line-height:1;">{player_safe}</div>
     <div style="display:flex; gap:8px;">
       <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
                   text-transform:uppercase; color:{heat_color}; border:1px solid {heat_color};
@@ -553,12 +556,12 @@ def render_game():
     </div>
   </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:17px; color:var(--text);
-              line-height:1.65; margin-bottom:20px;">{dare['dare']}</div>
+              line-height:1.65; margin-bottom:20px;">{dare_text}</div>
   <div style="background:var(--surface); border-left:2px solid var(--magenta);
               padding:10px 14px; border-radius:0 3px 3px 0;">
     <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
                 text-transform:uppercase; color:var(--magenta); margin-bottom:4px;">OR DRINK</div>
-    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">{dare['drink']}</div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">{drink_text}</div>
   </div>
 </div>
 """)
@@ -597,16 +600,19 @@ def render_game():
             text-transform:uppercase; color:var(--muted); margin-bottom:10px;">Recent</div>
 """)
         for h in reversed(history[-5:]):
-            p      = h["player"]
-            d      = h["dare"]["dare"][:80] + ("…" if len(h["dare"]["dare"]) > 80 else "")
+            p_raw  = h["player"]
+            d_raw  = h["dare"]["dare"]
+            p      = _html.escape(p_raw)
+            d      = _html.escape(d_raw[:80] + ("…" if len(d_raw) > 80 else ""))
             result = h.get("result", "done")
             r_icon, r_col = {"done": ("✓", "var(--lime)"), "drink": ("🍹", "var(--magenta)"), "skipped": ("↺", "var(--muted)")}.get(result, ("✓", "var(--lime)"))
+            skipped_badge = '<span style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--muted); margin-left:6px; border:1px solid var(--border); padding:1px 5px; border-radius:2px;">SKIPPED</span>' if result == "skipped" else ''
             st.html(f"""
 <div style="display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--border);">
   <div style="font-family:'Space Mono',monospace; font-size:14px; color:{r_col}; flex-shrink:0;">{r_icon}</div>
   <div>
     <span style="font-family:'Space Mono',monospace; font-size:9px; color:var(--soft); letter-spacing:1px; text-transform:uppercase;">{p}</span>
-    {'<span style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--muted); margin-left:6px; border:1px solid var(--border); padding:1px 5px; border-radius:2px;">SKIPPED</span>' if result == "skipped" else ''}
+    {skipped_badge}
     <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted); line-height:1.5;">{d}</div>
   </div>
 </div>
@@ -628,6 +634,9 @@ def render_game_over():
     winner  = max(scores, key=lambda u: scores[u]["done"])   if scores else "—"
     drinker = max(scores, key=lambda u: scores[u]["drinks"]) if scores else "—"
 
+    drinker_drinks = scores.get(drinker, {}).get("drinks", 0)
+    drinker_html = f'<div style="margin-top:12px;font-family:DM Sans,sans-serif;font-size:12px;color:var(--magenta);">🍹 {drinker} drank the most — {drinker_drinks} times</div>' if winner != drinker else ''
+    winner_done = scores.get(winner, {}).get('done', 0)
     st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-top:3px solid var(--lime); border-radius:4px;
@@ -637,9 +646,9 @@ def render_game_over():
   <div style="font-family:'Bebas Neue',sans-serif; font-size:52px; color:var(--lime);
               letter-spacing:3px; line-height:0.9; margin-bottom:8px;">{winner.upper()}</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--soft);">
-    held it down the most — {scores.get(winner, {}).get('done', 0)} dares completed
+    held it down the most — {winner_done} dares completed
   </div>
-  {'<div style="margin-top:12px;font-family:\'DM Sans\',sans-serif;font-size:12px;color:var(--magenta);">🍹 ' + drinker + ' drank the most — ' + str(scores.get(drinker,{}).get("drinks",0)) + ' times</div>' if winner != drinker else ''}
+  {drinker_html}
 </div>
 """)
 
@@ -673,15 +682,17 @@ def render_game_over():
 </div>
 """)
         for label, player, detail in highlights:
+            player_safe = _html.escape(str(player).upper())
+            detail_safe = _html.escape(str(detail))
             st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:14px 16px; margin-bottom:8px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:1px;
               text-transform:uppercase; color:var(--muted); margin-bottom:4px;">{label}</div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; color:var(--lime);
-              letter-spacing:1px; margin-bottom:4px;">{player.upper()}</div>
+              letter-spacing:1px; margin-bottom:4px;">{player_safe}</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft);
-              line-height:1.5; font-style:italic;">"{detail}"</div>
+              line-height:1.5; font-style:italic;">"{detail_safe}"</div>
 </div>
 """)
         st.html("<div style='height:8px'></div>")
@@ -695,13 +706,14 @@ def render_game_over():
         sorted(scores.items(), key=lambda x: x[1]["done"], reverse=True), 1
     ):
         rank_color = ["var(--lime)", "var(--amber)", "var(--cyan)"][min(rank - 1, 2)]
+        uname_safe = _html.escape(uname)
         st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:3px solid {rank_color}; border-radius:3px;
             padding:14px 18px; margin-bottom:8px;
             display:flex; justify-content:space-between; align-items:center;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:22px;
-              color:{rank_color}; letter-spacing:1px; line-height:1;">#{rank}  {uname}</div>
+              color:{rank_color}; letter-spacing:1px; line-height:1;">#{rank}  {uname_safe}</div>
   <div style="display:flex; gap:16px; text-align:center;">
     <div>
       <div style="font-family:'Bebas Neue',sans-serif; font-size:26px; color:var(--lime);">{s['done']}</div>

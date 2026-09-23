@@ -59,7 +59,7 @@ def login_page():
     with col2:
         st.html("""
 <div class="auth-card">
-  <div class="auth-wordmark">VICE<span>VAULT</span></div>
+  <div class="auth-wordmark">HID<span>DEN</span></div>
   <p class="auth-tagline">Welcome back — no judgement here</p>
   <div class="auth-divider"></div>
   <div class="auth-section-label">Sign in</div>
@@ -107,7 +107,7 @@ def register_page():
     with col2:
         st.html("""
 <div class="auth-card">
-  <div class="auth-wordmark">VICE<span>VAULT</span></div>
+  <div class="auth-wordmark">HID<span>DEN</span></div>
   <p class="auth-tagline">Let's get you set up</p>
   <div class="auth-divider"></div>
   <div class="auth-section-label">Create account</div>
