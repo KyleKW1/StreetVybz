@@ -210,6 +210,28 @@ def _nobody_yet(uid: int, me: dict):
         st.rerun()
 
 
+@st.dialog("Report or block")
+def _report_dialog(uid: int, c: dict):
+    from Pages.matches import REPORT_REASONS
+    st.html(f'<div class="hd-sub">{esc(c["username"])} won\'t see you again, and you won\'t see them. '
+            "They aren't told.</div>")
+    reason = st.selectbox("What's wrong?", ["Just block them"] + REPORT_REASONS, key="disc_rep_reason")
+    details = ""
+    if reason != "Just block them":
+        details = st.text_area("Anything else we should know? (optional)", key="disc_rep_details",
+                               max_chars=1000, height=80)
+    label = "Block" if reason == "Just block them" else "Report and block"
+    if st.button(label, type="primary", use_container_width=True, key="disc_rep_send"):
+        if reason != "Just block them" and not social_db.report_user(uid, c["user_id"], reason, details):
+            st.error("Couldn't send the report — try again.")
+            return
+        social_db.block_user(uid, c["user_id"])
+        st.session_state.disc_queue = [q for q in st.session_state.get("disc_queue") or []
+                                       if q["user_id"] != c["user_id"]]
+        st.toast("Blocked." if reason == "Just block them" else "Report sent. Thanks for keeping Hidden safe.")
+        st.rerun()
+
+
 def discover_page():
     uid = _uid()
     me = social_db.get_profile(uid) or {}
@@ -263,3 +285,6 @@ def discover_page():
     more = len(queue) - 1
     st.html(f'<div class="hd-kicker" style="text-align:center;margin-top:14px;">'
             f'{f"{_people(more)} more nearby" if more else "Last one nearby for now"}</div>')
+    with st.container(key="disc_report"):
+        if st.button("⚑ Report or block", type="tertiary", key=f"report_{c['user_id']}"):
+            _report_dialog(uid, c)

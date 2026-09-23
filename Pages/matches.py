@@ -221,6 +221,7 @@ def _safety(m: dict, uid: int):
         reason = st.selectbox("Reason", REPORT_REASONS, key=f"rep_reason_{m['id']}")
         details = st.text_area("What happened? (optional)", key=f"rep_details_{m['id']}",
                                max_chars=1000, height=80)
+        st.caption("Your recent messages with them are included so we can check what happened.")
         also_block = st.checkbox("Also block them", value=True, key=f"rep_block_{m['id']}")
         if st.button("Send report", use_container_width=True, key=f"rep_send_{m['id']}"):
             if social_db.report_user(uid, m["other_id"], reason, details):

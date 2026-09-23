@@ -153,6 +153,12 @@ div.st-key-nav button[aria-checked="true"] * { color:#0a0a0b !important; }
 .stButton > button[kind="tertiary"] * { color:var(--lime) !important; }
 .stButton > button[kind="tertiary"]:hover { text-decoration:underline; transform:none !important; }
 
+/* Discover: the quiet report link sits centred under the card */
+div.st-key-disc_report, div.st-key-disc_report .stButton { display:flex !important; align-items:center !important; justify-content:center !important; width:100% !important; }
+div.st-key-disc_report [data-testid="stElementContainer"] { width:100% !important; }
+div.st-key-disc_report .stButton > button[kind="tertiary"],
+div.st-key-disc_report .stButton > button[kind="tertiary"] * { color:var(--muted) !important; font-size:12px !important; }
+
 .hd-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
 </style>
 """
