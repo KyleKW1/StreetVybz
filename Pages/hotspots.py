@@ -3,6 +3,7 @@ Pages/hotspots.py — Kingston hot spots. Where to go tonight.
 Vibe filter: Chill / Turn Up / Late Night
 """
 
+import html as _html
 import streamlit as st
 import requests
 from styles import inject_page_css
@@ -135,6 +136,8 @@ def get_all_spots(api_key):
 
 # ── Card component ────────────────────────────────────────────────────────────
 def spot_card(s):
+    # Places results are external data — escape every text field before rendering.
+    s = {k: _html.escape(v) if isinstance(v, str) else v for k, v in s.items()}
     type_color = "#c6ff00" if s["type"] == "cannabis" else "#ffb300"
     type_label = "CANNABIS" if s["type"] == "cannabis" else "DRINKS"
     rating_color = _rating_color(s["rating"])

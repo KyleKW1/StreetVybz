@@ -1,4 +1,5 @@
 import hashlib
+import html as _html
 import streamlit as st
 from styles import inject_page_css
 
@@ -146,7 +147,7 @@ def _render_room(user_id: int, room: dict, db):
       <span style="font-family:'Space Mono',monospace; font-size:7px; color:var(--muted);">{ts}</span>
     </div>
     <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--text);
-                line-height:1.55; padding-left:4px;">{msg['content']}</div>
+                line-height:1.55; padding-left:4px;">{_html.escape(str(msg['content']))}</div>
   </div>
 """)
 

@@ -356,10 +356,13 @@ def _register_page():
                         user  = db.get_user_by_id(uid)
                         token = _secrets.token_urlsafe(32)
                         try:
-                            db.create_session_token(uid, token)
-                            st.session_state.session_token = token
+                            created = db.create_session_token(uid, token)
                         except Exception:
-                            pass
+                            created = False
+                        if not created:
+                            st.success("Account created — please log in.")
+                            st.stop()
+                        st.session_state.session_token = token
                         st.session_state.authenticated    = True
                         st.session_state.user             = user
                         st.session_state.vice_log         = []

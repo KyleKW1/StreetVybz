@@ -4,6 +4,7 @@ Shows: avatar, stats summary, RBTL result history, freak score, share card.
 """
 
 import streamlit as st
+import html as _html
 from datetime import datetime
 from styles import inject_page_css
 
@@ -48,7 +49,7 @@ def profile_page():
     log      = st.session_state.get("vice_log", [])
 
     # ── Masthead ──────────────────────────────────────────────────────────────
-    initials = username[:2].upper()
+    initials = _html.escape(str(username)[:2].upper())
     st.html(f"""
 <div style="display:flex; align-items:center; gap:20px;
             border-bottom:1px solid var(--border); padding-bottom:24px; margin-bottom:28px;">
@@ -59,7 +60,7 @@ def profile_page():
   </div>
   <div>
     <div style="font-family:'Bebas Neue',sans-serif; font-size:36px; color:var(--text);
-                letter-spacing:2px; line-height:1;">{username.upper()}</div>
+                letter-spacing:2px; line-height:1;">{_html.escape(str(username).upper())}</div>
     <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
                 text-transform:uppercase; color:var(--muted); margin-top:4px;">
       Hidden · {len(log)} sessions logged

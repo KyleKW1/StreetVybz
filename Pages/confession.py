@@ -10,6 +10,7 @@ import string
 import re
 import time
 import json
+from html import escape as _esc
 from datetime import datetime
 from styles import inject_page_css
 
@@ -237,6 +238,7 @@ def inject_printscreen_guard(confession_code):
 
 def _status_badge(status, sender, recipient, is_sender):
     """Render status badge for a confession."""
+    sender, recipient = _esc(str(sender)), _esc(str(recipient))
     cfg = {
         "sent":        {
             True:  ("var(--amber)",   "WAITING",   f"Waiting for {recipient} to send their questions first"),
@@ -268,6 +270,7 @@ def _status_badge(status, sender, recipient, is_sender):
 
 def _typing_indicator(name):
     """Render typing dots."""
+    name = _esc(str(name))
     st.html(f"""
 <div style="display:flex;align-items:center;gap:10px;padding:10px 0 14px 0;">
   <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
@@ -279,9 +282,11 @@ def _typing_indicator(name):
 
 def _exchange_card(label, color, questions, answers, delay_base=0):
     """Render a revealed exchange card."""
+    label = _esc(str(label))
     st.html(f'<div style="font-family:\'Space Mono\',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:{color};margin-bottom:8px;">{label}</div>')
     for i, (q, a) in enumerate(zip(questions, answers)):
         delay = delay_base + i * 0.12
+        q, a = _esc(str(q)), _esc(str(a))
         st.html(f"""
 <div class="reveal-card" style="animation-delay:{delay}s;background:var(--card);
      border:1px solid var(--border);border-left:2px solid {color};
@@ -322,7 +327,7 @@ def _render_screenshot_alerts():
     """Render any screenshot alerts for this user."""
     alerts = _db_safe("load_screenshot_alerts", _uid(), default=[])
     for alert in alerts:
-        screenshotter = alert.get("screenshotter_username", "Someone")
+        screenshotter = _esc(str(alert.get("screenshotter_username", "Someone")))
         ts = str(alert.get("created_at", ""))[:16]
         alert_id = alert.get("id")
         st.html(f"""
@@ -348,7 +353,9 @@ def _handle_query_params():
     params = st.query_params
     delete_code = params.get("delete_code")
     if delete_code:
-        _db_safe("delete_confession", delete_code)
+        uid = _uid()
+        if uid:
+            _db_safe("delete_confession", delete_code, uid)
         st.query_params.clear()
         st.rerun()
     ss_code = params.get("screenshot_code")
@@ -378,7 +385,7 @@ def _send_invite_email(sender_username, recipient_email, confession_code):
         return email_service.send_transactional_email(
             to=recipient_email,
             subject=f"{sender_username} sent you a confession on Hidden",
-            html=f'<p>{sender_username} wants to exchange confessions. <a href="{link}">Accept here</a></p>',
+            html=f'<p>{_esc(str(sender_username))} wants to exchange confessions. <a href="{link}">Accept here</a></p>',
         )
     except Exception:
         return False
@@ -521,7 +528,7 @@ def _render_inbox_item(item):
 <div style="background:var(--card);border:1px solid var(--border);border-left:3px solid var(--magenta);
             border-radius:4px;padding:18px 20px;margin-bottom:4px;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--text);">From {sender_name}</div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--text);">From {_esc(str(sender_name))}</div>
     <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);">{ts}</div>
   </div>
   <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--soft);">
@@ -548,7 +555,7 @@ def _render_inbox_item(item):
         with st.expander(f"They showed their hand — answer {sender_name}'s questions", expanded=True):
             recipient_answers = []
             for i, q in enumerate(sender_questions):
-                st.html(f'<div style="font-family:\'DM Sans\',sans-serif;font-size:14px;color:var(--text);padding:10px 14px;background:var(--surface);border-left:2px solid var(--magenta);border-radius:0 3px 3px 0;margin-bottom:6px;line-height:1.6;">{q}</div>')
+                st.html(f'<div style="font-family:\'DM Sans\',sans-serif;font-size:14px;color:var(--text);padding:10px 14px;background:var(--surface);border-left:2px solid var(--magenta);border-radius:0 3px 3px 0;margin-bottom:6px;line-height:1.6;">{_esc(str(q))}</div>')
                 recipient_answers.append(st.text_area("Your answer", placeholder="Be honest…", key=f"inbox_ans_{code}_{i}", height=80, label_visibility="collapsed"))
             if st.button("Submit answers — trigger the reveal →", key=f"inbox_step2_{code}", type="primary", use_container_width=True):
                 blank = [i+1 for i, a in enumerate(recipient_answers) if not a.strip()]
@@ -597,7 +604,7 @@ def _render_outbox_item(item):
 <div style="background:var(--card);border:1px solid var(--border);border-left:3px solid var(--lime);
             border-radius:4px;padding:18px 20px;margin-bottom:4px;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--text);">To {recipient_name}</div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--text);">To {_esc(str(recipient_name))}</div>
     <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);">{ts}</div>
   </div>
   <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--soft);">
@@ -613,10 +620,10 @@ def _render_outbox_item(item):
     elif status == "responded":
         recipient_questions = item.get("recipient_questions", [])
         with st.expander(f"They answered. Seal the deal — answer {recipient_name}'s questions", expanded=True):
-            st.html(f'<div style="padding:14px 16px;background:var(--surface);border-radius:4px;margin-bottom:16px;font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--soft);line-height:1.7;">{recipient_name} answered. The moment you submit, both sides reveal simultaneously. <strong style="color:var(--magenta);">Auto-deletes {_window_label(window_secs)} after reveal.</strong></div>')
+            st.html(f'<div style="padding:14px 16px;background:var(--surface);border-radius:4px;margin-bottom:16px;font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--soft);line-height:1.7;">{_esc(str(recipient_name))} answered. The moment you submit, both sides reveal simultaneously. <strong style="color:var(--magenta);">Auto-deletes {_window_label(window_secs)} after reveal.</strong></div>')
             sender_answers = []
             for i, q in enumerate(recipient_questions):
-                st.html(f'<div style="font-family:\'DM Sans\',sans-serif;font-size:14px;color:var(--text);padding:10px 14px;background:var(--surface);border-left:2px solid var(--lime);border-radius:0 3px 3px 0;margin-bottom:6px;line-height:1.6;">{q}</div>')
+                st.html(f'<div style="font-family:\'DM Sans\',sans-serif;font-size:14px;color:var(--text);padding:10px 14px;background:var(--surface);border-left:2px solid var(--lime);border-radius:0 3px 3px 0;margin-bottom:6px;line-height:1.6;">{_esc(str(q))}</div>')
                 sender_answers.append(st.text_area("Your answer", placeholder="Be honest…", key=f"outbox_ans_{code}_{i}", height=80, label_visibility="collapsed"))
             if st.button("Submit — reveal everything →", key=f"outbox_submit_{code}", type="primary", use_container_width=True):
                 blank = [i+1 for i, a in enumerate(sender_answers) if not a.strip()]
@@ -695,7 +702,7 @@ def _render_board_post_form():
 def _render_board_card(item):
     """Render a single board post."""
     cid = item["id"]
-    content = item.get("content", "")
+    content = _esc(str(item.get("content", "")))
     vice = item.get("vice")
     replies = item.get("reply_count", 0)
     meta = _VICE_META.get(vice, BOARD_VICE_NONE)
@@ -716,7 +723,7 @@ def _render_board_card(item):
         if thread:
             for reply in thread:
                 reply_ago = _time_ago(reply.get("created_at"))
-                st.html(f'<div style="background:var(--surface);border-left:2px solid var(--border);border-radius:0 3px 3px 0;padding:10px 14px;margin-bottom:8px;"><div style="font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--soft);line-height:1.6;font-style:italic;">"{reply["content"]}"</div><div style="font-family:\'Space Mono\',monospace;font-size:8px;color:var(--muted);margin-top:4px;letter-spacing:1px;text-transform:uppercase;">Anonymous · {reply_ago}</div></div>')
+                st.html(f'<div style="background:var(--surface);border-left:2px solid var(--border);border-radius:0 3px 3px 0;padding:10px 14px;margin-bottom:8px;"><div style="font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--soft);line-height:1.6;font-style:italic;">"{_esc(str(reply["content"]))}"</div><div style="font-family:\'Space Mono\',monospace;font-size:8px;color:var(--muted);margin-top:4px;letter-spacing:1px;text-transform:uppercase;">Anonymous · {reply_ago}</div></div>')
         else:
             st.html('<div style="font-family:\'DM Sans\',sans-serif;font-size:12px;color:var(--muted);padding:8px 0 4px;font-style:italic;">No replies yet. Be the first.</div>')
         uid = _uid()
@@ -802,13 +809,14 @@ def _days_clean_display(vice, last_per_vice):
 def _render_compare_panel(stats, label, is_me):
     """Render a comparison panel (side-by-side friend stats)."""
     col_accent = "var(--lime)" if is_me else "var(--cyan)"
-    username = stats.get("username", label)
-    initials = username[:2].upper()
+    raw_name = str(stats.get("username", label))
+    username = _esc(raw_name)
+    initials = _esc(raw_name[:2].upper())
     freak = stats.get("freak_score")
     freak_str = f"{freak}/100" if freak is not None else "—"
     total = stats.get("total_sessions", 0)
     vice_counts = stats.get("vice_counts", {})
-    rbtl = stats.get("rbtl_name") or "—"
+    rbtl = _esc(str(stats.get("rbtl_name") or "—"))
     rbtl_open = stats.get("rbtl_openness")
     last_per = stats.get("last_per_vice", {})
     bars_html = "".join(_vice_bar(v, vice_counts.get(v, 0), total) for v in ["weed", "alcohol", "sex", "other"]) if total else '<div style="font-family:\'DM Sans\',sans-serif;font-size:12px;color:var(--muted);font-style:italic;padding:8px 0;">No sessions logged (30d)</div>'
@@ -914,7 +922,7 @@ def _render_friends():
             sender = req.get("sender_username", "Someone")
             req_id = req.get("id")
             ago    = _time_ago(req.get("created_at"))
-            st.html(f'<div style="background:var(--card);border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:4px;padding:14px 18px;margin-bottom:4px;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:18px;color:var(--text);">{sender}</div><div style="font-family:\'Space Mono\',monospace;font-size:8px;color:var(--muted);">{ago}</div></div>')
+            st.html(f'<div style="background:var(--card);border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:4px;padding:14px 18px;margin-bottom:4px;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:18px;color:var(--text);">{_esc(str(sender))}</div><div style="font-family:\'Space Mono\',monospace;font-size:8px;color:var(--muted);">{ago}</div></div>')
             col_acc, col_dec, _ = st.columns([2, 2, 3])
             with col_acc:
                 if st.button("Accept →", key=f"fr_acc_{req_id}", type="primary", use_container_width=True):
@@ -942,10 +950,10 @@ def _render_friends():
             freak    = f.get("freak_score")
             top_vice = f.get("top_vice")
             sessions = f.get("session_count", 0)
-            rbtl     = f.get("rbtl_name") or "—"
+            rbtl     = _esc(str(f.get("rbtl_name") or "—"))
             fid      = f.get("user_id")
             top_meta = _VICE_META.get(top_vice, {}) if top_vice else {}
-            initials = fname[:2].upper()
+            initials = _esc(fname[:2].upper())
             st.html(f"""
 <div style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:16px 18px;margin-bottom:4px;">
   <div style="display:flex;align-items:center;gap:14px;">
@@ -953,7 +961,7 @@ def _render_friends():
       <span style="font-family:'Bebas Neue',sans-serif;font-size:16px;color:var(--soft);">{initials}</span>
     </div>
     <div style="flex:1;min-width:0;">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--text);letter-spacing:1px;line-height:1;">{fname}</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--text);letter-spacing:1px;line-height:1;">{_esc(fname)}</div>
       <div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-top:3px;">{f"{top_meta.get('icon','')} {top_meta.get('label','')} most · " if top_vice else ""}{sessions} sessions · {rbtl}</div>
     </div>
     <div style="text-align:right;flex-shrink:0;">
@@ -1069,6 +1077,7 @@ def confessions_page():
         st.error("Log in to use Confessions.")
         return
 
+    _db_safe("claim_confession_invites", uid, (st.session_state.get("user") or {}).get("email", ""))
     _render_screenshot_alerts()
     st.session_state.setdefault("conf_tab", "compose")
 

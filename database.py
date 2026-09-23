@@ -512,7 +512,7 @@ def create_session_token(user_id: int, token: str) -> bool:
 def verify_session_token(user_id: int, token: str) -> bool:
     conn = create_connection()
     if not conn:
-        return True   # fail-open keeps existing sessions alive when DB is down
+        return False   # fail closed: an unverifiable session is not a valid one
     try:
         cur = conn.cursor()
         cur.execute(
@@ -525,7 +525,7 @@ def verify_session_token(user_id: int, token: str) -> bool:
         cur.close()
         return row is not None
     except Exception:
-        return True
+        return False
     finally:
         conn.close()
 
@@ -972,6 +972,33 @@ def save_confession_invite(sender_id: int, recipient_email: str, code: str,
         conn.close()
 
 
+def claim_confession_invites(user_id: int, email: str) -> int:
+    """Attach email invites addressed to this user's email to their account."""
+    if not email:
+        return 0
+    conn = create_connection()
+    if not conn:
+        return 0
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE confessions
+               SET recipient_id = %s
+               WHERE recipient_id IS NULL
+                 AND LOWER(recipient_email) = LOWER(%s)
+                 AND sender_id <> %s""",
+            (user_id, email.strip(), user_id)
+        )
+        conn.commit()
+        claimed = cur.rowcount
+        cur.close()
+        return claimed
+    except Exception:
+        return 0
+    finally:
+        conn.close()
+
+
 def get_confession_by_code(code: str):
     conn = create_connection()
     if not conn:
@@ -1120,13 +1147,20 @@ def confession_sender_answer(code: str, sender_answers: list) -> bool:
         conn.close()
 
 
-def delete_confession(code: str) -> bool:
+def delete_confession(code: str, user_id: int = None) -> bool:
+    """Delete a confession — only if the caller is the sender or recipient."""
+    if user_id is None:
+        return False
     conn = create_connection()
     if not conn:
         return False
     try:
         cur = conn.cursor()
-        cur.execute("DELETE FROM confessions WHERE code = %s", (code,))
+        cur.execute(
+            """DELETE FROM confessions
+               WHERE code = %s AND (sender_id = %s OR recipient_id = %s)""",
+            (code, user_id, user_id),
+        )
         conn.commit()
         deleted = cur.rowcount > 0
         cur.close()
@@ -1936,9 +1970,10 @@ def authenticate_user(username_or_email: str, password: str):
         if not user:
             return None
 
-        stored = user.get("password_hash", "")
+        stored = user.get("password_hash", "") or ""
 
-        if stored.startswith("$2b$") or stored.startswith("$2a$"):
+        # bcrypt — current standard
+        if stored.startswith(("$2b$", "$2a$", "$2y$")):
             try:
                 import bcrypt
                 if bcrypt.checkpw(password.encode(), stored.encode()):
@@ -1947,15 +1982,26 @@ def authenticate_user(username_or_email: str, password: str):
                 pass
             return None
 
+        # Legacy SHA-256 — constant-time compare, then transparently
+        # upgrade the stored hash to bcrypt on successful login.
         if len(stored) == 64:
             import hashlib
-            if hashlib.sha256(password.encode()).hexdigest() == stored:
+            import hmac
+            candidate = hashlib.sha256(password.encode()).hexdigest()
+            if hmac.compare_digest(candidate, stored):
+                try:
+                    import bcrypt
+                    new_hash = bcrypt.hashpw(
+                        password.encode(), bcrypt.gensalt()
+                    ).decode()
+                    update_user_password(user["id"], new_hash)
+                except Exception:
+                    pass
                 return user
             return None
 
-        if stored == password:
-            return user
-
+        # Anything else — including legacy plaintext rows — is rejected.
+        # Those users must use the password-reset flow.
         return None
     except Exception as e:
         st.error(f"Authentication error: {e}")

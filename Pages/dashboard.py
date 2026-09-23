@@ -13,6 +13,7 @@ Changes vs previous:
 
 import streamlit as st
 import time
+import html as _html
 from datetime import datetime, timedelta, date
 from collections import defaultdict
 from styles import inject_page_css
@@ -637,9 +638,11 @@ def history_page():
         v        = VICES.get(e["vice"], VICES["other"])
         ts       = datetime.fromisoformat(e["timestamp"])
         time_str = ts.strftime("%b %d, %Y · %H:%M")
-        data_str = "  ·  ".join(f"{k}: {val}" for k, val in e["data"].items()
-                                 if val and k != "notes")
-        notes    = e["data"].get("notes", "")
+        data_str = _html.escape("  ·  ".join(
+            f"{k}: {val}" for k, val in e["data"].items()
+            if val and k != "notes"
+        ))
+        notes    = _html.escape(str(e["data"].get("notes", "")))
         entry_id = e.get("id")
 
         notes_html = f'<div style="font-family:\'DM Sans\',sans-serif; font-size:11px; color:var(--muted); margin-top:4px; font-style:italic;">"{notes}"</div>' if notes else ''

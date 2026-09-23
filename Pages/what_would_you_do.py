@@ -11,6 +11,7 @@ breakdown of how other Hidden users responded.
 """
 
 import hashlib
+import html as _html
 import streamlit as st
 import json
 import random
@@ -1327,14 +1328,14 @@ def render_quiz():
   </div>
   <div style="padding:14px 16px 14px;">
     <div style="font-family:'DM Sans',sans-serif; font-size:15px; font-weight:500;
-                color:var(--text); line-height:1.5; margin-bottom:10px;">{q['title']}</div>
+                color:var(--text); line-height:1.5; margin-bottom:10px;">{_html.escape(str(q['title']))}</div>
     <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
-                line-height:1.85;">{q['text']}</div>
+                line-height:1.85;">{_html.escape(str(q['text']))}</div>
   </div>
 </div>
 <div style="font-family:'DM Sans',sans-serif; font-size:15px; font-style:italic;
             color:var(--amber); border-left:3px solid var(--amber); padding-left:14px;
-            margin-bottom:18px; line-height:1.6;">{q['prompt']}</div>
+            margin-bottom:18px; line-height:1.6;">{_html.escape(str(q['prompt']))}</div>
 """)
 
     opt_labels  = [(opt["t"] if isinstance(opt, dict) else opt) for opt in q["opts"]]

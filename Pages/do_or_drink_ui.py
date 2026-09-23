@@ -9,6 +9,7 @@ New in this version:
 
 import random
 import time
+import html as _html
 import streamlit as st
 
 from Pages.do_or_drink_core import (
@@ -279,17 +280,18 @@ def render_setup():
             has_d      = _has_data(vs)
             vice_parts = [f"{_VICE_LABELS.get(vk, vk)}: *hidden*" for vk in counts.keys()]
             if quiz.get("profile_name"):
-                vice_parts.append(f"profile: {quiz['profile_name']}")
+                vice_parts.append(f"profile: {_html.escape(str(quiz['profile_name']))}")
             vice_str   = "  ·  ".join(vice_parts) if vice_parts else "No log data — generic dares"
             host_badge = " · HOST" if p.get("is_host") else ""
             d_color    = "var(--lime)" if has_d else "var(--muted)"
+            uname_safe = _html.escape(p['username'])
             st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:2px solid {'var(--lime)' if p.get('is_host') else 'var(--border)'};
             border-radius:3px; padding:12px 14px; margin-bottom:6px;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:1px;
               color:{'var(--lime)' if p.get('is_host') else 'var(--text)'};">
-    {p['username']}{host_badge}
+    {uname_safe}{host_badge}
   </div>
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
               text-transform:uppercase; color:{d_color}; margin-top:4px;">{vice_str}</div>
@@ -532,6 +534,9 @@ def render_game():
         heat_color = _HEAT_COLORS.get(heat, "var(--amber)")
         heat_label = _HEAT_LABELS.get(heat, "spicy")
         type_icon  = _TYPE_ICONS.get(dtype, "⚡")
+        dare_text   = _html.escape(dare.get('dare', ''))
+        drink_text  = _html.escape(dare.get('drink', ''))
+        player_safe = _html.escape(player)
 
         _inject_dare_timer(30)
 
@@ -540,7 +545,7 @@ def render_game():
             border-top:3px solid {heat_color}; border-radius:4px; padding:28px 26px; margin-bottom:14px;">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
     <div style="font-family:'Bebas Neue',sans-serif; font-size:32px; letter-spacing:3px;
-                color:{heat_color}; line-height:1;">{player}</div>
+                color:{heat_color}; line-height:1;">{player_safe}</div>
     <div style="display:flex; gap:8px;">
       <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
                   text-transform:uppercase; color:{heat_color}; border:1px solid {heat_color};
@@ -551,12 +556,12 @@ def render_game():
     </div>
   </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:17px; color:var(--text);
-              line-height:1.65; margin-bottom:20px;">{dare['dare']}</div>
+              line-height:1.65; margin-bottom:20px;">{dare_text}</div>
   <div style="background:var(--surface); border-left:2px solid var(--magenta);
               padding:10px 14px; border-radius:0 3px 3px 0;">
     <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
                 text-transform:uppercase; color:var(--magenta); margin-bottom:4px;">OR DRINK</div>
-    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">{dare['drink']}</div>
+    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);">{drink_text}</div>
   </div>
 </div>
 """)
@@ -595,8 +600,10 @@ def render_game():
             text-transform:uppercase; color:var(--muted); margin-bottom:10px;">Recent</div>
 """)
         for h in reversed(history[-5:]):
-            p      = h["player"]
-            d      = h["dare"]["dare"][:80] + ("…" if len(h["dare"]["dare"]) > 80 else "")
+            p_raw  = h["player"]
+            d_raw  = h["dare"]["dare"]
+            p      = _html.escape(p_raw)
+            d      = _html.escape(d_raw[:80] + ("…" if len(d_raw) > 80 else ""))
             result = h.get("result", "done")
             r_icon, r_col = {"done": ("✓", "var(--lime)"), "drink": ("🍹", "var(--magenta)"), "skipped": ("↺", "var(--muted)")}.get(result, ("✓", "var(--lime)"))
             skipped_badge = '<span style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--muted); margin-left:6px; border:1px solid var(--border); padding:1px 5px; border-radius:2px;">SKIPPED</span>' if result == "skipped" else ''
@@ -675,15 +682,17 @@ def render_game_over():
 </div>
 """)
         for label, player, detail in highlights:
+            player_safe = _html.escape(str(player).upper())
+            detail_safe = _html.escape(str(detail))
             st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:14px 16px; margin-bottom:8px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:1px;
               text-transform:uppercase; color:var(--muted); margin-bottom:4px;">{label}</div>
   <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; color:var(--lime);
-              letter-spacing:1px; margin-bottom:4px;">{player.upper()}</div>
+              letter-spacing:1px; margin-bottom:4px;">{player_safe}</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--soft);
-              line-height:1.5; font-style:italic;">"{detail}"</div>
+              line-height:1.5; font-style:italic;">"{detail_safe}"</div>
 </div>
 """)
         st.html("<div style='height:8px'></div>")
@@ -697,13 +706,14 @@ def render_game_over():
         sorted(scores.items(), key=lambda x: x[1]["done"], reverse=True), 1
     ):
         rank_color = ["var(--lime)", "var(--amber)", "var(--cyan)"][min(rank - 1, 2)]
+        uname_safe = _html.escape(uname)
         st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border);
             border-left:3px solid {rank_color}; border-radius:3px;
             padding:14px 18px; margin-bottom:8px;
             display:flex; justify-content:space-between; align-items:center;">
   <div style="font-family:'Bebas Neue',sans-serif; font-size:22px;
-              color:{rank_color}; letter-spacing:1px; line-height:1;">#{rank}  {uname}</div>
+              color:{rank_color}; letter-spacing:1px; line-height:1;">#{rank}  {uname_safe}</div>
   <div style="display:flex; gap:16px; text-align:center;">
     <div>
       <div style="font-family:'Bebas Neue',sans-serif; font-size:26px; color:var(--lime);">{s['done']}</div>

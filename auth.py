@@ -57,12 +57,16 @@ def authenticate_user(username: str, password: str):
     user = db.authenticate_user(username.strip(), password)
     if user:
         st.session_state[key] = 0
+        # Session validation fails closed, so login must fail if the token
+        # can't be stored — otherwise the user is kicked out on the next check.
+        token = secrets.token_urlsafe(32)
         try:
-            token = secrets.token_urlsafe(32)
-            db.create_session_token(user["id"], token)
-            st.session_state["session_token"] = token
+            created = db.create_session_token(user["id"], token)
         except Exception:
-            pass
+            created = False
+        if not created:
+            return False, None
+        st.session_state["session_token"] = token
         try:
             db.update_last_login(user["id"])
         except Exception:
@@ -92,16 +96,16 @@ def register_user(username: str, email: str, password: str) -> tuple[bool, str]:
 
 
 def check_session_valid() -> bool:
-    """Returns True if the current session token is still valid."""
+    """Fail closed: a logged-in user must hold a valid, unexpired session token."""
     user  = st.session_state.get("user")
     token = st.session_state.get("session_token")
     if not user or not token:
-        return True
+        return False
     try:
         import database as db
         return db.verify_session_token(user["id"], token)
     except Exception:
-        return True
+        return False
 
 
 # ─── AUTH PAGE UI ─────────────────────────────────────────────────────────────
