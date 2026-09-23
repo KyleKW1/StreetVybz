@@ -7,7 +7,7 @@ import streamlit as st
 import social_db
 from matching import INTENTS
 from Pages.profile_form import profile_form, age_text
-from ui import esc, avatar, lifestyle_chips
+from ui import esc, avatar, lifestyle_chips, open_quiz
 
 
 def _uid():
@@ -55,8 +55,7 @@ def _quiz_tab(uid: int):
         label = "Take the quiz →"
     st.html("<div style='height:10px'></div>")
     if st.button(label, type="primary", use_container_width=True, key="me_quiz"):
-        st.session_state.tab = "quiz"
-        st.rerun()
+        open_quiz("me")
 
 
 def _safety_tab(uid: int):

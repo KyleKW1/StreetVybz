@@ -187,3 +187,18 @@ def score_ring(score: int) -> str:
     color = "var(--lime)" if score >= 75 else "var(--cyan)" if score >= 50 else "var(--amber)"
     return (f'<div class="hd-ring" style="--p:{int(score)};--c:{color};">'
             f'<div><b>{int(score)}%</b><small>VIBE</small></div></div>')
+
+
+def open_quiz(return_to: str):
+    """Jump to the full-screen quiz; its exit button brings you back here."""
+    st.session_state._quiz_return = return_to
+    st.session_state.tab = "quiz"
+    st.rerun()
+
+
+def invite_link() -> str:
+    try:
+        base = st.secrets.get("APP_URL", "https://vivevaultapps.streamlit.app")
+    except Exception:
+        base = "https://vivevaultapps.streamlit.app"
+    return base.rstrip("/")

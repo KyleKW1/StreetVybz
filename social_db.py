@@ -496,3 +496,14 @@ def delete_social_data(user_id: int) -> None:
         _write(sql, (user_id, user_id))
     _write("DELETE FROM checkins WHERE user_id = %s", (user_id,))
     _write("DELETE FROM profiles WHERE user_id = %s", (user_id,))
+
+
+def community_size(user_id: int, city: str) -> dict:
+    """How many other people have profiles — overall and in this city."""
+    row = _fetchone(
+        """SELECT COUNT(*) AS total,
+                  SUM(LOWER(TRIM(city)) = LOWER(TRIM(%s))) AS in_city
+           FROM profiles WHERE user_id <> %s AND hidden = 0 AND intent IS NOT NULL""",
+        (city or "", user_id),
+    ) or {}
+    return {"total": int(row.get("total") or 0), "in_city": int(row.get("in_city") or 0)}

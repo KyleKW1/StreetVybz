@@ -145,13 +145,10 @@ def _login_page():
                 except Exception as e:
                     st.error(f"Login error: {e}")
         st.html("<div style='height:8px'></div>")
-        col_r, col_f = st.columns(2)
-        with col_r:
-            if st.button("Create account", use_container_width=True, key="go_register"):
-                st.session_state.page = "register"; st.rerun()
-        with col_f:
-            if st.button("Forgot password", use_container_width=True, key="go_forgot"):
-                st.session_state.page = "forgot"; st.rerun()
+        if st.button("New here? Create account", use_container_width=True, key="go_register"):
+            st.session_state.page = "register"; st.rerun()
+        if st.button("Forgot password", use_container_width=True, key="go_forgot"):
+            st.session_state.page = "forgot"; st.rerun()
 
 
 def _register_page():
@@ -303,13 +300,22 @@ def main():
 
     uid = st.session_state.user["id"]
 
-    # The quiz is a full-screen flow opened from Me
+    # The quiz is a full-screen flow (from setup, Discover or Me)
     if st.session_state.get("tab") == "quiz":
-        if st.button("← Back to Me", key="quiz_back"):
-            st.session_state.tab = "me"
+        done = st.session_state.get("wwyd_phase") == "result"
+        if st.button("Done — show me matches →" if done else "← Back to Hidden",
+                     key="hd_quiz_exit", type="primary" if done else "secondary"):
+            st.session_state.tab = st.session_state.pop("_quiz_return", "discover")
+            st.session_state.pop("disc_queue", None)   # re-rank with the new answers
+            st.session_state.pop("my_quiz", None)
             st.rerun()
         from Pages.what_would_you_do import what_would_you_do_page
         what_would_you_do_page()
+        return
+
+    if st.session_state.get("tab") == "quiz_offer":
+        from Pages.profile_form import quiz_offer_page
+        quiz_offer_page()
         return
 
     # No complete profile yet (new user, or existing user from before matching) → setup
