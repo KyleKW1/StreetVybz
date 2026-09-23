@@ -19,7 +19,7 @@ def _masthead(uid: int, p: dict):
 <div class="hd-card" style="display:flex;align-items:center;gap:18px;margin-bottom:14px;">
   {avatar(p.get('username', ''), uid)}
   <div style="min-width:0;">
-    <div class="hd-title" style="margin:0;">{esc(p.get('username', ''))}<span
+    <div class="hd-title" style="margin:0;overflow-wrap:anywhere;">{esc(p.get('username', ''))}<span
          style="color:var(--soft);font-size:28px;">{', ' + age_text(p) if age_text(p) else ''}</span></div>
     <div class="hd-kicker" style="margin-top:4px;">📍 {esc(p.get('city') or '—')} · {esc(INTENTS.get(p.get('intent'), ''))}</div>
     <div class="hd-chips" style="margin-bottom:0;">{lifestyle_chips(p)}</div>
