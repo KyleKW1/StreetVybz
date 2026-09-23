@@ -1,5 +1,5 @@
 """
-Pages/settings.py — Account settings.
+Pages/settings.py — Account settings (shown inside the Me tab).
 Data export (JSON), account deletion, password change link.
 """
 
@@ -30,15 +30,6 @@ def settings_page():
     inject_page_css()
     uid = _uid()
 
-    st.html("""
-<div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Hidden</div>
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:var(--text);
-              letter-spacing:3px; line-height:0.95;">SETTINGS</div>
-</div>
-""")
-
     if not uid:
         st.error("Log in to access settings.")
         return
@@ -52,7 +43,7 @@ def settings_page():
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:16px 18px; margin-bottom:16px;">
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
-    Download everything we have on you — vice log, quiz results, goals, hot takes.
+    Download everything we have on you — your profile, matches, quiz results and history.
     JSON format. You own your data.
   </div>
 </div>
@@ -61,6 +52,11 @@ def settings_page():
     if st.button("↓  Export all my data", use_container_width=True, key="export_data"):
         with st.spinner("Gathering your data…"):
             data = _db("export_user_data", uid, default={})
+            try:
+                import social_db
+                data = {**(data or {}), **social_db.export_social_data(uid)}
+            except Exception:
+                pass
         if data:
             st.download_button(
                 "↓ Download data.json",
@@ -104,8 +100,8 @@ def settings_page():
 <div style="background:#1a0a0e; border:1px solid var(--magenta); border-radius:4px;
             padding:16px 18px; margin-bottom:16px;">
   <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
-    Deleting your account removes your vice log, quiz results, goals, and all personal data.
-    Confessions you've started will be anonymised. This <strong style="color:var(--magenta);">
+    Deleting your account removes your profile, matches, chats, quiz results and all personal data.
+    This <strong style="color:var(--magenta);">
     cannot be undone</strong>.
   </div>
 </div>
@@ -131,6 +127,11 @@ def settings_page():
                          key="delete_step2"):
                 if confirm_text.strip().lower() == _username().lower():
                     with st.spinner("Deleting your account…"):
+                        try:
+                            import social_db
+                            social_db.delete_social_data(uid)
+                        except Exception:
+                            pass
                         success = _db("delete_user_account", uid, default=False)
                     if success:
                         st.success("Account deleted.")

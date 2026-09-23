@@ -256,3 +256,17 @@ def register_page():
                 st.rerun()
 
         st.html('<p class="auth-hint">Already have an account? Sign in on the previous screen.</p>')
+
+
+def logout():
+    """End the session server-side and clear local state."""
+    try:
+        import database as db
+        token = st.session_state.get("session_token")
+        if token:
+            db.invalidate_session_token(token)
+    except Exception:
+        pass
+    for k in list(st.session_state.keys()):
+        del st.session_state[k]
+    st.rerun()
