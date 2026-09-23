@@ -45,37 +45,39 @@ ALL_PLATFORM_CATEGORIES = [
     "Verified Models", "Vintage", "Virtual Reality", "Webcam",
 ]
 
+# min/max are openness-index bands (0–100), so every tier is reachable
+# whatever the number of scenarios.
 RESULT_TYPES = [
     {
-        "min": 0, "max": 10, "icon": "🔒", "name": "Closed Garden",
+        "min": 0, "max": 20, "icon": "🔒", "name": "Closed Garden",
         "meta": "Yours. Only yours. Period.",
-        "hook": "You answered every single one the same way. That consistency either means total clarity — or a story you haven't told yourself yet.",
+        "hook": "You kept the door shut on almost every one. That consistency either means total clarity — or a story you haven't told yourself yet.",
         "signal": "You're not curious about the scenarios. You're protective of something.",
         "tell": "The question that probably landed hardest was one you dismissed fast.",
     },
     {
-        "min": 11, "max": 22, "icon": "🌿", "name": "Quietly Curious",
+        "min": 21, "max": 45, "icon": "🌿", "name": "Quietly Curious",
         "meta": "The thought has crossed your mind. More than once.",
         "hook": "You played it safe on the ones that felt risky. But you didn't close the door all the way on any of them.",
         "signal": "There's a gap between what you'd say out loud and what you actually thought reading these.",
         "tell": "Someone who knows you well would not be entirely surprised by your score.",
     },
     {
-        "min": 23, "max": 35, "icon": "🌙", "name": "The Open Door",
+        "min": 46, "max": 70, "icon": "🌙", "name": "The Open Door",
         "meta": "You've thought this through. Seriously.",
         "hook": "You've been here before — in your head, at least. These scenarios didn't shock you. They felt familiar.",
         "signal": "The gap between where you are and where you want to be is mostly just one honest conversation.",
         "tell": "You know which scenario you'd actually say yes to if the circumstances were right.",
     },
     {
-        "min": 36, "max": 44, "icon": "🔺", "name": "Already Decided",
+        "min": 71, "max": 89, "icon": "🔺", "name": "Already Decided",
         "meta": "The question isn't whether. It's when.",
         "hook": "You didn't hesitate on the ones that matter. That's not impulsiveness — that's someone who's done the work already.",
         "signal": "You're past theory. The only thing between you and acting on this is logistics.",
         "tell": "You probably already know who you'd want in the room.",
     },
     {
-        "min": 45, "max": 999, "icon": "⚡", "name": "The Third Is Already Picked",
+        "min": 90, "max": 100, "icon": "⚡", "name": "The Third Is Already Picked",
         "meta": "You know exactly who. They probably know too.",
         "hook": "You read these like someone reading their own journal entries. Not recognition — confirmation.",
         "signal": "This isn't curiosity. This is inventory.",
@@ -273,21 +275,28 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 .stProgress > div > div > div { background:var(--magenta) !important; }
 #MainMenu { visibility:hidden; } footer { visibility:hidden; }
 div[data-testid="stRadio"] > label { display:none !important; }
-div[data-testid="stRadio"] > div { gap:8px !important; flex-direction:column !important; }
-div[data-testid="stRadio"] > div > label {
+div[data-testid="stRadioGroup"] { gap:8px !important; flex-direction:column !important; }
+div[data-testid="stRadio"], div[data-testid="stRadioGroup"],
+div[data-testid="stRadioGroup"] > div { width:100% !important; }
+label[data-testid="stRadioOption"] {
   background:var(--card) !important; border:1px solid var(--border) !important;
-  border-radius:3px !important; padding:12px 16px !important;
-  font-family:'DM Sans',sans-serif !important; font-size:13px !important;
-  color:var(--soft) !important; cursor:pointer !important;
-  transition:all 0.15s !important; width:100% !important; line-height:1.55 !important;
+  border-radius:3px !important; padding:12px 16px !important; margin:0 !important;
+  cursor:pointer !important; transition:all 0.15s !important; width:100% !important;
 }
-div[data-testid="stRadio"] > div > label:hover {
-  border-color:var(--lime) !important; color:var(--text) !important; background:#1c1c22 !important;
+label[data-testid="stRadioOption"], label[data-testid="stRadioOption"] p {
+  font-family:'DM Sans',sans-serif !important; font-size:14px !important;
+  letter-spacing:normal !important; text-transform:none !important;
+  color:var(--soft) !important; line-height:1.55 !important;
 }
-div[data-testid="stRadio"] > div > label[data-checked="true"] {
+label[data-testid="stRadioOption"]:hover {
+  border-color:var(--lime) !important; background:#1c1c22 !important;
+}
+label[data-testid="stRadioOption"]:hover p { color:var(--text) !important; }
+label[data-testid="stRadioOption"]:has(input:checked) {
   background:rgba(255,45,120,0.12) !important; border-color:var(--magenta) !important;
-  color:var(--text) !important; border-left-width:3px !important;
+  border-left-width:3px !important;
 }
+label[data-testid="stRadioOption"]:has(input:checked) p { color:var(--text) !important; }
 @keyframes card-enter {
   from { opacity:0; transform:translateY(14px) scale(0.98); }
   to   { opacity:1; transform:translateY(0) scale(1); }
@@ -505,50 +514,155 @@ def _generate_all_scenarios(api_key: str, profile: dict = None) -> list:
 
     # Filter Nones, fill any gaps with a safe fallback
     scenarios = [s for s in results if s]
-    while len(scenarios) < SCENARIO_COUNT:
-        scenarios.append(_fallback_scenario(len(scenarios)))
+    scenarios += _fallback_scenarios(SCENARIO_COUNT - len(scenarios),
+                                     exclude_titles=[s.get("title") for s in scenarios])
 
     return scenarios[:SCENARIO_COUNT]
 
 
-def _fallback_scenario(idx: int) -> dict:
-    """Static fallback if generation fails — gender-neutral."""
-    fallbacks = [
-        {
-            "title": "The conversation that changed something",
-            "text": "You and someone you're close to stayed up talking until 4am. At some point the conversation shifted — not explicitly, but both of you felt it. Nothing happened. But something was established.",
-            "prompt": "What's the most honest thing you can say about what you wanted in that moment?",
-            "opts": [
-                {"t": "I wanted the conversation and nothing more. That was enough.", "pts": 0},
-                {"t": "I was aware of the tension but told myself I was imagining it.", "pts": 2},
-                {"t": "I knew exactly what was happening and I was waiting to see what they'd do.", "pts": 3},
-                {"t": "I wanted it to go further and I made sure they knew that.", "pts": 5},
-            ],
-        },
-        {
-            "title": "The fantasy that keeps coming back",
-            "text": "There's a specific scenario you've thought about more than once. It involves a specific type of situation, a specific dynamic. You didn't choose it — it just keeps returning.",
-            "prompt": "How far have you actually let yourself go with this in your head?",
-            "opts": [
-                {"t": "I shut it down when it comes up. It's not something I want to explore.", "pts": 0},
-                {"t": "I've thought about it but kept it surface level — never the full scenario.", "pts": 2},
-                {"t": "I've played it out in detail. More than once.", "pts": 3},
-                {"t": "I've played it out in detail and I'm actively looking for a way to make it real.", "pts": 5},
-            ],
-        },
-        {
-            "title": "Someone you probably shouldn't want",
-            "text": "There's someone in your life — not a stranger, someone you interact with — that you're more attracted to than you've admitted. You've thought about what it would be like. You haven't done anything about it.",
-            "prompt": "What's the most accurate thing about where you actually are with this?",
-            "opts": [
-                {"t": "I recognise the attraction and I'm not going to act on it. That's settled.", "pts": 0},
-                {"t": "I notice it but I'm mostly good at not thinking about it.", "pts": 2},
-                {"t": "I think about it more than I should and I'm not really trying to stop.", "pts": 3},
-                {"t": "I've already thought through how it could happen. The attraction is mutual and we both know it.", "pts": 5},
-            ],
-        },
-    ]
-    return fallbacks[idx % len(fallbacks)]
+# Used when AI generation is unavailable: enough distinct scenarios that a
+# quiz never repeats one.
+_FALLBACK_SCENARIOS = [
+    {
+        "title": "The conversation that changed something",
+        "text": "You and someone you're close to stayed up talking until 4am. At some point the conversation shifted — not explicitly, but both of you felt it. Nothing happened. But something was established.",
+        "prompt": "What's the most honest thing you can say about what you wanted in that moment?",
+        "opts": [
+            {"t": "I wanted the conversation and nothing more. That was enough.", "pts": 0},
+            {"t": "I was aware of the tension but told myself I was imagining it.", "pts": 2},
+            {"t": "I knew exactly what was happening and I was waiting to see what they'd do.", "pts": 3},
+            {"t": "I wanted it to go further and I made sure they knew that.", "pts": 5},
+        ],
+    },
+    {
+        "title": "The fantasy that keeps coming back",
+        "text": "There's a specific scenario you've thought about more than once. It involves a specific type of situation, a specific dynamic. You didn't choose it — it just keeps returning.",
+        "prompt": "How far have you actually let yourself go with this in your head?",
+        "opts": [
+            {"t": "I shut it down when it comes up. It's not something I want to explore.", "pts": 0},
+            {"t": "I've thought about it but kept it surface level — never the full scenario.", "pts": 2},
+            {"t": "I've played it out in detail. More than once.", "pts": 3},
+            {"t": "I've played it out in detail and I'm actively looking for a way to make it real.", "pts": 5},
+        ],
+    },
+    {
+        "title": "Someone you probably shouldn't want",
+        "text": "There's someone in your life — not a stranger, someone you interact with — that you're more attracted to than you've admitted. You've thought about what it would be like. You haven't done anything about it.",
+        "prompt": "What's the most accurate thing about where you actually are with this?",
+        "opts": [
+            {"t": "I recognise the attraction and I'm not going to act on it. That's settled.", "pts": 0},
+            {"t": "I notice it but I'm mostly good at not thinking about it.", "pts": 2},
+            {"t": "I think about it more than I should and I'm not really trying to stop.", "pts": 3},
+            {"t": "I've already thought through how it could happen. The attraction is mutual and we both know it.", "pts": 5},
+        ],
+    },
+
+    {
+        "title": "The text you almost sent",
+        "text": "It's late and you've typed out exactly what you want to say to someone you shouldn't be texting. Your thumb is over send. You've done this before and deleted it every time.",
+        "prompt": "What happens this time?",
+        "opts": [
+            {"t": "I delete it. Some things are better left in drafts.", "pts": 0},
+            {"t": "I delete it, then screenshot the draft so I don't lose it.", "pts": 2},
+            {"t": "I send something softer and wait to see if they bite.", "pts": 3},
+            {"t": "I send it exactly as written. I'm done pretending.", "pts": 5},
+        ],
+    },
+    {
+        "title": "Your partner asks what you really want",
+        "text": "Your partner asks, sincerely, if there's anything you've always wanted to try and never said. They mean it. They're waiting for an answer.",
+        "prompt": "What do you actually tell them?",
+        "opts": [
+            {"t": "Honestly, nothing. What we have is what I want.", "pts": 0},
+            {"t": "Something small and safe, and I keep the real answer to myself.", "pts": 2},
+            {"t": "A hint of the real thing, to see how they react.", "pts": 3},
+            {"t": "The whole thing, in detail. I've been waiting for them to ask.", "pts": 5},
+        ],
+    },
+    {
+        "title": "The hotel bar, the last round",
+        "text": "You're away for work and someone at the hotel bar has been talking to you for two hours. They mention their room number without being asked.",
+        "prompt": "Where's your head when you get in the elevator?",
+        "opts": [
+            {"t": "On my own floor. It was a nice conversation and that's all.", "pts": 0},
+            {"t": "Flattered, and replaying it more than I'd admit.", "pts": 2},
+            {"t": "Doing the maths on what I'd say if I knocked.", "pts": 3},
+            {"t": "I already pressed their floor.", "pts": 5},
+        ],
+    },
+    {
+        "title": "Someone wants to watch",
+        "text": "Someone you trust tells you they'd love to just watch you with your partner. No touching, no pressure. They'd only be in the room.",
+        "prompt": "What's your honest first reaction?",
+        "opts": [
+            {"t": "A clear no. That's not for me.", "pts": 0},
+            {"t": "No, but I noticed I didn't hate the idea.", "pts": 2},
+            {"t": "I've already pictured how it would go.", "pts": 3},
+            {"t": "I'd want to set a date.", "pts": 5},
+        ],
+    },
+    {
+        "title": "The ex who still knows you",
+        "text": "An ex messages out of nowhere: they still think about one specific night. You know exactly which one. You think about it too.",
+        "prompt": "How do you reply?",
+        "opts": [
+            {"t": "I don't. That door is closed.", "pts": 0},
+            {"t": "Something friendly and vague, and I reread their message twice.", "pts": 2},
+            {"t": "I admit I remember it, and let them take the next step.", "pts": 3},
+            {"t": "I ask when they're free.", "pts": 5},
+        ],
+    },
+    {
+        "title": "Three of you, one night",
+        "text": "You and your partner have joked about a threesome for months. Tonight a friend you both like stays over, and the joke suddenly isn't one.",
+        "prompt": "What do you want to happen?",
+        "opts": [
+            {"t": "Nothing. The joke was a joke.", "pts": 0},
+            {"t": "I'd be curious, but I'd never be the one to start it.", "pts": 2},
+            {"t": "I'd give my partner a look that says I'm in if they are.", "pts": 3},
+            {"t": "I'd make the first move myself.", "pts": 5},
+        ],
+    },
+    {
+        "title": "Handing over control",
+        "text": "Someone you're seeing asks if you'd let them take complete control for one night: what you wear, what you do, when you're allowed to finish.",
+        "prompt": "What's your answer?",
+        "opts": [
+            {"t": "No. I don't hand over that kind of control.", "pts": 0},
+            {"t": "Maybe, if we talked it through a lot first.", "pts": 2},
+            {"t": "Yes, and I'm already thinking about what they'd make me do.", "pts": 3},
+            {"t": "Yes. I've wanted someone to ask me that for years.", "pts": 5},
+        ],
+    },
+    {
+        "title": "The open-relationship conversation",
+        "text": "Your partner brings up opening the relationship, very carefully, like they've rehearsed it. They say they'd only do it if you wanted to as well.",
+        "prompt": "Where do you land?",
+        "opts": [
+            {"t": "It's a no. Monogamy matters to me.", "pts": 0},
+            {"t": "I say I'll think about it, and I actually do.", "pts": 2},
+            {"t": "I'm relieved, because I've been thinking the same thing.", "pts": 3},
+            {"t": "I already have someone in mind.", "pts": 5},
+        ],
+    },
+    {
+        "title": "What you watch when you're alone",
+        "text": "You catch yourself watching the same kind of thing over and over, something that doesn't match how you'd describe yourself.",
+        "prompt": "What do you make of it?",
+        "opts": [
+            {"t": "Nothing. It's fantasy and it stays fantasy.", "pts": 0},
+            {"t": "It's a bit uncomfortable, so I try not to think about it.", "pts": 2},
+            {"t": "It's telling me something, and I'm starting to listen.", "pts": 3},
+            {"t": "I know exactly what it means, and I want to try it for real.", "pts": 5},
+        ],
+    },
+]
+
+
+def _fallback_scenarios(n: int, exclude_titles=()) -> list:
+    """n distinct static scenarios (gender-neutral), skipping titles already used."""
+    pool = [f for f in _FALLBACK_SCENARIOS if f["title"] not in set(exclude_titles)]
+    return [dict(f) for f in random.sample(pool, min(n, len(pool)))]
 
 
 def get_scenarios() -> list:
@@ -579,7 +693,7 @@ def get_scenarios() -> list:
             return _generate_all_scenarios(key, profile)
         except Exception:
             pass
-    return [_fallback_scenario(i) for i in range(SCENARIO_COUNT)]
+    return _fallback_scenarios(SCENARIO_COUNT)
 
 
 # ─── PROFILE + CATEGORY SCORING ───────────────────────────────────────────────
@@ -721,11 +835,18 @@ def generate_profile_and_categories(result_type, openness_pct, hd_answers,
 
 # ─── COMMUNITY PULSE ──────────────────────────────────────────────────────────
 
-def _render_community_pulse(q_hash: str, chosen_idx: int, opt_labels: list):
+def _render_community_pulse(q_hash: str, chosen_idx: int, opt_labels: list, slots: list = None):
+    """slots[i] is the stored slot of displayed option i (answers are shuffled)."""
+    slots = slots or list(range(len(opt_labels)))
     try:
         import database as db
-        db.record_community_answer(q_hash, chosen_idx)
-        tallies = db.get_community_answers(q_hash)
+        # Streamlit reruns on every click, so only count the first answer per question
+        recorded = st.session_state.setdefault("wwyd_pulse_shown", {})
+        if q_hash not in recorded:
+            db.record_community_answer(q_hash, slots[chosen_idx])
+            recorded[q_hash] = slots[chosen_idx]
+        stored = db.get_community_answers(q_hash)
+        tallies = {i: stored.get(slot, 0) for i, slot in enumerate(slots)}
     except Exception:
         return
 
@@ -1241,6 +1362,15 @@ def render_profile_intake():
         st.rerun()
 
 
+def _shuffle_opts(q: dict) -> dict:
+    """Show answers in random order so the most guarded one isn't always on top.
+    Each option keeps its original slot in "i" for the community tallies."""
+    opts = [dict(o, i=k) if isinstance(o, dict) else {"t": str(o), "pts": 0, "i": k}
+            for k, o in enumerate(q.get("opts") or [])]
+    random.shuffle(opts)
+    return {**q, "opts": opts}
+
+
 # ─── PHASE: LOADING ───────────────────────────────────────────────────────────
 
 def render_loading():
@@ -1257,7 +1387,7 @@ def render_loading():
 
     try:
         upd(10, "Generating personalized scenarios…")
-        scenarios = get_scenarios()
+        scenarios = [_shuffle_opts(q) for q in get_scenarios()]
 
         upd(100, "Ready.")
         time.sleep(0.1)
@@ -1356,7 +1486,8 @@ def render_quiz():
         st.session_state.wwyd_answers = a
 
     if chosen is not None:
-        _render_community_pulse(q_hash, chosen, opt_labels)
+        slots = [opt.get("i", k) if isinstance(opt, dict) else k for k, opt in enumerate(q["opts"])]
+        _render_community_pulse(q_hash, chosen, opt_labels, slots)
 
     st.html("<br>")
     col_back, col_next = st.columns(2)
@@ -1525,7 +1656,7 @@ def render_generating_profile():
             for q in questions
         )
         pct         = round((total_pts / max_pts) * 100) if max_pts else 0
-        result_type = next((r for r in RESULT_TYPES if r["min"] <= total_pts <= r["max"]), RESULT_TYPES[-1])
+        result_type = next((r for r in RESULT_TYPES if r["min"] <= pct <= r["max"]), RESULT_TYPES[-1])
 
         upd(35, "Reading your hidden desire signals…")
         try:
