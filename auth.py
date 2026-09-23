@@ -125,21 +125,36 @@ def forget_session():
     st.session_state["_cookie_clear"] = True
 
 
+def remember_flag(name: str):
+    """Remember a one-off (like "already celebrated") in this browser for a year."""
+    st.session_state.setdefault("_cookie_flags", []).append(name)
+
+
+def has_flag(name: str) -> bool:
+    try:
+        return bool(st.context.cookies.get(name))
+    except Exception:
+        return False
+
+
+def _cookie_js(name: str, value: str, age: int) -> str:
+    return ("document.cookie = '" + name + "=" + value + "; Max-Age=" + str(age)
+            + "; Path=/; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : '');")
+
+
 def flush_session_cookie():
-    """Write or clear the cookie. Call once per run, from a run that doesn't rerun right away."""
+    """Write or clear cookies. Call once per run, from a run that doesn't rerun right away."""
     token = st.session_state.pop("_cookie_set", None)
     clear = st.session_state.pop("_cookie_clear", False)
+    flags = st.session_state.pop("_cookie_flags", [])
+    js = []
     if token and re.fullmatch(r"[A-Za-z0-9_-]+", token):
-        value, age = token, _COOKIE_MAX_AGE
+        js.append(_cookie_js(SESSION_COOKIE, token, _COOKIE_MAX_AGE))
     elif clear:
-        value, age = "", 0
-    else:
-        return
-    st.html(
-        "<script>document.cookie = '" + SESSION_COOKIE + "=" + value + "; Max-Age=" + str(age)
-        + "; Path=/; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : '');</script>",
-        unsafe_allow_javascript=True, width=1,
-    )
+        js.append(_cookie_js(SESSION_COOKIE, "", 0))
+    js += [_cookie_js(f, "1", 365 * 24 * 3600) for f in flags if re.fullmatch(r"[A-Za-z0-9_]+", f)]
+    if js:
+        st.html("<script>" + "".join(js) + "</script>", unsafe_allow_javascript=True, width=1)
 
 
 def restore_session() -> bool:
@@ -165,6 +180,8 @@ def restore_session() -> bool:
     st.session_state.user = user
     st.session_state.session_token = token
     st.session_state.setdefault("tab", "discover")
+    import time
+    st.session_state["_session_checked_at"] = time.time()   # just verified it
     return True
 
 

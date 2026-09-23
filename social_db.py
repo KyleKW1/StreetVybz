@@ -8,6 +8,8 @@ Uses the shared connection pool from database.py.
 import json
 from datetime import datetime, timedelta
 
+import streamlit as st
+
 from database import create_connection
 
 PROFILE_FIELDS = (
@@ -93,6 +95,33 @@ _DDL = [
 
 # ─── PLUMBING ─────────────────────────────────────────────────────────────────
 
+def new_run():
+    """Start of a full app run: forget the per-run memo (see _memo)."""
+    try:
+        st.session_state["_run_memo"] = {}
+    except Exception:
+        pass
+
+
+def _memo(key, fn):
+    """Reuse a read within one app run — the nav bar, the page and main() all
+    ask for the same profile and matches. Any write clears it."""
+    try:
+        memo = st.session_state.setdefault("_run_memo", {})
+    except Exception:
+        return fn()
+    if key not in memo:
+        memo[key] = fn()
+    return memo[key]
+
+
+def _forget():
+    try:
+        st.session_state["_run_memo"] = {}
+    except Exception:
+        pass
+
+
 def _run(fn, default=None):
     """Open a connection, run fn(conn), always close. Any error → default."""
     conn = create_connection()
@@ -128,6 +157,7 @@ def _fetchone(sql, params=()):
 
 def _write(sql, params=()):
     """Execute one write. Returns rowcount (≥0) on success, None on failure."""
+    _forget()
     def q(conn):
         cur = conn.cursor()
         cur.execute(sql, params)
@@ -168,9 +198,9 @@ def tonight() -> str:
 # ─── PROFILES ─────────────────────────────────────────────────────────────────
 
 def get_profile(user_id: int) -> dict | None:
-    return _fetchone(
+    return _memo(("profile", user_id), lambda: _fetchone(
         """SELECT p.*, u.username FROM profiles p JOIN users u ON u.id = p.user_id
-           WHERE p.user_id = %s""", (user_id,))
+           WHERE p.user_id = %s""", (user_id,)))
 
 
 def profile_complete(profile: dict | None) -> bool:
@@ -266,6 +296,7 @@ def record_swipe(user_id: int, target_id: int, liked: bool) -> int | None:
         conn.commit()
         cur.close()
         return match_id
+    _forget()
     return _run(q, None)
 
 
@@ -317,6 +348,10 @@ def match_view(row: dict, user_id: int) -> dict:
 
 
 def load_matches(user_id: int) -> list:
+    return _memo(("matches", user_id), lambda: _load_matches(user_id))
+
+
+def _load_matches(user_id: int) -> list:
     rows = _fetchall(
         """SELECT m.*, u.username AS other_name,
                   lm.body AS last_message, lm.created_at AS last_at, lm.sender_id AS last_sender

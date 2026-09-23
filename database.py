@@ -66,6 +66,19 @@ def _report_db_down(e):
         pass
 
 
+def _checkout(pool, wait_secs: float = 3.0):
+    """Borrow a pooled connection. When every connection is busy (lots of people
+    online at once), wait briefly for one instead of treating it as an outage."""
+    deadline = time.time() + wait_secs
+    while True:
+        try:
+            return pool.get_connection()
+        except mysql.connector.errors.PoolError:
+            if time.time() >= deadline:
+                raise
+            time.sleep(0.05)
+
+
 def create_connection():
     global _db_down_until
     if not MYSQL_AVAILABLE or not DB_CONFIG.get("host"):
@@ -74,7 +87,10 @@ def create_connection():
         return None
     try:
         pool = _get_pool()
-        conn = pool.get_connection()
+        conn = _checkout(pool)
+    except mysql.connector.errors.PoolError as e:
+        print(f"[database] {e}")   # busy, not down: don't rebuild the pool or back off
+        return None
     except Exception as e:
         _get_pool.clear()
         _db_down_until = time.time() + _DB_RETRY_SECS

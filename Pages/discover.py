@@ -83,14 +83,15 @@ def _its_a_match(m: dict):
 
 
 def _quiz_nudge():
-    c1, c2 = st.columns([3, 1.3], vertical_alignment="center")
-    with c1:
-        st.html('<div class="hd-sub"><b style="color:var(--text);">🎯 Get better matches</b> — '
-                'take the quiz so your vibe score uses more than lifestyle.</div>')
-    with c2:
-        if st.button("Take quiz", key="disc_quiz_nudge", use_container_width=True):
-            open_quiz("discover")
-    st.html("<div style='height:8px'></div>")
+    # One slim row (text + button side by side, even on phones) so the card stays on screen
+    with st.container(key="qnudge"):
+        c1, c2 = st.columns([3, 1.3], vertical_alignment="center")
+        with c1:
+            st.html('<div class="hd-sub" style="line-height:1.35;"><b style="color:var(--text);">'
+                    '🎯 Sharper matches</b><br>Take the 5-minute quiz</div>')
+        with c2:
+            if st.button("Take quiz", key="disc_quiz_nudge", use_container_width=True):
+                open_quiz("discover")
 
 
 def _step(icon: str, title: str, text: str):
@@ -211,7 +212,11 @@ def discover_page():
         with st.spinner("Finding people…"):
             queue = _load_queue(uid, me)
 
-    header("Discover", "Who's around", "Ranked by how much you vibe — lifestyle + quiz answers." if queue else "")
+    if queue:
+        # Compact heading when there's a card, so Like/Pass fit on a phone screen
+        st.html('<div class="hd-kicker" style="margin:2px 0 10px;">Who\'s around · best vibe first</div>')
+    else:
+        header("Discover", "Who's around")
 
     if me.get("hidden"):
         st.info("👻 You're hidden, so nobody can see you right now. Turn it off in **Me** to show up again.")
@@ -228,7 +233,6 @@ def discover_page():
     c = queue[0]
     _card(c)
 
-    st.html("<div style='height:12px'></div>")
     with st.container(key="swipe"):
         col_pass, col_like = st.columns(2)
         with col_pass:
