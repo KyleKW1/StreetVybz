@@ -231,8 +231,5 @@ def open_quiz(return_to: str):
 
 
 def invite_link() -> str:
-    try:
-        base = st.secrets.get("APP_URL", "https://vivevaultapps.streamlit.app")
-    except Exception:
-        base = "https://vivevaultapps.streamlit.app"
-    return base.rstrip("/")
+    from config import APP_URL
+    return APP_URL

@@ -163,8 +163,8 @@ def _send_email(to_email: str, token=None, reset_type="password") -> bool:
         msg["To"]   = to_email
         if reset_type == "password":
             msg["Subject"] = "Hidden — Password Reset"
-            base_url  = st.secrets.get("APP_URL", "https://vivevaultapps.streamlit.app")
-            reset_url = f"{base_url.rstrip('/')}/?reset_token={token}"
+            from config import APP_URL
+            reset_url = f"{APP_URL}/?reset_token={token}"
             body = (
                 f"Click the link below to reset your password (valid 1 hour):\n\n"
                 f"{reset_url}\n\n"
