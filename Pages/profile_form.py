@@ -10,7 +10,7 @@ import streamlit as st
 import social_db
 from matching import (LIFESTYLE, INTENTS, GENDERS, SHOW_ME, MIN_AGE,
                       is_adult, age_on, round_coord)
-from ui import header
+from ui import header, open_quiz
 
 
 def _uid():
@@ -149,10 +149,31 @@ def setup_page():
     if profile.get("birthdate") and not is_adult(profile["birthdate"]):
         header("Hidden", "18+ only", f"You must be {MIN_AGE} or older to use Hidden.")
         return
-    header("Step 1 of 1", "Set up your vibe",
+    header("Step 1 of 2", "Set up your vibe",
            "Tell us how you live and where you are — we'll find people who match.")
-    if profile_form(uid, profile, "setup", "Start matching →"):
-        st.balloons()
+    if profile_form(uid, profile, "setup", "Next →"):
+        st.session_state.tab = "quiz_offer"
+        st.rerun()
+
+
+def quiz_offer_page():
+    st.html('<div class="hd-brand" style="margin-bottom:10px;">HIDDEN</div>')
+    header("Step 2 of 2", "Sharpen your matches",
+           "Read Between The Lines is a quick scenario quiz. Your answers stay private — "
+           "they only power the vibe score.")
+    st.html("""
+<div class="hd-card" style="padding:20px 22px;">
+  <div class="hd-why" style="margin:0;padding:0;border:0;">
+    <div>🎭 &nbsp;Real-life scenarios — pick what you'd actually do</div>
+    <div>🔒 &nbsp;Hidden desires round — never shown to anyone</div>
+    <div>🎯 &nbsp;Worth 40% of every vibe score</div>
+    <div>⏱ &nbsp;About 5 minutes</div>
+  </div>
+</div>""")
+    st.html("<div style='height:12px'></div>")
+    if st.button("Take the quiz →", type="primary", use_container_width=True, key="offer_take"):
+        open_quiz("discover")
+    if st.button("Skip for now", use_container_width=True, key="offer_skip"):
         st.session_state.tab = "discover"
         st.rerun()
 

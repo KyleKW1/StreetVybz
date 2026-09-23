@@ -6,8 +6,8 @@
 import streamlit as st
 
 _BASE_CSS = """
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
+@import url("https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap");
 :root {
   --bg:#0a0a0b; --surface:#111114; --card:#18181d;
   --border:#2a2a35; --lime:#c6ff00; --magenta:#ff2d78;
