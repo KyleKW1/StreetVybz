@@ -2,6 +2,7 @@
 app.py — Hidden main entry point.
 
 Four tabs: Discover · Matches · Tonight (secret — unlocks at your first match) · Me.
+New accounts see a short "How Hidden works" walkthrough (Pages/intro.py) before setup.
 """
 
 from datetime import date
@@ -98,6 +99,9 @@ def _render_auth():
         _register_page()
     elif page == "forgot":
         _forgot_page()
+    elif page == "intro":
+        from Pages.intro import intro_page
+        intro_page(logged_in=False)
     elif page == "reset_password":
         try:
             from password_reset import reset_password_page
@@ -149,6 +153,9 @@ def _login_page():
             st.session_state.page = "register"; st.rerun()
         if st.button("Forgot password", use_container_width=True, key="go_forgot"):
             st.session_state.page = "forgot"; st.rerun()
+        if st.button("How does Hidden work?", use_container_width=True, key="go_intro", type="tertiary"):
+            from Pages.intro import open_intro
+            open_intro("login", logged_in=False)
 
 
 def _register_page():
@@ -206,7 +213,8 @@ def _register_page():
                         st.session_state.session_token = token
                         st.session_state.authenticated = True
                         st.session_state.user          = user
-                        st.session_state.tab           = "discover"
+                        st.session_state.tab           = "intro"      # walkthrough, then setup
+                        st.session_state._intro_return = "setup"
                         st.rerun()
                     elif status == db.CREATE_USER_DUP_USERNAME:
                         st.error("That username is already taken — try another.")
@@ -311,6 +319,11 @@ def main():
             st.rerun()
         from Pages.what_would_you_do import what_would_you_do_page
         what_would_you_do_page()
+        return
+
+    if st.session_state.get("tab") == "intro":
+        from Pages.intro import intro_page
+        intro_page()
         return
 
     if st.session_state.get("tab") == "quiz_offer":

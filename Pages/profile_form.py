@@ -151,6 +151,9 @@ def setup_page():
         return
     header("Step 1 of 2", "Set up your vibe",
            "Tell us how you live and where you are — we'll find people who match.")
+    if st.button("How does Hidden work?", key="setup_intro", type="tertiary"):
+        from Pages.intro import open_intro
+        open_intro("setup")
     if profile_form(uid, profile, "setup", "Next →"):
         st.session_state.tab = "quiz_offer"
         st.rerun()

@@ -125,6 +125,15 @@ div.st-key-nav button[aria-checked="true"] * { color:#0a0a0b !important; }
   div.st-key-nav button { font-size:10px !important; letter-spacing:0 !important; padding:6px 2px !important; }
 }
 
+/* Tertiary buttons read as quiet text links */
+.stButton > button[kind="tertiary"] {
+  background:transparent !important; border:0 !important; box-shadow:none !important;
+  color:var(--lime) !important; text-transform:none !important; letter-spacing:0 !important;
+  font-family:'DM Sans',sans-serif !important; font-size:14px !important;
+  min-height:0 !important; padding:4px 0 !important; }
+.stButton > button[kind="tertiary"] * { color:var(--lime) !important; }
+.stButton > button[kind="tertiary"]:hover { text-decoration:underline; transform:none !important; }
+
 .hd-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
 </style>
 """
