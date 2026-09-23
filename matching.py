@@ -120,6 +120,37 @@ def is_candidate(me: dict, them: dict, today=None) -> bool:
     return bool(shared_intents(me, them)) and distance(me, them) is not None
 
 
+def filter_reasons(me: dict, others: list[dict], today=None) -> dict:
+    """Why nearby people aren't in Discover: counts by the first rule each one fails.
+
+    my_ages     — outside my age range (I can change this)
+    their_ages  — I'm outside theirs
+    intent      — not looking for the same thing
+    gender      — dating preferences don't line up
+    """
+    out = {"nearby": 0, "my_ages": 0, "their_ages": 0, "intent": 0, "gender": 0}
+    if not is_adult(me.get("birthdate"), today):
+        return out
+    my_age = age_on(me["birthdate"], today)
+    for them in others:
+        if (me.get("user_id") == them.get("user_id") or them.get("hidden")
+                or not is_adult(them.get("birthdate"), today) or distance(me, them) is None):
+            continue
+        out["nearby"] += 1
+        if is_candidate(me, them, today):
+            continue
+        their_age = age_on(them["birthdate"], today)
+        if not (int(me.get("age_min") or 18) <= their_age <= int(me.get("age_max") or 99)):
+            out["my_ages"] += 1
+        elif not (int(them.get("age_min") or 18) <= my_age <= int(them.get("age_max") or 99)):
+            out["their_ages"] += 1
+        elif not (_intent_set(me.get("intent")) & _intent_set(them.get("intent"))):
+            out["intent"] += 1
+        else:
+            out["gender"] += 1
+    return out
+
+
 # ─── SIMILARITY ───────────────────────────────────────────────────────────────
 
 def _jaccard(a, b):

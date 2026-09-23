@@ -156,7 +156,7 @@ textarea {
 .stTextArea label,
 .stSelectbox label,
 .stSlider label,
-.stRadio label,
+.stRadio > label,
 .stDateInput label,
 .stTimeInput label {
   font-family: 'Space Mono', monospace !important;

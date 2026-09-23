@@ -18,6 +18,12 @@ button[data-testid="stExpandSidebarButton"] { display:none !important; }
 section.main .block-container, div[data-testid="stMainBlockContainer"] {
   max-width: 640px !important; padding-top: 1.2rem !important;
 }
+/* The transparent Streamlit header overlaps the top of the page (thanks to the
+   short padding above), so let clicks fall through it to our own buttons.
+   Its own toolbar controls stay clickable. */
+header[data-testid="stHeader"], header[data-testid="stHeader"] div { pointer-events: none; }
+header[data-testid="stHeader"] :is(button, a, [role="button"], [data-testid="stMainMenu"],
+  [data-testid="stToolbarActions"] *, [data-testid="stAppDeployButton"] *) { pointer-events: auto; }
 
 @keyframes hd-rise  { from{opacity:0;transform:translateY(22px) scale(.97)} to{opacity:1;transform:none} }
 @keyframes hd-pop   { 0%{transform:scale(.6);opacity:0} 60%{transform:scale(1.08);opacity:1} 100%{transform:scale(1)} }

@@ -498,12 +498,16 @@ def delete_social_data(user_id: int) -> None:
     _write("DELETE FROM profiles WHERE user_id = %s", (user_id,))
 
 
-def community_size(user_id: int, city: str) -> dict:
-    """How many other people have profiles — overall and in this city."""
+def community_size(user_id: int, city: str) -> dict | None:
+    """How many other people have profiles (overall and in this city), and how
+    many this user passed on. None when the database can't be reached."""
     row = _fetchone(
         """SELECT COUNT(*) AS total,
-                  SUM(LOWER(TRIM(city)) = LOWER(TRIM(%s))) AS in_city
+                  SUM(LOWER(TRIM(city)) = LOWER(TRIM(%s))) AS in_city,
+                  (SELECT COUNT(*) FROM swipes WHERE swiper_id = %s AND liked = 0) AS passed
            FROM profiles WHERE user_id <> %s AND hidden = 0 AND intent IS NOT NULL""",
-        (city or "", user_id),
-    ) or {}
-    return {"total": int(row.get("total") or 0), "in_city": int(row.get("in_city") or 0)}
+        (city or "", user_id, user_id),
+    )
+    if row is None:
+        return None
+    return {k: int(row.get(k) or 0) for k in ("total", "in_city", "passed")}
