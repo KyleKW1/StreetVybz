@@ -1,5 +1,6 @@
 # database.py
 import json
+import time
 import streamlit as st
 
 try:
@@ -28,52 +29,62 @@ except Exception:
 
 @st.cache_resource
 def _get_pool():
+    """Build the connection pool. Raises on failure so a failed attempt is
+    NOT cached — the next call retries instead of staying broken until reboot."""
     if not MYSQL_AVAILABLE or not DB_CONFIG.get("host"):
         return None
+    return pooling.MySQLConnectionPool(
+        pool_name="hidden",
+        pool_size=5,
+        pool_reset_session=True,
+        host=DB_CONFIG.get("host", ""),
+        port=int(DB_CONFIG.get("port", 3306)),
+        user=DB_CONFIG.get("user", ""),
+        password=DB_CONFIG.get("password", ""),
+        database=DB_CONFIG.get("database", ""),
+        connection_timeout=int(DB_CONFIG.get("connection_timeout", 5)),
+        autocommit=False,
+        ssl_disabled=bool(DB_CONFIG.get("ssl_disabled", True)),
+    )
+
+
+# After a failure, skip reconnect attempts for a short while so one page load
+# doesn't stall on a timeout for every query while the database is down.
+_DB_RETRY_SECS = 15
+_db_down_until = 0.0
+
+
+def _report_db_down(e):
+    """Show one friendly error per session per outage (details go to the log)."""
+    print(f"[database] connection failed: {e}")
     try:
-        return pooling.MySQLConnectionPool(
-            pool_name="hidden",
-            pool_size=5,
-            pool_reset_session=True,
-            host=DB_CONFIG.get("host", ""),
-            port=int(DB_CONFIG.get("port", 3306)),
-            user=DB_CONFIG.get("user", ""),
-            password=DB_CONFIG.get("password", ""),
-            database=DB_CONFIG.get("database", ""),
-            connection_timeout=int(DB_CONFIG.get("connection_timeout", 5)),
-            autocommit=False,
-            ssl_disabled=bool(DB_CONFIG.get("ssl_disabled", True)),
-        )
-    except Exception as e:
-        st.error(f"DB pool init error: {e}")
-        return None
+        if not st.session_state.get("_db_down_notice"):
+            st.session_state["_db_down_notice"] = True
+            st.error("Can't reach the database right now. It may be starting up — "
+                     "try again in a minute.")
+    except Exception:
+        pass
 
 
 def create_connection():
-    pool = _get_pool()
-    if pool:
-        try:
-            return pool.get_connection()
-        except Exception:
-            # Pool may be stale — clear cache and try a direct connection
-            _get_pool.clear()
-
+    global _db_down_until
     if not MYSQL_AVAILABLE or not DB_CONFIG.get("host"):
         return None
-    try:
-        return mysql.connector.connect(
-            host=DB_CONFIG.get("host", ""),
-            port=int(DB_CONFIG.get("port", 3306)),
-            user=DB_CONFIG.get("user", ""),
-            password=DB_CONFIG.get("password", ""),
-            database=DB_CONFIG.get("database", ""),
-            connection_timeout=int(DB_CONFIG.get("connection_timeout", 5)),
-            autocommit=False,
-            ssl_disabled=bool(DB_CONFIG.get("ssl_disabled", True)),
-        )
-    except Exception as e:
-        st.error(f"DB connection error: {e}")
+    if time.time() < _db_down_until:
         return None
+    try:
+        pool = _get_pool()
+        conn = pool.get_connection()
+    except Exception as e:
+        _get_pool.clear()
+        _db_down_until = time.time() + _DB_RETRY_SECS
+        _report_db_down(e)
+        return None
+    try:
+        st.session_state.pop("_db_down_notice", None)
+    except Exception:
+        pass
+    return conn
 
 
 def ensure_tables():

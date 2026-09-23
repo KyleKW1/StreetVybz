@@ -399,6 +399,10 @@ def _bootstrap_db():
         return
     try:
         import database as db
+        probe = db.create_connection()
+        if not probe:
+            return  # database unreachable — retry setup on the next run
+        probe.close()
         db.ensure_tables()
         _ensure_password_resets_table()
         st.session_state["_db_bootstrapped"] = True
