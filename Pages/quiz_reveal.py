@@ -86,7 +86,7 @@ def comparison_html(me_label: str, mq: dict, them_label: str, tq: dict, name_des
 
 # Someone who said yes to nearly every hidden desire only sees how many they share with
 # a match, so answering yes to everything can't be used to read the other person's list.
-MAX_NAMED_DESIRES = 10
+MAX_NAMED_DESIRES = 7    # of the 10 statements
 
 
 def match_quiz_card(uid: int, other_id: int, other_name: str, matched_at, key: str):

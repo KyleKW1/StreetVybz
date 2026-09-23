@@ -24,25 +24,27 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 SCENARIO_COUNT = 7
 
+# Real adult-platform categories, minus the ones built around people who could read as
+# under 18 (school, babysitter, college, step, old/young): results are shown to real matches.
 ALL_PLATFORM_CATEGORIES = [
     "18-25", "60FPS", "AI", "Amateur", "Anal", "Arab", "Asian", "Babe",
-    "Babysitter (18+)", "BBW", "Behind The Scenes", "Big Ass", "Big Dick",
+    "BBW", "Behind The Scenes", "Big Ass", "Big Dick",
     "Big Tits", "Bisexual Male", "Blonde", "Blowjob", "Bondage", "Brazilian",
     "British", "Brunette", "Bukkake", "Cartoon", "Casting", "Celebrity",
-    "College (18+)", "Compilation", "Cosplay", "Creampie", "Cuckold",
-    "Cumshot", "Czech", "Deepthroat", "Double Penetration", "Ebony", "Euro",
+    "Compilation", "Cosplay", "Creampie", "Cuckold",
+    "Cumshot", "Czech", "Deepthroat", "Dirty Talk", "Double Penetration", "Ebony", "Euro",
     "Exclusive", "Feet", "Female Orgasm", "Fetish", "Fingering", "Fisting",
-    "French", "Funny", "Gaming", "Gangbang", "German", "Handjob", "Hardcore",
+    "French", "Funny", "Gaming", "Gangbang", "Gay", "German", "Handjob", "Hardcore",
     "HD Porn", "Hentai", "Indian", "Interactive", "Interracial", "Italian",
     "Japanese", "Korean", "Latina", "Lesbian", "Massage", "Masturbation",
-    "Mature", "MILF", "Muscular Men", "Music", "Old/Young (18+)", "Orgy",
+    "Mature", "MILF", "Muscular Men", "Music", "Orgy",
     "Parody", "Party", "Pissing", "Podcast", "Popular With Women", "Pornstar",
     "POV", "Public", "Pussy Licking", "Reaction", "Reality", "Red Head",
-    "Role Play", "Romantic", "Rough Sex", "Russian", "School (18+)", "SFW",
+    "Role Play", "Romantic", "Rough Sex", "Russian", "Sensual", "SFW",
     "Small Tits", "Smoking", "Solo Female", "Solo Male", "Squirt",
-    "Step Fantasy", "Strap On", "Striptease", "Tattooed Women", "Threesome",
+    "Strap On", "Striptease", "Tattooed Women", "Threesome",
     "Toys", "Transgender", "Verified Amateurs", "Verified Couples",
-    "Verified Models", "Vintage", "Virtual Reality", "Webcam",
+    "Verified Models", "Vintage", "Virtual Reality", "Voyeur", "Webcam",
 ]
 
 # min/max are openness-index bands (0–100), so every tier is reachable
@@ -85,47 +87,39 @@ RESULT_TYPES = [
     },
 ]
 
-# Phase 2: escalating hidden desire statements
+# Phase 2: 10 statements that escalate from curiosity to your deepest fantasy.
+# The signal names are stored with results and shown to matches (matching.DESIRE_LABELS),
+# so keep them stable; retired ones stay in DESIRE_LABELS for older results.
 HIDDEN_DESIRE_QUESTIONS = [
-    # Tier 1 — warming up
-    {"id": "hd_01", "signal": "verbal_arousal", "tier": 1,
-     "text": "Being told exactly what someone wants to do to you — in specific, graphic detail — turns you on more than the act itself sometimes."},
+    # Tier 1 — curiosity
     {"id": "hd_02", "signal": "desired_intensity", "tier": 1,
-     "text": "You want to be wanted badly enough that someone loses composure. Not politely wanted. Urgently."},
-    {"id": "hd_03", "signal": "authentic_exposure", "tier": 1,
-     "text": "Being completely naked — no performance, no held breath, no self-editing — and having someone look at you like that is something you actively think about."},
+     "text": "You want to be wanted so badly that someone stops being polite about it — hands on you before the door is even shut."},
+    {"id": "hd_01", "signal": "verbal_arousal", "tier": 1,
+     "text": "Someone telling you exactly what they're going to do to you — slowly, in detail — gets you going faster than being touched."},
 
     # Tier 2 — getting specific
-    {"id": "hd_04", "signal": "power_dynamic", "tier": 2,
-     "text": "A specific power dynamic — one person clearly in charge, one clearly not — is what makes certain sexual scenarios stay in your head long after."},
-    {"id": "hd_05", "signal": "archetype_attraction", "tier": 2,
-     "text": "There's a specific type of person — not a look, an energy — whose presence makes you immediately wonder what they'd be like in bed."},
     {"id": "hd_06", "signal": "stranger_fantasy", "tier": 2,
-     "text": "A stranger in a specific setting — hotel bar, late flight, someone else's party — and the scene writes itself before you consciously stop it."},
+     "text": "A stranger, a specific place — a hotel bar, a dark dance floor, a late flight — and in your head it's already gone all the way before you've said a word."},
+    {"id": "hd_10", "signal": "exhib_active", "tier": 2,
+     "text": "The idea of being watched — someone seeing you undress, or seeing you mid-sex — turns you on more than you'd admit to anyone you know."},
 
-    # Tier 3 — dominant/submissive
+    # Tier 3 — the ones people don't say out loud
     {"id": "hd_07", "signal": "dom_active", "tier": 3,
-     "text": "You've fantasised about being completely in control of another person's pleasure — setting every pace, every permission, deciding when they get what they want."},
+     "text": "You've fantasised about being completely in charge of someone's pleasure — setting the pace, making them wait, deciding when they finally get to finish."},
     {"id": "hd_08", "signal": "sub_active", "tier": 3,
-     "text": "You've thought about having someone take over completely — pinning you down, deciding what happens to your body, and you just taking it."},
-    {"id": "hd_09", "signal": "taboo_arousal", "tier": 3,
-     "text": "You've gotten turned on by something you'd never say out loud — a video, a story, a thought — and your first instinct was to delete the browser history."},
-    {"id": "hd_10", "signal": "exhib_active", "tier": 3,
-     "text": "Being watched — someone seeing you during sex, or seeing you undress — is something you've thought about with more interest than you typically admit."},
+     "text": "You've thought about someone taking over completely — pinning you down, deciding what happens to your body, and you just letting them."},
+    {"id": "hd_12", "signal": "group_sex", "tier": 3,
+     "text": "You've pictured sex with more than one person at once — not as a joke, as a detailed scene you've replayed."},
 
-    # Tier 4 — group, specific fantasy
+    # Tier 4 — deeper
+    {"id": "hd_09", "signal": "taboo_arousal", "tier": 4,
+     "text": "Something you'd never say out loud has turned you on — a video, a story, a thought — and you went straight back to it later."},
     {"id": "hd_11", "signal": "secret_fantasy", "tier": 4,
-     "text": "You have a sexual fantasy you've never told a partner. Not because it's wrong — because saying it out loud would mean you'd actually have to decide if you want it."},
-    {"id": "hd_12", "signal": "group_sex", "tier": 4,
-     "text": "You've imagined what sex with more than one person at the same time would actually feel like — not as a passing thought, as a detailed mental image."},
-    {"id": "hd_13", "signal": "taboo_fixation", "tier": 4,
-     "text": "There's a specific category of content — something you'd close if someone walked in — that you keep returning to even when you tell yourself you're not that interested."},
+     "text": "There's a fantasy you've never told a single partner. Not because it's wrong — because saying it would mean admitting how much you want it."},
 
-    # Tier 5 — the ones that catch people off guard
+    # Tier 5 — your deepest fantasy
     {"id": "hd_14", "signal": "elaborated_fantasy", "tier": 5,
-     "text": "You have a sexual fantasy so mapped out — the specific person or type, the setting, the sequence of what happens — that you surprised yourself when you noticed how detailed it already was."},
-    {"id": "hd_15", "signal": "unnamed_fixation", "tier": 5,
-     "text": "There's something specific you've never done sexually but think about more than makes sense — and the fact that you haven't done it yet is its own kind of answer."},
+     "text": "Your deepest fantasy is already fully written — who it's with, where it happens, what happens first — and if the right person asked, you'd tell them tonight."},
 ]
 
 HD_OPTS = [
@@ -212,6 +206,36 @@ _SCENARIO_THEMES = [
     "a moment during a group social situation where eye contact with someone said everything that wasn't said out loud",
     "a sexting conversation that escalated faster than intended — and they weren't actually trying to stop it",
 ]
+
+# Single life — nobody assumed to have a partner
+_SINGLE_THEMES = [
+    "a casual link-up who asks, mid-kiss, what they've always wanted to try and never has",
+    "a couple they met on a night out inviting them home — both of them, together",
+    "a first date that skips dinner entirely because the texts beforehand already said everything",
+    "someone across a party who hasn't stopped looking all night finally coming over to whisper exactly what they want",
+    "a friend with benefits suggesting a blindfold, and the rules being that they can't ask what comes next",
+    "a dating-app match who opens with the most specific, filthy message they've ever received — and it's exactly their type",
+]
+
+# Themes that assume the reader already has a partner
+_PARTNER_WORDS = ("partner", "relationship", "couple who", "settled into", "either person formally")
+
+
+def _audience(profile: dict | None) -> str:
+    """Which scenarios fit: "single", "partnered", or "open" (poly: all of them)."""
+    rel = (profile or {}).get("relationship_status", "")
+    if rel in ("partnered", "married"):
+        return "partnered"
+    return "open" if rel == "poly" else "single"
+
+
+def _themes_for(audience: str) -> list:
+    if audience == "single":
+        return [t for t in _SCENARIO_THEMES if not any(w in t for w in _PARTNER_WORDS)] + _SINGLE_THEMES
+    if audience == "partnered":
+        return list(_SCENARIO_THEMES)
+    return _SCENARIO_THEMES + _SINGLE_THEMES
+
 
 # Gender-neutral rule enforced in every 
 _GENDER_NEUTRAL_RULE = """CRITICAL — gender-neutral and orientation-inclusive:
@@ -372,31 +396,36 @@ def _question_hash(text: str) -> str:
 # Kick off scenario generation at module load so questions are ready
 # before the user finishes reading the intro screen.
 
-_prefetch_lock   = threading.Lock()
-_prefetch_result = None  # list[scenario] once done | "loading" | "error"
+# One batch per audience (single / partnered / open), so nobody single gets partner scenarios.
 
-def _run_prefetch():
-    global _prefetch_result
+_prefetch_lock   = threading.Lock()
+_prefetch_result = {}  # audience → list[scenario] once done | "loading" | "error"
+_AUDIENCES = ("single", "partnered", "open")
+_AUDIENCE_PROFILE = {"single": {"relationship_status": "single"},
+                     "partnered": {"relationship_status": "partnered"},
+                     "open": {"relationship_status": "poly"}}
+
+def _run_prefetch(audience: str):
     try:
         key = st.secrets.get("OPENAI_API_KEY", "")
         if not key:
             with _prefetch_lock:
-                _prefetch_result = "error"
+                _prefetch_result[audience] = "error"
             return
-        scenarios = _generate_all_scenarios(key, {})
+        scenarios = _generate_all_scenarios(key, _AUDIENCE_PROFILE[audience])
         with _prefetch_lock:
-            _prefetch_result = scenarios
+            _prefetch_result[audience] = scenarios
     except Exception:
         with _prefetch_lock:
-            _prefetch_result = "error"
+            _prefetch_result[audience] = "error"
 
-def _ensure_prefetch_started():
-    global _prefetch_result
+def _ensure_prefetch_started(audiences=_AUDIENCES):
     with _prefetch_lock:
-        if _prefetch_result is None:
-            _prefetch_result = "loading"
-            t = threading.Thread(target=_run_prefetch, daemon=True)
-            t.start()
+        todo = [a for a in audiences if a not in _prefetch_result]
+        for a in todo:
+            _prefetch_result[a] = "loading"
+    for a in todo:
+        threading.Thread(target=_run_prefetch, args=(a,), daemon=True).start()
 
 _ensure_prefetch_started()
 
@@ -430,6 +459,8 @@ def _generate_one_scenario(theme: str, slot: int, api_key: str, profile: dict = 
         profile_context = f"User context (for personalization):\n{profile_context}\nMake this scenario feel specifically written for someone in this situation."
     else:
         profile_context = "Create a universally resonant scenario."
+    if _audience(profile) == "single":
+        profile_context += "\nThe reader is SINGLE: never mention their partner, relationship or spouse. Use a link-up, a date, a match, a stranger or a friend instead."
 
     prompt = f"""You write scenarios for an adult desire quiz on an 18+ platform. No filters.
 
@@ -489,7 +520,8 @@ def _generate_all_scenarios(api_key: str, profile: dict = None) -> list:
     if profile is None:
         profile = {}
     
-    themes = random.sample(_SCENARIO_THEMES, min(SCENARIO_COUNT, len(_SCENARIO_THEMES)))
+    pool   = _themes_for(_audience(profile))
+    themes = random.sample(pool, min(SCENARIO_COUNT, len(pool)))
 
     results = [None] * SCENARIO_COUNT
 
@@ -515,7 +547,8 @@ def _generate_all_scenarios(api_key: str, profile: dict = None) -> list:
     # Filter Nones, fill any gaps with a safe fallback
     scenarios = [s for s in results if s]
     scenarios += _fallback_scenarios(SCENARIO_COUNT - len(scenarios),
-                                     exclude_titles=[s.get("title") for s in scenarios])
+                                     exclude_titles=[s.get("title") for s in scenarios],
+                                     audience=_audience(profile))
 
     return scenarios[:SCENARIO_COUNT]
 
@@ -524,14 +557,14 @@ def _generate_all_scenarios(api_key: str, profile: dict = None) -> list:
 # quiz never repeats one.
 _FALLBACK_SCENARIOS = [
     {
-        "title": "The conversation that changed something",
-        "text": "You and someone you're close to stayed up talking until 4am. At some point the conversation shifted — not explicitly, but both of you felt it. Nothing happened. But something was established.",
-        "prompt": "What's the most honest thing you can say about what you wanted in that moment?",
+        "title": "4am on the couch",
+        "text": "You and someone you're close to have been talking until 4am, and their hand has been on your thigh for the last hour. Neither of you has mentioned it, and neither of you has moved.",
+        "prompt": "What do you do next?",
         "opts": [
-            {"t": "I wanted the conversation and nothing more. That was enough.", "pts": 0},
-            {"t": "I was aware of the tension but told myself I was imagining it.", "pts": 2},
-            {"t": "I knew exactly what was happening and I was waiting to see what they'd do.", "pts": 3},
-            {"t": "I wanted it to go further and I made sure they knew that.", "pts": 5},
+            {"t": "Stand up and say goodnight. Some lines stay uncrossed.", "pts": 0},
+            {"t": "Stay exactly where I am and let them decide.", "pts": 2},
+            {"t": "Put my hand on theirs so they know I've noticed.", "pts": 3},
+            {"t": "Kiss them. I've been waiting an hour for an excuse.", "pts": 5},
         ],
     },
     {
@@ -569,7 +602,7 @@ _FALLBACK_SCENARIOS = [
         ],
     },
     {
-        "title": "Your partner asks what you really want",
+        "title": "Your partner asks what you really want", "who": "partnered",
         "text": "Your partner asks, sincerely, if there's anything you've always wanted to try and never said. They mean it. They're waiting for an answer.",
         "prompt": "What do you actually tell them?",
         "opts": [
@@ -591,7 +624,7 @@ _FALLBACK_SCENARIOS = [
         ],
     },
     {
-        "title": "Someone wants to watch",
+        "title": "Someone wants to watch", "who": "partnered",
         "text": "Someone you trust tells you they'd love to just watch you with your partner. No touching, no pressure. They'd only be in the room.",
         "prompt": "What's your honest first reaction?",
         "opts": [
@@ -613,7 +646,7 @@ _FALLBACK_SCENARIOS = [
         ],
     },
     {
-        "title": "Three of you, one night",
+        "title": "Three of you, one night", "who": "partnered",
         "text": "You and your partner have joked about a threesome for months. Tonight a friend you both like stays over, and the joke suddenly isn't one.",
         "prompt": "What do you want to happen?",
         "opts": [
@@ -635,7 +668,7 @@ _FALLBACK_SCENARIOS = [
         ],
     },
     {
-        "title": "The open-relationship conversation",
+        "title": "The open-relationship conversation", "who": "partnered",
         "text": "Your partner brings up opening the relationship, very carefully, like they've rehearsed it. They say they'd only do it if you wanted to as well.",
         "prompt": "Where do you land?",
         "opts": [
@@ -643,6 +676,61 @@ _FALLBACK_SCENARIOS = [
             {"t": "I say I'll think about it, and I actually do.", "pts": 2},
             {"t": "I'm relieved, because I've been thinking the same thing.", "pts": 3},
             {"t": "I already have someone in mind.", "pts": 5},
+        ],
+    },
+    {
+        "title": "Two of them, one invitation", "who": "single",
+        "text": "A couple you've been dancing with all night lean in and ask if you want to come home with them. They're both looking at you, and they've clearly talked about this already.",
+        "prompt": "What's your honest answer?",
+        "opts": [
+            {"t": "No thanks. One person at a time is my limit.", "pts": 0},
+            {"t": "I say no, but I think about it the whole way home.", "pts": 2},
+            {"t": "I ask what exactly they have in mind.", "pts": 3},
+            {"t": "I'm already calling the car.", "pts": 5},
+        ],
+    },
+    {
+        "title": "The first message", "who": "single",
+        "text": "A new match skips hello and tells you, in detail, what they want to do to you on the first date. It's exactly your type of filthy.",
+        "prompt": "How do you reply?",
+        "opts": [
+            {"t": "I unmatch. Say hi first.", "pts": 0},
+            {"t": "Something playful that doesn't answer, and I read it twice.", "pts": 2},
+            {"t": "I tell them what I'd add to their list.", "pts": 3},
+            {"t": "I ask if they're free tonight.", "pts": 5},
+        ],
+    },
+    {
+        "title": "Dinner is cancelled", "who": "single",
+        "text": "An hour before your first date they text: forget the restaurant, come straight to mine. You both know what that means.",
+        "prompt": "What do you do?",
+        "opts": [
+            {"t": "Insist on the restaurant. I like to meet people first.", "pts": 0},
+            {"t": "Go to the restaurant, but I'm not planning to stay long.", "pts": 2},
+            {"t": "Go to theirs, and dress for it.", "pts": 3},
+            {"t": "Go to theirs. I was going to suggest it myself.", "pts": 5},
+        ],
+    },
+    {
+        "title": "The blindfold rule", "who": "single",
+        "text": "Your friend with benefits pulls out a blindfold and says tonight you don't get to see or ask what comes next. You only get to say stop.",
+        "prompt": "What's your first reaction?",
+        "opts": [
+            {"t": "No. I need to see what's happening.", "pts": 0},
+            {"t": "Nervous, but I let them put it on.", "pts": 2},
+            {"t": "Already turned on before it's even tied.", "pts": 3},
+            {"t": "I've been hoping someone would ask me this.", "pts": 5},
+        ],
+    },
+    {
+        "title": "Across the room", "who": "single",
+        "text": "Someone at the party has been watching you all night. They finally walk over, lean in and whisper exactly what they want to do to you in the bathroom.",
+        "prompt": "Where does this go?",
+        "opts": [
+            {"t": "Nowhere. I laugh it off and find my friends.", "pts": 0},
+            {"t": "I tell them to get my number first.", "pts": 2},
+            {"t": "I tell them to go first and I'll follow in a minute.", "pts": 3},
+            {"t": "I take their hand and lead the way.", "pts": 5},
         ],
     },
     {
@@ -659,31 +747,32 @@ _FALLBACK_SCENARIOS = [
 ]
 
 
-def _fallback_scenarios(n: int, exclude_titles=()) -> list:
-    """n distinct static scenarios (gender-neutral), skipping titles already used."""
-    pool = [f for f in _FALLBACK_SCENARIOS if f["title"] not in set(exclude_titles)]
-    return [dict(f) for f in random.sample(pool, min(n, len(pool)))]
+def _fallback_scenarios(n: int, exclude_titles=(), audience: str = "open") -> list:
+    """n distinct static scenarios (gender-neutral) that fit this person's situation."""
+    pool = [f for f in _FALLBACK_SCENARIOS if f["title"] not in set(exclude_titles)
+            and (audience == "open" or f.get("who", audience) == audience)]
+    picked = random.sample(pool, min(n, len(pool)))
+    return [{k: v for k, v in f.items() if k != "who"} for f in picked]
 
 
 def get_scenarios() -> list:
-    """Return prefetched scenarios if ready, else generate now with user profile."""
-    profile = st.session_state.get("wwyd_profile", {})
-    global _prefetch_result
+    """Return prefetched scenarios for this person's situation if ready, else generate now."""
+    profile  = st.session_state.get("wwyd_profile", {})
+    audience = _audience(profile)
     deadline = time.time() + 8
     while time.time() < deadline:
         with _prefetch_lock:
-            val = _prefetch_result
+            val = _prefetch_result.get(audience)
         if val not in (None, "loading"):
             break
         time.sleep(0.05)
 
     with _prefetch_lock:
-        val = _prefetch_result
-
+        val = _prefetch_result.get(audience)
+        if val and val not in ("loading", "error"):
+            del _prefetch_result[audience]      # each batch is used once
     if val and val not in ("loading", "error"):
-        # Reset for next session
-        _prefetch_result = None
-        _ensure_prefetch_started()
+        _ensure_prefetch_started((audience,))
         return val
 
     # Fallback: generate now with profile
@@ -693,31 +782,60 @@ def get_scenarios() -> list:
             return _generate_all_scenarios(key, profile)
         except Exception:
             pass
-    return _fallback_scenarios(SCENARIO_COUNT)
+    return _fallback_scenarios(SCENARIO_COUNT, audience=audience)
 
 
 # ─── PROFILE + CATEGORY SCORING ───────────────────────────────────────────────
 
 _SIGNAL_CATEGORY_MAP = {
-    "verbal_arousal":       ["POV", "Solo Female", "Solo Male", "Webcam"],
-    "desired_intensity":    ["Hardcore", "Rough Sex"],
-    "authentic_exposure":   ["Amateur", "Verified Amateurs", "Verified Couples", "Reality"],
+    "verbal_arousal":       ["Dirty Talk", "POV", "Solo Female", "Solo Male"],
+    "desired_intensity":    ["Hardcore", "Rough Sex", "Female Orgasm", "Romantic"],
+    "authentic_exposure":   ["Amateur", "Verified Couples", "Sensual"],
     "power_dynamic":        ["Bondage", "Role Play"],
-    "archetype_attraction": ["MILF", "Mature", "Babe", "Pornstar"],
-    "stranger_fantasy":     ["Casting", "Public", "Massage"],
-    "dom_active":           ["Bondage", "Rough Sex", "Strap On"],
-    "sub_active":           ["Bondage", "Deepthroat", "Rough Sex"],
-    "taboo_arousal":        ["Step Fantasy", "Old/Young (18+)", "Cuckold"],
-    "exhib_active":         ["Public", "Webcam", "Striptease", "Party"],
-    "secret_fantasy":       ["Fetish", "Role Play", "Cosplay"],
+    "archetype_attraction": ["Muscular Men", "MILF", "Mature", "Babe"],
+    "stranger_fantasy":     ["Public", "Massage", "Casting"],
+    "dom_active":           ["Bondage", "Strap On", "Rough Sex"],
+    "sub_active":           ["Bondage", "Rough Sex", "Deepthroat"],
+    "taboo_arousal":        ["Fetish", "Cuckold", "Role Play"],
+    "exhib_active":         ["Public", "Webcam", "Striptease", "Voyeur"],
+    "secret_fantasy":       ["Fetish", "Role Play", "Cosplay", "Toys"],
     "group_sex":            ["Threesome", "Orgy", "Gangbang", "Party"],
-    "taboo_fixation":       ["Fetish", "Feet", "Bukkake"],
-    "elaborated_fantasy":   ["Role Play", "Cosplay", "Hentai", "Virtual Reality"],
-    "unnamed_fixation":     ["Fetish", "Compilation"],
+    "taboo_fixation":       ["Fetish", "Feet"],
+    "elaborated_fantasy":   ["Role Play", "Cosplay", "Virtual Reality", "Romantic"],
+    "unnamed_fixation":     ["Fetish", "Toys"],
+}
+
+# Who you're into (and who you are) nudges the fingerprint, so it doesn't read the same for everyone
+_INTO_CATEGORIES = {
+    "men":    ["Muscular Men", "Big Dick", "Solo Male", "Blowjob", "Handjob"],
+    "women":  ["Solo Female", "Babe", "Pussy Licking", "Big Tits", "Big Ass"],
+    "all":    ["Bisexual Male", "Lesbian", "Threesome", "Transgender", "Solo Male", "Solo Female"],
+    "varies": ["Bisexual Male", "Lesbian", "Threesome", "Transgender"],
+    "unclear": ["Bisexual Male", "Lesbian", "Sensual", "Transgender"],
+}
+_SELF_CATEGORIES = {
+    "f":  ["Female Orgasm", "Popular With Women", "Romantic", "Toys"],
+    "nb": ["Transgender", "Strap On", "Toys"],
 }
 
 
-def _local_profile_and_categories(result_type, openness_pct, hd_answers) -> dict:
+def _identity_boosts(profile: dict | None) -> dict:
+    """Category → bonus from the quiz intake (gender, who they're into)."""
+    profile = profile or {}
+    me, into = profile.get("gender_identity", ""), profile.get("attraction", "")
+    boosts = {}
+    for c in _INTO_CATEGORIES.get(into, []):
+        boosts[c] = boosts.get(c, 0) + 2
+    for c in _SELF_CATEGORIES.get(me, []):
+        boosts[c] = boosts.get(c, 0) + 1
+    if into == "men" and me == "m":
+        boosts["Gay"] = boosts.get("Gay", 0) + 3
+    if into == "women" and me == "f":
+        boosts["Lesbian"] = boosts.get("Lesbian", 0) + 3
+    return boosts
+
+
+def _local_profile_and_categories(result_type, openness_pct, hd_answers, profile=None) -> dict:
     """No-AI fallback: score categories from hidden-desire signals + openness.
     Deterministic per answer set so reruns give the same profile."""
     strong = [q["signal"] for q in HIDDEN_DESIRE_QUESTIONS if hd_answers.get(q["id"]) == "strongly"]
@@ -727,9 +845,10 @@ def _local_profile_and_categories(result_type, openness_pct, hd_answers) -> dict
     rng  = random.Random(seed)
     base = 2 + round(openness_pct / 33)          # 2–5 baseline from openness
 
+    boosts = _identity_boosts(profile)
     scores = {}
     for cat in ALL_PLATFORM_CATEGORIES:
-        s = base + rng.randint(-1, 1)
+        s = base + rng.randint(-1, 1) + boosts.get(cat, 0)
         for sig in strong:
             if cat in _SIGNAL_CATEGORY_MAP.get(sig, []):
                 s += 4
@@ -754,14 +873,14 @@ def _local_profile_and_categories(result_type, openness_pct, hd_answers) -> dict
         "ranked_categories": scored,
         "top25_names":       [c["name"] for c in scored[:25]],
         "recommendations":   recs,
-        "insight":           f"You read as {result_type['name']} — {result_type['meta'].lower().rstrip('.')}. The pattern in your answers is more consistent than you think.",
+        "insight":           f"You read as {result_type['name']}. {result_type['meta']} The pattern in your answers is more consistent than you think.",
     }
 
 
 def generate_profile_and_categories(result_type, openness_pct, hd_answers,
-                                    questions, answers, client) -> dict:
+                                    questions, answers, client, profile=None) -> dict:
     if client is None:
-        return _local_profile_and_categories(result_type, openness_pct, hd_answers)
+        return _local_profile_and_categories(result_type, openness_pct, hd_answers, profile)
     pos, neg = [], []
     for qi, ai in enumerate(answers):
         if ai is None or qi >= len(questions): continue
@@ -789,7 +908,9 @@ def generate_profile_and_categories(result_type, openness_pct, hd_answers,
         f"- Strong hidden desire signals: {', '.join(strong_signals) or 'none'}\n"
         f"- Present hidden desire signals: {', '.join(mild_signals) or 'none'}\n"
         f"- Resonated with: {pos_str}\n"
-        f"- Rejected (DO NOT recommend these themes): {neg_str}\n\n"
+        f"- Rejected (DO NOT recommend these themes): {neg_str}\n"
+        f"- Their gender: {(profile or {}).get('gender_identity') or 'unknown'}; into: {(profile or {}).get('attraction') or 'unknown'}. "
+        f"Score as someone of that gender who is into those people would actually watch — not a default straight-male list.\n\n"
         f"Tasks — return ONE JSON object with exactly these keys:\n\n"
         f'1. "ranked_categories": Score EVERY category 0-10 against this person\'s actual desires. '
         f"Rejected themes get 0. Be specific — not everything scores 5+.\n"
@@ -818,7 +939,7 @@ def generate_profile_and_categories(result_type, openness_pct, hd_answers,
         if not isinstance(data, dict):
             raise ValueError("Profile generation returned invalid JSON")
     except Exception:
-        return _local_profile_and_categories(result_type, openness_pct, hd_answers)
+        return _local_profile_and_categories(result_type, openness_pct, hd_answers, profile)
 
     raw_scores = data.get("ranked_categories", {})
     scored = sorted(
@@ -939,9 +1060,6 @@ def _wipe():
 def hard_reset():
     _wipe()
     init_state()
-    global _prefetch_result
-    with _prefetch_lock:
-        _prefetch_result = None
     _ensure_prefetch_started()
     st.rerun()
 
@@ -1050,8 +1168,8 @@ def render_start():
       Phase 2 · Hidden Desires
     </div>
     <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75; margin:0;">
-      15 statements that escalate from curiosity to the specific fantasies most people
-      have never said out loud. At least one will catch you off guard.
+      10 statements that escalate from curiosity to the specific fantasies most people
+      have never said out loud. The last one is your deepest.
     </p>
   </div>
   <div style="background:var(--card); border:1px solid var(--border);
@@ -1420,7 +1538,7 @@ def render_phase_transition():
     Phase 2 · Hidden Desires
   </div>
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);
-              margin-bottom:32px;">15 statements. They escalate.</div>
+              margin-bottom:32px;">10 statements. They escalate.</div>
 </div>
 """)
     if st.button("Continue →", use_container_width=True, type="primary", key="transition_btn"):
@@ -1443,7 +1561,7 @@ def render_hidden_desires():
     tier    = q.get("tier", 1)
 
     tier_colors = {1:"var(--soft)", 2:"var(--amber)", 3:"var(--magenta)", 4:"var(--magenta)", 5:"var(--lime)"}
-    tier_labels = {1:"Warming up", 2:"Getting specific", 3:"The ones people don't say out loud", 4:"Deeper", 5:"The ones that catch people off guard"}
+    tier_labels = {1:"Warming up", 2:"Getting specific", 3:"The ones people don't say out loud", 4:"Deeper", 5:"Your deepest fantasy"}
     accent      = tier_colors.get(tier, "var(--amber)")
     tier_label  = tier_labels.get(tier, "")
 
@@ -1557,7 +1675,8 @@ def render_generating_profile():
             client = None
 
         upd(55, "Scoring every category against your profile…")
-        profile_data = generate_profile_and_categories(result_type, pct, hd_ans, questions, answers, client)
+        profile_data = generate_profile_and_categories(result_type, pct, hd_ans, questions, answers, client,
+                                                       st.session_state.get("wwyd_profile") or {})
 
         upd(90, "Saving…")
         st.session_state.wwyd_result_type   = result_type
@@ -1624,41 +1743,27 @@ def render_category_selector():
   </div>
   {insight_html}
   <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted); line-height:1.65;">
-    Every real platform category scored against your answers.
-    <span style="color:var(--lime);">Lime = AI top 25 picks for you.</span>
-    Toggle anything — this is your profile, not a recommendation.
+    Every real platform category scored against your answers. Your top 25 are already picked —
+    tap to add or remove. This is your profile, not a recommendation.
   </div>
 </div>
 <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
             text-transform:uppercase; color:var(--muted); margin-bottom:14px;">
-  {sel_count} selected
+  Tap to add or remove
 </div>
 """)
 
-    cols = st.columns(3)
-    for idx, cat_info in enumerate(ranked_cats):
-        cat_name  = cat_info["name"]
-        cat_score = cat_info["score"]
-        is_top25  = cat_name in top25_names
-        is_sel    = cat_name in selected
-        btn_label = f"✓ {cat_name}" if is_sel else (f"◆ {cat_name}" if is_top25 else cat_name)
-
-        with cols[idx % 3]:
-            if st.button(btn_label, key=f"cat_{idx}", use_container_width=True,
-                         type="primary" if is_sel else "secondary"):
-                new_sel = set(st.session_state.wwyd_selected_cats)
-                if is_sel: new_sel.discard(cat_name)
-                else:      new_sel.add(cat_name)
-                st.session_state.wwyd_selected_cats = list(new_sel)
-                st.rerun()
-
-            if cat_score > 0:
-                bar_color = "var(--lime)" if is_top25 else "var(--border)"
-                st.html(f"""
-<div style="height:2px; background:var(--border); border-radius:1px; margin:-6px 0 8px;">
-  <div style="width:{min(100, cat_score * 10)}%; height:100%; background:{bar_color}; border-radius:1px;"></div>
-</div>
-""")
+    # Pills wrap on a phone, so the whole fingerprint fits instead of 100 stacked buttons
+    top_names  = [c["name"] for c in ranked_cats if c["name"] in top25_names]
+    rest_names = [c["name"] for c in ranked_cats if c["name"] not in top25_names]
+    picked_top = st.pills("Your top picks", top_names, selection_mode="multi",
+                          default=[n for n in top_names if n in selected], key="cat_pills_top")
+    with st.expander(f"All {len(rest_names)} other categories"):
+        picked_rest = st.pills("Other categories", rest_names, selection_mode="multi",
+                               default=[n for n in rest_names if n in selected], key="cat_pills_rest",
+                               label_visibility="collapsed")
+    selected = set(picked_top or []) | set(picked_rest or [])
+    st.session_state.wwyd_selected_cats = [n for n in top_names + rest_names if n in selected]
 
     st.html("<br>")
     if st.button("See My Full Profile →", use_container_width=True, type="primary",
@@ -1669,6 +1774,43 @@ def render_category_selector():
 
 
 # ─── PHASE: RESULT ────────────────────────────────────────────────────────────
+
+def _deepest_fantasy(hd_ans: dict, cats: list):
+    """Name the one desire they owned most (strongest answer, then furthest into Phase 2)."""
+    from matching import DESIRE_LABELS
+    owned = [q for q in HIDDEN_DESIRE_QUESTIONS if hd_ans.get(q["id"]) in ("yes", "strongly")]
+    if not owned:
+        body = ('<div class="df-name">Still under lock</div>'
+                '<div class="df-sub">You didn\'t own a single one. Either that\'s the truth, or your deepest '
+                'fantasy is the one you\'re protecting. Retake it when you\'re ready to say it.</div>')
+    else:
+        # "An untold fantasy" and "a mapped-out fantasy" say one exists, not what it is,
+        # so name a concrete desire whenever they owned one
+        concrete = [q for q in owned if q["signal"] not in ("secret_fantasy", "elaborated_fantasy")] or owned
+        top = max(concrete, key=lambda q: (hd_ans.get(q["id"]) == "strongly", q.get("tier", 1)))
+        related = [c for c in cats if c in _SIGNAL_CATEGORY_MAP.get(top["signal"], [])] or cats
+        leans = ", ".join(_html.escape(c) for c in related[:3])
+        body = (f'<div class="df-name">{_html.escape(DESIRE_LABELS.get(top["signal"], "Unnamed"))}</div>'
+                f'<div class="df-sub">It\'s the one you owned hardest: “{_html.escape(top["text"])}”</div>'
+                + (f'<div class="df-leans">Leans toward · {leans}</div>' if leans else ""))
+    st.html(f"""
+<style>
+.df-card {{ background:linear-gradient(160deg,#241018 0%,#131318 100%); border:1px solid rgba(255,45,120,.5);
+  border-radius:4px; padding:20px; margin-bottom:12px; }}
+.df-kicker {{ font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px; text-transform:uppercase;
+  color:var(--magenta); margin-bottom:8px; }}
+.df-name {{ font-family:'Bebas Neue',sans-serif; font-size:34px; letter-spacing:2px; color:var(--text); line-height:1; }}
+.df-sub {{ font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.7; margin-top:8px; font-style:italic; }}
+.df-leans {{ font-family:'Space Mono',monospace; font-size:10px; color:var(--amber); margin-top:10px; letter-spacing:.5px; }}
+.df-private {{ font-family:'Space Mono',monospace; font-size:8px; color:var(--muted); margin-top:12px;
+  letter-spacing:1px; text-transform:uppercase; }}
+</style>
+<div class="df-card enter-card">
+  <div class="df-kicker">🔥 Your deepest fantasy</div>
+  {body}
+  <div class="df-private">Only you see this. A match only sees it if they said yes to it too.</div>
+</div>""")
+
 
 def render_result():
     _show_persistent_db_error()
@@ -1732,6 +1874,8 @@ def render_result():
   </div>
 </div>
 """)
+
+    _deepest_fantasy(hd_ans, sel_cats or [c["name"] for c in ranked_cats[:5]])
 
     strong = sorted(
         [q for q in HIDDEN_DESIRE_QUESTIONS if hd_ans.get(q["id"]) in ("yes","strongly")],
