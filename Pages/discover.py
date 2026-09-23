@@ -7,7 +7,7 @@ import time
 import streamlit as st
 
 import social_db
-from matching import rank_candidates
+from matching import rank_candidates, filter_reasons, INTENTS
 from ui import (esc, header, avatar, intent_chips, lifestyle_chips,
                 score_ring, open_quiz, invite_link)
 
@@ -26,8 +26,10 @@ def _my_quiz(uid: int):
 
 def _load_queue(uid: int, me: dict) -> list:
     me = {**me, "quiz": _my_quiz(uid)}
-    queue = rank_candidates(me, social_db.load_candidate_pool(uid))
+    pool = social_db.load_candidate_pool(uid)
+    queue = rank_candidates(me, pool)
     st.session_state.disc_queue = queue
+    st.session_state.disc_filtered = filter_reasons(me, pool)
     st.session_state.disc_loaded_at = time.time()
     return queue
 
@@ -98,49 +100,102 @@ def _step(icon: str, title: str, text: str):
             f'<div class="hd-sub">{esc(text)}</div></div></div>')
 
 
+def _people(n: int) -> str:
+    return f"{n} {'person' if n == 1 else 'people'}"
+
+
+def _filter_story(me: dict, f: dict) -> tuple[str, bool] | None:
+    """(why nobody nearby shows up, whether changing my own settings would help)."""
+    blocked = {k: f[k] for k in ("my_ages", "their_ages", "intent", "gender") if f.get(k)}
+    if not f.get("nearby") or not blocked:
+        return None
+    reason = max(blocked, key=blocked.get)
+    share = blocked[reason] / f["nearby"]
+    if share <= 0.5:
+        return (f"{_people(f['nearby'])} nearby, but none match your age range, "
+                "who you date, or what you're looking for.", True)
+    most, who = ("they're", "they") if share == 1 else ("most are", "most")
+    want = INTENTS.get(me.get("intent"), "the same thing").lower()
+    text = {
+        "my_ages":    f"{most} outside your age range ({me.get('age_min') or 18}–{me.get('age_max') or 99}).",
+        "their_ages": f"you're outside the age range {who} want.",
+        "intent":     f"{most} not looking for {want}.",
+        "gender":     f"{most} not a fit for who you want to date, or who they do.",
+    }[reason]
+    return f"{_people(f['nearby'])} nearby, but {text}", reason != "their_ages"
+
+
+def _goto_me():
+    st.session_state.tab = "me"
+    st.rerun()
+
+
 def _nobody_yet(uid: int, me: dict):
-    """Empty Discover: say why, and give people something useful to do."""
+    """Empty Discover: say why, and put the one thing that would help first."""
     size = social_db.community_size(uid, me.get("city"))
+    if size is None:
+        st.html('<div class="hd-card" style="text-align:center;padding:36px 24px;">'
+                '<div style="font-size:44px;margin-bottom:6px;">📡</div>'
+                '<div class="hd-title" style="font-size:30px;">Can&#39;t load people right now</div>'
+                '<div class="hd-sub">Hidden is having trouble connecting. Give it a moment.</div></div>')
+        if st.button("↻ Try again", type="primary", use_container_width=True, key="disc_refresh"):
+            st.session_state.pop("disc_queue", None)
+            st.rerun()
+        return
+
     city = (me.get("city") or "your area").strip().title()
-    if size["total"] == 0:
-        headline, sub = "You're one of the first", "Nobody else has a profile yet — you're early."
-    elif size["in_city"] == 0:
-        headline = "No one in " + city + " yet"
-        sub = f"{size['total']} {'person is' if size['total'] == 1 else 'people are'} on Hidden, just not near you."
+    filtered = _filter_story(me, st.session_state.get("disc_filtered") or {})
+    action = None   # (label, key, handler) — the one primary button for this case
+    if filtered:
+        headline, (sub, fixable) = "Nobody fits your filters", filtered
+        if fixable:
+            action = ("Change my filters →", "empty_me", _goto_me)
+    elif size["total"] == 0:
+        headline, sub = "You're one of the first", "Nobody else is on Hidden yet. Invite a few people and you'll have someone to meet."
+    elif size["in_city"] == 0 and not size["passed"]:
+        headline = f"No one in {city} yet"
+        sub = f"{_people(size['total'])} {'is' if size['total'] == 1 else 'are'} on Hidden, just not near you."
+    elif size["passed"]:
+        headline = "You've seen everyone nearby"
+        sub = f"New people show up here as they join. You passed on {_people(size['passed'])}."
+        def _again():
+            social_db.reset_passes(uid)
+            st.session_state.pop("disc_queue", None)
+            st.rerun()
+        action = (f"Give {'them' if size['passed'] > 1 else 'it'} another look →", "disc_reset", _again)
     else:
         headline = "You've seen everyone nearby"
-        sub = f"{size['in_city']} {'person' if size['in_city'] == 1 else 'people'} in {city} — check back tonight."
+        sub = "You liked everyone here. If they like you back, it's a match. New people show up as they join."
     st.html(f'<div class="hd-card" style="text-align:center;padding:36px 24px;">'
             f'<div style="font-size:44px;margin-bottom:6px;">🌙</div>'
             f'<div class="hd-title" style="font-size:30px;">{esc(headline)}</div>'
             f'<div class="hd-sub">{esc(sub)}</div></div>')
+    if action:
+        st.html("<div style='height:4px'></div>")
+        label, key, handler = action
+        if st.button(label, type="primary", use_container_width=True, key=key):
+            handler()
 
     st.html('<div class="hd-kicker" style="margin:22px 0 0;">While you wait</div>')
 
     if not _my_quiz(uid):
         _step("🎯", "Take the quiz", "Your answers make every future match smarter. About 5 minutes.")
-        if st.button("Take the quiz →", type="primary", use_container_width=True, key="empty_quiz"):
+        if st.button("Take the quiz →", type="secondary" if action else "primary",
+                     use_container_width=True, key="empty_quiz"):
             open_quiz("discover")
 
     _step("📣", "Bring your people", "Hidden gets better with every person nearby. Send them this link:")
     st.code(f"Come find me on Hidden 👀 {invite_link()}", language=None, wrap_lines=True)
 
-    _step("📍", "Widen your search", "Raise your distance or age range, or switch to live location.")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if st.button("Edit profile", use_container_width=True, key="empty_me"):
-            st.session_state.tab = "me"
-            st.rerun()
-    with c2:
-        if st.button("↻ Refresh", use_container_width=True, key="disc_refresh"):
-            st.session_state.pop("disc_queue", None)
-            st.rerun()
-    with c3:
-        if st.button("Passed people", use_container_width=True, key="disc_reset",
-                     help="Show people you passed on again"):
-            social_db.reset_passes(uid)
-            st.session_state.pop("disc_queue", None)
-            st.rerun()
+    if size["total"] and not size["in_city"] and me.get("location_mode") != "live":
+        _step("📍", "Look beyond " + city, "Switch to live location in Me to see people within your distance, not just your city.")
+        if st.button("Open Me", use_container_width=True, key="empty_me"):
+            _goto_me()
+
+    st.html("<div style='height:10px'></div>")
+    if st.button("↻ Check again", use_container_width=True, key="disc_refresh"):
+        st.session_state.pop("disc_queue", None)
+        st.rerun()
 
 
 def discover_page():
@@ -151,17 +206,17 @@ def discover_page():
         _its_a_match(st.session_state.just_matched)
         return
 
-    header("Discover", "Who's around", "Ranked by how much you vibe — lifestyle + quiz answers.")
+    queue = st.session_state.get("disc_queue")
+    if queue is None or time.time() - st.session_state.get("disc_loaded_at", 0) > _QUEUE_TTL:
+        with st.spinner("Finding people…"):
+            queue = _load_queue(uid, me)
+
+    header("Discover", "Who's around", "Ranked by how much you vibe — lifestyle + quiz answers." if queue else "")
 
     if me.get("hidden"):
         st.info("👻 You're hidden, so nobody can see you right now. Turn it off in **Me** to show up again.")
     if me.get("location_mode") == "live" and me.get("lat") is None:
         st.warning("📍 Share your location in **Me** to see distances — for now we're matching you by city.")
-
-    queue = st.session_state.get("disc_queue")
-    if queue is None or time.time() - st.session_state.get("disc_loaded_at", 0) > _QUEUE_TTL:
-        with st.spinner("Finding people…"):
-            queue = _load_queue(uid, me)
 
     if not queue:
         _nobody_yet(uid, me)
@@ -193,4 +248,4 @@ def discover_page():
 
     more = len(queue) - 1
     st.html(f'<div class="hd-kicker" style="text-align:center;margin-top:14px;">'
-            f'{more} more {"person" if more == 1 else "people"} nearby</div>')
+            f'{f"{_people(more)} more nearby" if more else "Last one nearby for now"}</div>')
