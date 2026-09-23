@@ -2527,7 +2527,7 @@ def get_compat_drop(code: str) -> dict | None:
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """SELECT cd.*,
+            """SELECT cd.*, (cd.expires_at > NOW()) AS is_live,
                       cq.result_name AS creator_result_name,
                       cq.openness_pct AS creator_openness_pct,
                       cq.dim_scores AS creator_dim_scores,

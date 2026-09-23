@@ -263,15 +263,57 @@ def load_quiz_summaries(user_ids: list) -> dict:
     out = {}
     for r in rows:
         dims = _json(r.get("dim_scores"), {}) or {}
-        raw = dims.get("hd_signals") or ""
-        signals = [] if raw in ("", "none") else [s.split(":")[0].strip() for s in raw.split(",") if s.strip()]
-        out[r["user_id"]] = {
-            "result": r.get("result_name") or None,
-            "openness": r.get("openness_pct"),
-            "signals": signals,
-            "categories": dims.get("selected") or [],
-        }
+        out[r["user_id"]] = {**_quiz_summary(r, dims), "shared": bool(dims.get(QUIZ_SHARED_KEY))}
     return out
+
+
+# Set on quiz results saved once the quiz said matches see your result. Older results
+# were taken under "never shown to anyone", so they only ever count toward the score.
+QUIZ_SHARED_KEY = "shown_to_matches"
+
+
+def _quiz_summary(r: dict, dims: dict) -> dict:
+    raw = dims.get("hd_signals") or ""
+    return {
+        "result": r.get("result_name") or None,
+        "openness": r.get("openness_pct"),
+        "signals": [] if raw in ("", "none") else [s.split(":")[0].strip() for s in raw.split(",") if s.strip()],
+        "categories": dims.get("selected") or [],
+    }
+
+
+def match_quiz_pair(user_id: int, other_id: int, matched_at) -> tuple:
+    """(mine, theirs, mine_is_private) for a match page; a side is None when it has nothing to show.
+
+    Only results saved as shown_to_matches count. Each side is pinned to the result it had
+    once both had one, so retaking the quiz after matching can't fish for the other's answers.
+    """
+    rows = _fetchall(
+        """SELECT user_id, id, completed_at, result_name, openness_pct, dim_scores
+           FROM quiz_results
+           WHERE user_id IN (%s, %s) AND quiz_type LIKE 'rbtl_v4_%%'
+           ORDER BY id""",
+        (user_id, other_id),
+    ) or []
+    by, private = {user_id: [], other_id: []}, False
+    for r in rows:
+        dims = _json(r.get("dim_scores"), {}) or {}
+        if dims.get(QUIZ_SHARED_KEY):
+            by[r["user_id"]].append((r, dims))
+        elif r["user_id"] == user_id:
+            private = True
+    mine, theirs = by[user_id], by[other_id]
+    if not (mine and theirs):
+        return (_quiz_summary(*mine[-1]) if mine else None,
+                _quiz_summary(*theirs[-1]) if theirs else None,
+                private and not mine)
+    starts = [t for t in (matched_at, mine[0][0].get("completed_at"), theirs[0][0].get("completed_at")) if t]
+    pin = max(starts) if starts else None
+
+    def pinned(side):
+        kept = [x for x in side if pin is None or not x[0].get("completed_at") or x[0]["completed_at"] <= pin]
+        return _quiz_summary(*(kept[-1] if kept else side[0]))
+    return pinned(mine), pinned(theirs), False
 
 
 def record_swipe(user_id: int, target_id: int, liked: bool) -> int | None:

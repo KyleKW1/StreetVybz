@@ -342,6 +342,7 @@ def _main():
             st.session_state.tab = st.session_state.pop("_quiz_return", "discover")
             st.session_state.pop("disc_queue", None)   # re-rank with the new answers
             st.session_state.pop("my_quiz", None)
+            st.session_state.pop("hd_drop", None)     # old drop code points at the old result
             st.rerun()
         from Pages.what_would_you_do import what_would_you_do_page
         what_would_you_do_page()

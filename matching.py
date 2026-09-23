@@ -158,11 +158,55 @@ def _jaccard(a, b):
     return len(a & b) / len(a | b) if (a or b) else None
 
 
+# Short, readable names for the hidden-desire signals (Read Between The Lines, phase 2)
+DESIRE_LABELS = {
+    "verbal_arousal":       "Dirty talk",
+    "desired_intensity":    "Being wanted badly",
+    "authentic_exposure":   "Being truly seen",
+    "power_dynamic":        "Power dynamics",
+    "archetype_attraction": "A certain energy",
+    "stranger_fantasy":     "Strangers",
+    "dom_active":           "Taking control",
+    "sub_active":           "Giving up control",
+    "taboo_arousal":        "Taboo turn-ons",
+    "exhib_active":         "Being watched",
+    "secret_fantasy":       "An untold fantasy",
+    "group_sex":            "More than two",
+    "taboo_fixation":       "A guilty-pleasure category",
+    "elaborated_fantasy":   "A mapped-out fantasy",
+    "unnamed_fixation":     "Something not tried yet",
+}
+
+
+def shared_desires(mq: dict, tq: dict) -> list[str]:
+    """Hidden-desire signals both people said yes to — the only ones a match ever sees."""
+    mine = set((mq or {}).get("signals") or [])
+    return [s for s in DESIRE_LABELS if s in mine and s in set((tq or {}).get("signals") or [])]
+
+
+def quiz_match(mq: dict, tq: dict) -> int | None:
+    """0–100 from two quiz results (openness gap, shared desires, categories); None unless both took it."""
+    if not (mq and tq):
+        return None   # one side skipped the quiz: don't let that drag the score down
+    parts = []   # (weight, score)
+    if mq.get("openness") is not None and tq.get("openness") is not None:
+        parts.append((0.5, 1 - abs(int(mq["openness"]) - int(tq["openness"])) / 100))
+    sig = _jaccard(mq.get("signals"), tq.get("signals"))
+    if sig is not None:
+        parts.append((0.3, sig))
+    cats = _jaccard(mq.get("categories"), tq.get("categories"))
+    if cats is not None:
+        parts.append((0.2, cats))
+    if not parts:
+        return None
+    return round(100 * sum(w * s for w, s in parts) / sum(w for w, _ in parts))
+
+
 def similarity(me: dict, them: dict) -> tuple[int, list[str]]:
     """Returns (0–100 score, short human reasons) from lifestyle + quiz answers.
 
-    Hidden-desire signals only ever count toward the score, never shown by
-    name — the card says how many you share, not what they are.
+    On Discover, hidden-desire signals only count toward the score: the card
+    says how many you share, never which ones (a match page names shared ones).
     """
     reasons, quiz_reasons = [], []
 
@@ -176,31 +220,16 @@ def similarity(me: dict, them: dict) -> tuple[int, list[str]]:
             reasons.append(f"{label}: both {opts[int(a)].lower()}")
     lifestyle = 1 - sum(diffs) / len(diffs) if diffs else 0.5
 
-    quiz_parts = []   # (weight, score)
     mq, tq = me.get("quiz") or {}, them.get("quiz") or {}
     if mq.get("openness") is not None and tq.get("openness") is not None:
-        gap = abs(int(mq["openness"]) - int(tq["openness"]))
-        quiz_parts.append((0.5, 1 - gap / 100))
-        if gap <= 10:
+        if abs(int(mq["openness"]) - int(tq["openness"])) <= 10:
             quiz_reasons.append("Same level of openness")
-    sig = _jaccard(mq.get("signals"), tq.get("signals"))
-    if sig is not None:
-        quiz_parts.append((0.3, sig))
-        shared = len(set(mq.get("signals") or []) & set(tq.get("signals") or []))
-        if shared:
-            quiz_reasons.append(f"{shared} hidden desire{'s' if shared != 1 else ''} in common")
-    cats = _jaccard(mq.get("categories"), tq.get("categories"))
-    if cats is not None:
-        quiz_parts.append((0.2, cats))
-    if mq.get("result") and mq.get("result") == tq.get("result"):
-        quiz_reasons.append(f"Both got “{tq['result']}”")
+    shared = len(shared_desires(mq, tq))
+    if shared:
+        quiz_reasons.append(f"{shared} hidden desire{'s' if shared != 1 else ''} in common")
 
-    if quiz_parts:
-        total_w = sum(w for w, _ in quiz_parts)
-        quiz = sum(w * s for w, s in quiz_parts) / total_w
-        score = 0.6 * lifestyle + 0.4 * quiz
-    else:
-        score = lifestyle
+    quiz = quiz_match(mq, tq)
+    score = lifestyle if quiz is None else 0.6 * lifestyle + 0.4 * quiz / 100
     return max(0, min(100, round(score * 100))), (quiz_reasons + reasons)[:3]
 
 
