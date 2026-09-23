@@ -108,6 +108,66 @@ def check_session_valid() -> bool:
         return False
 
 
+# ─── STAY LOGGED IN ───────────────────────────────────────────────────────────
+# The session token also lives in a browser cookie, so a refresh or a reopened
+# tab picks the session back up instead of landing on the login page.
+
+SESSION_COOKIE = "hd_session"
+_COOKIE_MAX_AGE = 30 * 24 * 3600   # matches session_tokens.expires_at
+
+
+def remember_session():
+    """Queue the cookie write; flush_session_cookie() does it on the next render."""
+    st.session_state["_cookie_set"] = st.session_state.get("session_token")
+
+
+def forget_session():
+    st.session_state["_cookie_clear"] = True
+
+
+def flush_session_cookie():
+    """Write or clear the cookie. Call once per run, from a run that doesn't rerun right away."""
+    token = st.session_state.pop("_cookie_set", None)
+    clear = st.session_state.pop("_cookie_clear", False)
+    if token and re.fullmatch(r"[A-Za-z0-9_-]+", token):
+        value, age = token, _COOKIE_MAX_AGE
+    elif clear:
+        value, age = "", 0
+    else:
+        return
+    st.html(
+        "<script>document.cookie = '" + SESSION_COOKIE + "=" + value + "; Max-Age=" + str(age)
+        + "; Path=/; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : '');</script>",
+        unsafe_allow_javascript=True, width=1,
+    )
+
+
+def restore_session() -> bool:
+    """Log back in from the cookie, once per browser session. True if it worked."""
+    if st.session_state.get("_restore_tried"):
+        return False
+    st.session_state["_restore_tried"] = True
+    try:
+        token = st.context.cookies.get(SESSION_COOKIE)
+    except Exception:
+        token = None
+    if not token:
+        return False
+    import database as db
+    uid = db.user_id_for_session_token(token)
+    if uid == 0:            # expired or logged out elsewhere
+        forget_session()
+        return False
+    user = db.get_user_by_id(uid) if uid else None
+    if not user:
+        return False
+    st.session_state.authenticated = True
+    st.session_state.user = user
+    st.session_state.session_token = token
+    st.session_state.setdefault("tab", "discover")
+    return True
+
+
 # ─── AUTH PAGE UI ─────────────────────────────────────────────────────────────
 
 CSS = """
@@ -269,4 +329,6 @@ def logout():
         pass
     for k in list(st.session_state.keys()):
         del st.session_state[k]
+    st.session_state["_restore_tried"] = True   # don't log straight back in from the old cookie
+    forget_session()
     st.rerun()

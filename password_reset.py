@@ -136,6 +136,12 @@ def _reset_password(email: str, new_password: str) -> bool:
             (hash_password(new_password), email.strip()),
         )
         cur.execute("DELETE FROM password_resets WHERE email = %s", (email,))
+        # A new password signs out every device that stayed logged in
+        cur.execute(
+            """UPDATE session_tokens SET invalidated = 1
+               WHERE invalidated = 0 AND user_id IN (SELECT id FROM users WHERE LOWER(email) = LOWER(%s))""",
+            (email.strip(),),
+        )
         conn.commit()
         cur.close()
         return True

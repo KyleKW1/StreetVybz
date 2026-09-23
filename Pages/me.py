@@ -96,6 +96,9 @@ def me_page():
         from Pages.settings import settings_page
         settings_page()
         st.html("<div style='height:10px'></div>")
+        if st.button("❔  How Hidden works", use_container_width=True, key="me_intro"):
+            from Pages.intro import open_intro
+            open_intro("me")
         if st.button("⎋  Log out", use_container_width=True, key="me_logout"):
             from auth import logout
             logout()
