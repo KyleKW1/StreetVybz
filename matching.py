@@ -205,8 +205,8 @@ def quiz_match(mq: dict, tq: dict) -> int | None:
 def similarity(me: dict, them: dict) -> tuple[int, list[str]]:
     """Returns (0–100 score, short human reasons) from lifestyle + quiz answers.
 
-    Hidden-desire signals only ever count toward the score, never shown by
-    name — the card says how many you share, not what they are.
+    On Discover, hidden-desire signals only count toward the score: the card
+    says how many you share, never which ones (a match page names shared ones).
     """
     reasons, quiz_reasons = [], []
 
