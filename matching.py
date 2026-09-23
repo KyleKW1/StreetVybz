@@ -227,8 +227,6 @@ def similarity(me: dict, them: dict) -> tuple[int, list[str]]:
     shared = len(shared_desires(mq, tq))
     if shared:
         quiz_reasons.append(f"{shared} hidden desire{'s' if shared != 1 else ''} in common")
-    if mq.get("result") and mq.get("result") == tq.get("result"):
-        quiz_reasons.append(f"Both got “{tq['result']}”")
 
     quiz = quiz_match(mq, tq)
     score = lifestyle if quiz is None else 0.6 * lifestyle + 0.4 * quiz / 100

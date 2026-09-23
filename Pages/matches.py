@@ -249,7 +249,7 @@ def _match_detail(uid: int, match_id: int):
             f'{avatar(m["other_name"], m["other_id"])}<div><div class="hd-kicker">Matched</div>'
             f'<div class="hd-title" style="margin:0;">{esc(m["other_name"])}</div></div></div>')
     screenshot_shield((st.session_state.get("user") or {}).get("username"))
-    match_quiz_card(uid, m["other_id"], m["other_name"], key=str(m["id"]))
+    match_quiz_card(uid, m["other_id"], m["other_name"], m.get("created_at"), key=str(m["id"]))
     _progress(m["stage"])
 
     stage = m["stage"]

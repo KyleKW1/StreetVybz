@@ -7,6 +7,9 @@ Two places use it:
   • drop codes (Me › Quiz): share a code with anyone; they see the same, except
     hidden desires are only counted, never named.
 
+A match only sees results saved once the quiz said so (older ones stay private), and each
+side is pinned to the result it had when both first had one (see social_db.match_quiz_pair).
+
 Plus the screenshot deterrents for pages that show this: a watermark with the
 viewer's username, blur when the app loses focus, and no copying.
 """
@@ -81,20 +84,29 @@ def comparison_html(me_label: str, mq: dict, them_label: str, tq: dict, name_des
             f'<div class="hd-qz-row">{_tile(me_label, mq)}{_tile(them_label, tq)}</div>{match}{desires}</div>')
 
 
-def match_quiz_card(uid: int, other_id: int, other_name: str, key: str):
-    """On a match page: reveal both results once BOTH have taken the quiz."""
-    quiz = social_db.load_quiz_summaries([uid, other_id])
-    mq, tq = quiz.get(uid), quiz.get(other_id)
+# Someone who said yes to nearly every hidden desire only sees how many they share with
+# a match, so answering yes to everything can't be used to read the other person's list.
+MAX_NAMED_DESIRES = 10
+
+
+def match_quiz_card(uid: int, other_id: int, other_name: str, matched_at, key: str):
+    """On a match page: reveal both results once BOTH have one saved as shown to matches."""
+    mq, tq, mine_private = social_db.match_quiz_pair(uid, other_id, matched_at)
     if mq and tq:
-        st.html(comparison_html("You", mq, other_name, tq, name_desires=True))
+        st.html(comparison_html("You", mq, other_name, tq,
+                                name_desires=len(mq.get("signals") or []) <= MAX_NAMED_DESIRES))
         return
-    if not mq:
-        text = (f"{esc(other_name)} took the quiz. Take it and you'll both see each other's result, "
+    them = esc(other_name)
+    if mine_private:
+        text = ("Your result is from before quiz results were shown to matches, so it stays private. "
+                f"Retake the quiz to share it with {them}.")
+    elif not mq:
+        text = (f"{them} took the quiz. Take it and you'll both see each other's result, "
                 "freak score and the hidden desires you share." if tq else
                 "Take the quiz and once they do too, you'll both see each other's result, "
                 "freak score and the hidden desires you share.")
     else:
-        text = (f"{esc(other_name)} hasn't taken the quiz yet. When they do, you'll both see each "
+        text = (f"{them} hasn't shared a quiz result yet. When they do, you'll both see each "
                 "other's result, freak score and the hidden desires you share.")
     with st.container(key=f"qzn_{key}"):
         c1, c2 = st.columns([3, 1.3], vertical_alignment="center")
@@ -102,17 +114,45 @@ def match_quiz_card(uid: int, other_id: int, other_name: str, key: str):
             st.html(f'<div class="hd-sub" style="line-height:1.4;"><b style="color:var(--text);">🎯 Quiz match'
                     f'</b><br>{text}</div>')
         with c2:
-            if not mq and st.button("Take quiz", key=f"qz_take_{key}", use_container_width=True):
+            if not mq and st.button("Retake quiz" if mine_private else "Take quiz", key=f"qz_take_{key}",
+                                    use_container_width=True):
                 open_quiz("matches")
 
 
 # ─── DROP CODES ──────────────────────────────────────────────────────────────
 
-def _drop_view(uid: int, code: str):
+def _drops(uid: int) -> dict:
+    """This user's drop-code state; thrown away if another account logs in on the same tab."""
+    s = st.session_state.get("hd_drop")
+    if not s or s.get("uid") != uid:
+        s = st.session_state.hd_drop = {"uid": uid, "mine": None, "view": None}
+    return s
+
+
+def _use_code(uid: int, code: str) -> str | None:
+    """On Compare: attach my latest result to an open code that isn't mine. Returns an error, or None."""
     import database as db
     drop = db.get_compat_drop(code)
     if not drop or not drop.get("is_live"):
-        st.error("That code doesn't exist or has expired.")
+        return "That code doesn't exist or has expired."
+    if uid in (drop.get("creator_id"), drop.get("partner_id")):
+        return None
+    if drop.get("status") != "open":
+        return "That code has already been used by someone else."
+    latest = db.load_latest_rbtl_result(uid)
+    if not (latest and latest.get("id")):
+        return "Take the quiz first, then enter the code to compare."
+    if not db.link_compat_drop(code, uid, latest["id"]):
+        return "Someone else just used that code."
+    return None
+
+
+def _drop_view(uid: int, code: str):
+    """Both results for a code — only for the person who made it and the one who used it."""
+    import database as db
+    drop = db.get_compat_drop(code)
+    if not drop or not drop.get("is_live"):
+        st.error("That code has expired.")
         return
     if drop.get("creator_id") == uid:
         if not drop.get("partner_id"):
@@ -121,18 +161,7 @@ def _drop_view(uid: int, code: str):
         me_side, them_side = "creator", "partner"
     elif drop.get("partner_id") == uid:
         me_side, them_side = "partner", "creator"
-    elif drop.get("status") == "open":
-        latest = db.load_latest_rbtl_result(uid)
-        if not (latest and latest.get("id")):
-            st.info("Take the quiz first, then enter the code to compare.")
-            return
-        if not db.link_compat_drop(code, uid, latest["id"]):
-            st.error("Someone else just used that code.")
-            return
-        drop = db.get_compat_drop(code) or drop
-        me_side, them_side = "partner", "creator"
     else:
-        st.error("That code has already been used by someone else.")
         return
     mq = summary_from_row(drop.get(f"{me_side}_result_name"), drop.get(f"{me_side}_openness_pct"),
                           drop.get(f"{me_side}_dim_scores"))
@@ -147,22 +176,28 @@ def _drop_view(uid: int, code: str):
 def drop_codes_section(uid: int):
     """Me › Quiz: get your own code, or enter someone else's."""
     import database as db
+    s = _drops(uid)
     st.html('<div class="hd-kicker" style="margin:22px 0 4px;">Compare with anyone</div>'
             '<div class="hd-sub" style="margin-bottom:10px;">Share a code and whoever enters it sees both results, '
-            'both freak scores and how many hidden desires you share. Never which ones.</div>')
+            'both freak scores and how many hidden desires you share. Never which ones. Entering someone '
+            'else\'s code shows them yours too.</div>')
 
-    code = st.session_state.get("hd_my_drop_code")
-    if code:
+    mine = db.get_compat_drop(s["mine"]) if s["mine"] else None
+    if s["mine"] and not (mine and mine.get("is_live")):
+        s["mine"] = mine = None
+    if mine:
+        used = bool(mine.get("partner_id"))
         st.html(f'<div class="hd-card" style="text-align:center;padding:16px;"><div class="hd-kicker">Your code · '
-                f'valid 7 days</div><div class="hd-brand" style="font-size:40px;letter-spacing:8px;">'
-                f'{esc(code)}</div></div>')
+                f'{"used" if used else "valid 7 days"}</div><div class="hd-brand" '
+                f'style="font-size:40px;letter-spacing:8px;">{esc(s["mine"])}</div></div>')
         if st.button("See who used it", use_container_width=True, key="drop_mine"):
-            st.session_state.hd_drop_view = code
-    elif st.button("◈ Get my code", use_container_width=True, key="drop_new"):
+            s["view"] = s["mine"]
+    if (not mine or mine.get("partner_id")) and st.button(
+            "◈ Get a new code" if mine else "◈ Get my code", use_container_width=True, key="drop_new"):
         latest = db.load_latest_rbtl_result(uid)
         new = db.create_compat_drop(uid, latest["id"]) if latest and latest.get("id") else None
         if new:
-            st.session_state.hd_my_drop_code = new
+            s["mine"], s["view"] = new, None
             st.rerun()
         st.error("Couldn't make a code — try again.")
 
@@ -174,9 +209,13 @@ def drop_codes_section(uid: int):
         with c2:
             go = st.form_submit_button("Compare", use_container_width=True)
     if go and entered.strip():
-        st.session_state.hd_drop_view = entered.strip().upper()
-    if st.session_state.get("hd_drop_view"):
-        _drop_view(uid, st.session_state.hd_drop_view)
+        code = entered.strip().upper()
+        err = _use_code(uid, code)
+        s["view"] = None if err else code
+        if err:
+            st.error(err)
+    if s["view"]:
+        _drop_view(uid, s["view"])
 
 
 # ─── SCREENSHOT DETERRENTS ───────────────────────────────────────────────────

@@ -970,7 +970,8 @@ def _save_to_db(phase: str):
                         "top25": st.session_state.get("wwyd_top25",[]),
                         "selected": st.session_state.get("wwyd_selected_cats",[]),
                         "hd_signals": _hd_signal_str(st.session_state.get("wwyd_hd_answers",{})),
-                        "insight": st.session_state.get("wwyd_insight","")},
+                        "insight": st.session_state.get("wwyd_insight",""),
+                        "shown_to_matches": True},   # taken under "matches see your result"
             recommendations=st.session_state.get("wwyd_recs",[]),
         )
         st.session_state.wwyd_db_error = "" if saved else f"DB save returned False ({phase})."
@@ -1067,7 +1068,7 @@ def render_start():
   </div>
   <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
               text-transform:uppercase; color:var(--muted); text-align:center; margin-bottom:14px;">
-    18+ only · Only your matches see your result · Scenarios change every time
+    18+ only · Matches who took it too see your result · Scenarios change every time
   </div>
 </div>
 """)
@@ -1819,8 +1820,9 @@ def render_result():
                            mime="text/plain", use_container_width=True, key="save_result")
 
     st.html('<div style="font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--muted);'
-            'text-align:center;margin-top:22px;line-height:1.6;">Your matches now see your result and '
-            'freak score.<br>To compare with anyone else, get a drop code in <b>Me › Quiz</b>.</div>')
+            'text-align:center;margin-top:22px;line-height:1.6;">Matches who\'ve taken the quiz too see '
+            'your result, your freak score (Openness Index) and the hidden desires you both said yes to. '
+            'Never the rest.<br>To compare with anyone else, get a drop code in <b>Me › Quiz</b>.</div>')
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────

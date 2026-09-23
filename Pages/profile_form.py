@@ -163,7 +163,7 @@ def quiz_offer_page():
     st.html('<div class="hd-brand" style="margin-bottom:10px;">HIDDEN</div>')
     header("Step 2 of 2", "Sharpen your matches",
            "Read Between The Lines is a quick scenario quiz. It powers your vibe score, "
-           "and your matches see your result.")
+           "and matches who take it too see your result.")
     st.html("""
 <div class="hd-card" style="padding:20px 22px;">
   <div class="hd-why" style="margin:0;padding:0;border:0;">

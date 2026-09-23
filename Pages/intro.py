@@ -67,7 +67,7 @@ _PREVIEW_SAFETY = """
   <div class="hd-why" style="margin:0;padding:0;border:0;">
     <div>👻 &nbsp;Hide from Discover any time</div>
     <div>⚑ &nbsp;Block or report from any match</div>
-    <div>🔒 &nbsp;Only matches see your quiz result</div>
+    <div>🔒 &nbsp;Quiz results: only matches, or people you give a code</div>
     <div>📍 &nbsp;Distances are rough, never your exact spot</div>
   </div>
 </div>
