@@ -1,4 +1,4 @@
-streamlit
+streamlit>=1.64
 pandas
 mysql-connector-python
 numpy
@@ -7,3 +7,4 @@ anthropic
 requests
 openai>=1.0.0
 bcrypt
+streamlit_js_eval

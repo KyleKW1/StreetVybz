@@ -1,249 +1,86 @@
 """
 app.py — Hidden main entry point.
+
+Four tabs: Discover · Matches · Tonight (secret — unlocks at your first match) · Me.
 """
 
+from datetime import date
+
 import streamlit as st
-from styles import apply_custom_styles, inject_page_css, reset_css_flag
 
 st.set_page_config(
     page_title="Hidden",
     page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    layout="centered",
+    initial_sidebar_state="collapsed",
 )
+
+import social_db
+from matching import is_adult
+from styles import apply_custom_styles, inject_page_css, reset_css_flag
+from ui import inject_app_css
 
 reset_css_flag()
 apply_custom_styles()
-
-
-def _inject_floating_log_btn():
-    st.html("""
-<style>
-#vv-fab {
-  position: fixed; bottom: 24px; right: 24px; z-index: 9999;
-  width: 52px; height: 52px; border-radius: 50%;
-  background: var(--lime, #c6ff00); color: #0a0a0b;
-  font-size: 26px; line-height: 52px; text-align: center;
-  cursor: pointer; box-shadow: 0 4px 18px rgba(198,255,0,0.35);
-  border: none; font-family: 'Space Mono', monospace;
-  transition: transform 0.15s, box-shadow 0.15s; user-select: none;
-}
-#vv-fab:hover { transform: scale(1.08); box-shadow: 0 6px 24px rgba(198,255,0,0.5); }
-#vv-fab:active { transform: scale(0.96); }
-</style>
-<button id="vv-fab" title="Quick Log" onclick="(function(){
-  const url = new URL(window.location.href);
-  url.searchParams.set('vv_action','quick_log');
-  window.location.href = url.toString();
-})()">＋</button>
-""")
+inject_app_css()
 
 
 def is_authenticated() -> bool:
     return bool(st.session_state.get("authenticated") and st.session_state.get("user"))
 
 
-def logout():
-    try:
-        import database as db
-        token = st.session_state.get("session_token")
-        if token:
-            db.invalidate_session_token(token)
-    except Exception:
-        pass
-    for k in list(st.session_state.keys()):
-        del st.session_state[k]
-    st.rerun()
+# ─── NAVIGATION ──────────────────────────────────────────────────────────────
+
+TABS = ["discover", "matches", "tonight", "me"]
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def _prewarm_quiz():
-    try:
-        import requests, random
-        subs = ["relationship_advice", "confession", "tifu", "TrueOffMyChest"]
-        sub  = random.choice(subs)
-        r    = requests.get(
-            f"https://www.reddit.com/r/{sub}/hot.json?limit=10",
-            headers={"User-Agent": "Hidden/1.0"}, timeout=5,
-        )
-        if r.ok:
-            return [p["data"] for p in r.json()["data"]["children"] if not p["data"].get("over_18")]
-    except Exception:
-        pass
-    return []
+def _on_nav():
+    st.session_state.tab = st.session_state.nav
+    if st.session_state.nav != "matches":
+        st.session_state.pop("open_match", None)
 
 
-NAV_SECTIONS = [
-    {
-        "label": "Your Log",
-        "items": [
-            ("stats",     "◈  Dashboard"),
-            ("log",       "＋  Log Session"),
-            ("history",   "▤  History"),
-            ("analytics", "⌬  Analytics"),
-        ],
-    },
-    {
-        "label": "Features",
-        "items": [
-            ("rbtl",        "⚡  Read Between The Lines"),
-            ("hotspots",    "📍  Where To Go Tonight"),
-            ("dod",         "🃏  Do or Drink"),
-            ("confess",     "◎  Confessions"),
-            ("freak_match", "⬡  Freak Match"),
-            ("heat_rooms",  "◎  Heat Rooms"),
-        ],
-    },
-    {
-        "label": "Account",
-        "items": [
-            ("profile",   "⬡  Profile"),
-            ("settings",  "◧  Settings"),
-        ],
-    },
-]
+def _nav(uid: int) -> str:
+    """Brand + pill bar. Returns the selected tab."""
+    from Pages.matches import needs_action
+    from Pages.tonight import is_unlocked
+
+    todo = needs_action(social_db.load_matches(uid))
+    unlocked = is_unlocked(uid)
+    labels = {
+        "discover": "🔥 Discover",
+        "matches":  "🔴 Matches" if todo else "💘 Matches",   # red dot = a match is waiting on you
+        "tonight":  "🌙 Tonight" if unlocked else "🔒 ???",
+        "me":       "👤 Me",
+    }
+
+    current = st.session_state.get("tab", "discover")
+    if current not in TABS:
+        current = "discover"
+    # Clicks update `tab` via _on_nav before this runs; anything still out of sync
+    # is a programmatic change (e.g. "Start the Q&A →"), so move the pill to match.
+    if st.session_state.get("nav") != current:
+        st.session_state.nav = current
+
+    st.html('<div class="hd-brand" style="margin-bottom:10px;">HIDDEN</div>')
+    st.segmented_control("Navigate", TABS, format_func=labels.get, key="nav", on_change=_on_nav,
+                         label_visibility="collapsed", required=True, width="stretch")
+    st.html("<div style='height:6px'></div>")
+    return current
 
 
-def _render_sidebar():
-    with st.sidebar:
-        import html as _html
-        user     = st.session_state.get("user", {})
-        uname    = _html.escape(user.get("username", "—"))
-        initials = uname[:2].upper()
-        uid      = user.get("id")
-
-        freak_score = st.session_state.get("_sidebar_freak_score")
-        freak_color = st.session_state.get("_sidebar_freak_color", "var(--lime)")
-        freak_label = st.session_state.get("_sidebar_freak_label", "")
-        if freak_score is None and uid:
-            try:
-                from Pages.vice_hot_takes import compute_freak_score
-                fk = compute_freak_score(uid)
-                if fk:
-                    freak_score = fk["freak_pct"]
-                    freak_color = fk["color"]
-                    freak_label = fk["label"]
-                    st.session_state["_sidebar_freak_score"] = freak_score
-                    st.session_state["_sidebar_freak_color"] = freak_color
-                    st.session_state["_sidebar_freak_label"] = freak_label
-            except Exception:
-                pass
-
-        meter_pct  = freak_score if freak_score else 0
-        avatar_col = freak_color if freak_score else "var(--lime)"
-        freak_html = ""
-        if freak_score is not None:
-            freak_html = f"""
-<div style="margin-top:8px;">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-    <div style="font-family:'Space Mono',monospace;font-size:7px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);">Freak Score</div>
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;color:{freak_color};line-height:1;">{freak_score}<span style="font-size:8px;color:var(--muted);"> /100</span></div>
-  </div>
-  <div style="height:2px;background:var(--border);border-radius:1px;">
-    <div style="width:{meter_pct}%;height:100%;background:{freak_color};border-radius:1px;transition:width 0.6s ease;"></div>
-  </div>
-  <div style="font-family:'Space Mono',monospace;font-size:7px;color:{freak_color};text-transform:uppercase;letter-spacing:1px;margin-top:2px;">{freak_label}</div>
-</div>"""
-
-        st.html(f"""
-<div style="padding:16px 0 20px; border-bottom:1px solid var(--border); margin-bottom:20px;">
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:26px; color:var(--lime);
-              letter-spacing:3px; line-height:1;">HIDDEN</div>
-  <div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
-    <div style="width:28px; height:28px; border-radius:50%; background:{avatar_col};
-                display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-      <span style="font-family:'Bebas Neue',sans-serif; font-size:12px; color:#0a0a0b;">{initials}</span>
-    </div>
-    <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--soft);
-                letter-spacing:1px; text-transform:uppercase;">{uname}</div>
-  </div>
-  {freak_html}
-</div>
-""")
-
-        st.html("""
-<style>
-section[data-testid="stSidebar"] .stButton > button {
-  font-size: 9px !important;
-  letter-spacing: 0.6px !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  padding-left: 10px !important;
-  padding-right: 10px !important;
-}
-</style>
-""")
-
-        selected = st.session_state.get("selected_feature", "stats")
-
-        for section in NAV_SECTIONS:
-            st.html(f"""
-<div style="font-family:'Space Mono',monospace; font-size:7px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin:16px 0 6px;">{section['label']}</div>
-""")
-            for key, label in section["items"]:
-                is_active = selected == key
-                coming_soon = key in ("heat_rooms",)
-                btn_label = label + "  · soon" if coming_soon else label
-                if st.button(btn_label, key=f"nav_{key}", use_container_width=True,
-                             type="primary" if is_active else "secondary",
-                             disabled=coming_soon):
-                    st.session_state.selected_feature = key
-                    if key != "onboarding":
-                        st.session_state.onboarding_done = True
-                    st.rerun()
-
-        st.html("<div style='height:24px'></div>")
-        if st.button("⎋  Logout", use_container_width=True, key="nav_logout"):
-            logout()
-
-
-def _render_feature(feature: str):
-    if feature in ("stats", "dashboard"):
-        from Pages.dashboard import stats_page; stats_page()
-    elif feature == "log":
-        from Pages.dashboard import log_session_page; log_session_page()
-    elif feature == "history":
-        from Pages.dashboard import history_page; history_page()
-    elif feature == "analytics":
-        from Pages.analytics import analytics_page; analytics_page()
-    elif feature == "rbtl":
-        from Pages.what_would_you_do import what_would_you_do_page; what_would_you_do_page()
-    elif feature == "hotspots":
-        try:
-            from Pages.hotspots import hotspots_page; hotspots_page()
-        except ImportError:
-            inject_page_css()
-            st.html('<div style="padding:60px;text-align:center;font-family:\'Bebas Neue\',sans-serif;font-size:28px;letter-spacing:3px;color:var(--muted);">COMING SOON</div>')
-    elif feature == "dod":
-        from Pages.do_or_drink_ui import render_setup, render_generating, render_game, render_game_over
-        from Pages.do_or_drink_core import init_state
-        init_state()
-        phase = st.session_state.get("dod_phase", "setup")
-        if phase == "setup":        render_setup()
-        elif phase == "generating": render_generating()
-        elif phase == "game":       render_game()
-        elif phase == "gameover":   render_game_over()
-    elif feature == "confess":
-        from Pages.confession import confessions_page; confessions_page()
-    elif feature == "profile":
-        from Pages.profile import profile_page; profile_page()
-    elif feature == "settings":
-        from Pages.settings import settings_page; settings_page()
-    elif feature == "onboarding":
-        from Pages.onboarding import onboarding_page; onboarding_page()
-    elif feature == "quick_log":
-        from Pages.dashboard import log_session_page; log_session_page()
-    elif feature == "freak_match":
-        uid = st.session_state.get("user", {}).get("id")
-        from Pages.freak_match import freak_match_page; freak_match_page(uid)
-    elif feature == "heat_rooms":
-        uid = st.session_state.get("user", {}).get("id")
-        from Pages.heat_rooms import heat_rooms_page; heat_rooms_page(uid)
+def _render_tab(tab: str):
+    if tab == "matches":
+        from Pages.matches import matches_page; matches_page()
+    elif tab == "tonight":
+        from Pages.tonight import tonight_page; tonight_page()
+    elif tab == "me":
+        from Pages.me import me_page; me_page()
     else:
-        from Pages.dashboard import stats_page; stats_page()
+        from Pages.discover import discover_page; discover_page()
 
+
+# ─── AUTH PAGES ──────────────────────────────────────────────────────────────
 
 def _render_auth():
     inject_page_css()
@@ -274,11 +111,13 @@ def _render_auth():
 def _login_page():
     st.html("""
 <div style="max-width:400px; margin:60px auto 0; text-align:center; margin-bottom:32px;">
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:60px; color:var(--lime);
-              letter-spacing:4px; line-height:0.9;">HID<br>DEN</div>
+  <div class="hd-brand" style="font-size:72px; letter-spacing:8px;">HIDDEN</div>
+  <div style="font-family:'DM Sans',sans-serif; font-size:15px; color:var(--soft); margin-top:10px;">
+    Meet people nearby who live like you do.
+  </div>
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--muted); margin-top:10px;">
-    Your vice. Your data. Private.
+              text-transform:uppercase; color:var(--muted); margin-top:8px;">
+    18+ · Blind Q&amp;A before you chat
   </div>
 </div>
 """)
@@ -295,13 +134,9 @@ def _login_page():
                     from auth import authenticate_user
                     success, user = authenticate_user(username.strip(), password)
                     if success and user:
-                        import database as db
-                        st.session_state.authenticated    = True
-                        st.session_state.user             = user
-                        st.session_state.vice_log         = db.load_vice_log(user["id"])
-                        st.session_state.selected_feature = "stats"
-                        try: _prewarm_quiz()
-                        except Exception: pass
+                        st.session_state.authenticated = True
+                        st.session_state.user          = user
+                        st.session_state.tab           = "discover"
                         st.rerun()
                     elif user == "locked":
                         st.error("Too many failed attempts. Try again in 10 minutes.")
@@ -332,6 +167,9 @@ def _register_page():
         email    = st.text_input("Email",            key="reg_email")
         pw       = st.text_input("Password",         type="password", key="reg_pw")
         pw2      = st.text_input("Confirm password", type="password", key="reg_pw2")
+        birthday = st.date_input("Birthday", value=None, key="reg_bd", format="DD/MM/YYYY",
+                                 min_value=date(date.today().year - 100, 1, 1), max_value=date.today(),
+                                 help="Hidden is 18+ only.")
         if st.button("Create Account →", type="primary", use_container_width=True, key="reg_btn"):
             from auth import validate_password, validate_email as _ve, hash_password
             import database as db
@@ -346,6 +184,10 @@ def _register_page():
                 st.error(pw_msg)
             elif pw != pw2:
                 st.error("Passwords don't match.")
+            elif not birthday:
+                st.error("Add your birthday.")
+            elif not is_adult(birthday):
+                st.error("Sorry — Hidden is for people 18 and over.")
             else:
                 try:
                     # create_user now returns (uid, status_code)
@@ -360,13 +202,14 @@ def _register_page():
                         except Exception:
                             created = False
                         if not created:
+                            social_db.save_profile(uid, {"birthdate": birthday})
                             st.success("Account created — please log in.")
                             st.stop()
+                        social_db.save_profile(uid, {"birthdate": birthday})
                         st.session_state.session_token = token
-                        st.session_state.authenticated    = True
-                        st.session_state.user             = user
-                        st.session_state.vice_log         = []
-                        st.session_state.selected_feature = "onboarding"
+                        st.session_state.authenticated = True
+                        st.session_state.user          = user
+                        st.session_state.tab           = "discover"
                         st.rerun()
                     elif status == db.CREATE_USER_DUP_USERNAME:
                         st.error("That username is already taken — try another.")
@@ -405,6 +248,7 @@ def _bootstrap_db():
         probe.close()
         db.ensure_tables()
         _ensure_password_resets_table()
+        social_db.ensure_social_tables()
         st.session_state["_db_bootstrapped"] = True
     except Exception:
         pass
@@ -435,17 +279,8 @@ def _ensure_password_resets_table():
         pass
 
 
-def _handle_query_params():
-    params = st.query_params
-    if params.get("vv_action") == "quick_log":
-        st.query_params.clear()
-        st.session_state.selected_feature = "log"
-        st.rerun()
-
-
 def main():
     _bootstrap_db()
-    _handle_query_params()
 
     if not is_authenticated():
         _render_auth()
@@ -466,26 +301,30 @@ def main():
         except Exception:
             pass
 
-    st.session_state.setdefault("selected_feature", "stats")
-    st.session_state.setdefault("onboarding_done", False)
+    uid = st.session_state.user["id"]
 
-    # Route new/empty users to onboarding automatically
-    if not st.session_state.get("onboarding_done"):
-        try:
-            from Pages.onboarding import should_show_onboarding
-            if should_show_onboarding():
-                st.session_state.selected_feature = "onboarding"
-        except Exception:
-            pass
+    # The quiz is a full-screen flow opened from Me
+    if st.session_state.get("tab") == "quiz":
+        if st.button("← Back to Me", key="quiz_back"):
+            st.session_state.tab = "me"
+            st.rerun()
+        from Pages.what_would_you_do import what_would_you_do_page
+        what_would_you_do_page()
+        return
 
-    # ── THIS WAS MISSING — nothing rendered after login ──
-    _inject_floating_log_btn()
-    _render_sidebar()
-    feature = st.session_state.get("selected_feature", "stats")
-    _render_feature(feature)
+    # No complete profile yet (new user, or existing user from before matching) → setup
+    profile = social_db.get_profile(uid)
+    if not social_db.profile_complete(profile):
+        st.html('<div class="hd-brand" style="margin-bottom:10px;">HIDDEN</div>')
+        from Pages.profile_form import setup_page
+        setup_page()
+        return
+    if not is_adult(profile["birthdate"]):
+        st.error("Hidden is for people 18 and over.")
+        return
+
+    _render_tab(_nav(uid))
 
 
 if __name__ == "__main__":
     main()
-
-
