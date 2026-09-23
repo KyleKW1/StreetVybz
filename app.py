@@ -141,6 +141,8 @@ def _login_page():
                         st.session_state.authenticated = True
                         st.session_state.user          = user
                         st.session_state.tab           = "discover"
+                        from auth import remember_session
+                        remember_session()
                         st.rerun()
                     elif user == "locked":
                         st.error("Too many failed attempts. Try again in 10 minutes.")
@@ -215,6 +217,8 @@ def _register_page():
                         st.session_state.user          = user
                         st.session_state.tab           = "intro"      # walkthrough, then setup
                         st.session_state._intro_return = "setup"
+                        from auth import remember_session
+                        remember_session()
                         st.rerun()
                     elif status == db.CREATE_USER_DUP_USERNAME:
                         st.error("That username is already taken — try another.")
@@ -287,6 +291,15 @@ def _ensure_password_resets_table():
 def main():
     _bootstrap_db()
 
+    from auth import restore_session, flush_session_cookie
+    if not is_authenticated():
+        restore_session()        # stay logged in across refreshes
+    _main()
+    flush_session_cookie()       # skipped when _main() reruns, so it waits for a run that renders
+
+
+def _main():
+    from auth import forget_session
     if not is_authenticated():
         _render_auth()
         return
@@ -299,6 +312,8 @@ def main():
             if not check_session_valid():
                 for k in list(st.session_state.keys()):
                     del st.session_state[k]
+                st.session_state["_restore_tried"] = True
+                forget_session()
                 st.warning("Your session has ended. Please log in again.")
                 _render_auth()
                 return

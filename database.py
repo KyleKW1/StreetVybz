@@ -541,6 +541,27 @@ def verify_session_token(user_id: int, token: str) -> bool:
         conn.close()
 
 
+def user_id_for_session_token(token: str):
+    """User id for a valid, unexpired session token; 0 if there's none; None if the DB is unreachable."""
+    conn = create_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT user_id FROM session_tokens
+               WHERE token = %s AND invalidated = 0 AND expires_at > NOW()""",
+            (token,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        return int(row[0]) if row else 0
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
 def invalidate_session_token(token: str) -> bool:
     conn = create_connection()
     if not conn:
