@@ -1114,6 +1114,12 @@ def _update_selections_in_db(selected_cats: list):
 # ─── HEADER ───────────────────────────────────────────────────────────────────
 
 def _render_header():
+    if st.session_state.get("wwyd_phase") != "start":
+        # Question screens: a slim label, so the question sits at the top of a phone screen
+        st.html('<div style="font-family:\'Space Mono\',monospace; font-size:9px; letter-spacing:4px; '
+                'text-transform:uppercase; color:var(--magenta); margin:4px 0 18px;">Read Between The Lines</div>')
+        _show_persistent_db_error()
+        return
     st.html("""
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
@@ -1190,10 +1196,41 @@ def render_start():
   </div>
 </div>
 """)
-    if st.button("Begin →", use_container_width=True, type="primary", key="start_btn"):
+    # One question, so the scenarios fit your situation. Gender and who you're into
+    # come from your Hidden profile rather than being asked again.
+    rel_opts = {"single": "Single", "dating": "Seeing someone casually", "partnered": "In a relationship",
+                "married": "Married", "poly": "Poly / open", "complicated": "It's complicated"}
+    st.html('<div style="font-family:\'DM Sans\',sans-serif; font-size:16px; color:var(--text); '
+            'margin:6px 0 2px;">One question first: are you seeing anyone?</div>'
+            '<div style="font-family:\'DM Sans\',sans-serif; font-size:12px; color:var(--muted); '
+            'margin-bottom:6px;">So the scenarios fit your life. Only used for this quiz.</div>')
+    rel = st.radio("Are you seeing anyone?", list(rel_opts), index=None, label_visibility="collapsed",
+                   format_func=rel_opts.get, key="start_rel")
+    if st.button("Begin →", use_container_width=True, type="primary", key="start_btn", disabled=rel is None):
         _wipe()
-        st.session_state.wwyd_phase = "profile_intake"
+        init_state()
+        st.session_state.wwyd_profile = {"relationship_status": rel, **_profile_basics()}
+        st.session_state.wwyd_phase = "loading"
         st.rerun()
+
+
+_GENDER_IDS = {"Woman": "f", "Man": "m", "Non-binary": "nb", "Other": "other"}
+_INTO_IDS   = {"Women": "women", "Men": "men", "Everyone": "all"}
+
+
+def _profile_basics() -> dict:
+    """Gender and who they're into, from the Hidden profile they already filled in."""
+    try:
+        import social_db
+        p = social_db.get_profile(_uid()) or {}
+    except Exception:
+        p = {}
+    out = {}
+    if p.get("gender") in _GENDER_IDS:
+        out["gender_identity"] = _GENDER_IDS[p["gender"]]
+    if p.get("show_me") in _INTO_IDS:
+        out["attraction"] = _INTO_IDS[p["show_me"]]
+    return out
 
 
 # ─── PHASE: PROFILE INTAKE ────────────────────────────────────────────────────

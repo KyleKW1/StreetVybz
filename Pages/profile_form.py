@@ -83,7 +83,7 @@ def profile_form(uid: int, profile: dict | None, key: str, submit_label: str) ->
     with c2:
         show_me = p.get("show_me") or "Everyone"
         if intent in ("date", "both"):
-            show_me = st.selectbox("Date", SHOW_ME, key=f"{key}_showme",
+            show_me = st.selectbox("Show me", SHOW_ME, key=f"{key}_showme",
                                    index=SHOW_ME.index(show_me) if show_me in SHOW_ME else 0)
 
     st.html('<div class="hd-kicker" style="margin:14px 0 4px;">Your lifestyle</div>')
