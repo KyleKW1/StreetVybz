@@ -44,9 +44,14 @@ def tonight_page():
         return
 
     if not st.session_state.get("_tonight_seen"):
+        # Celebrate the unlock once per browser, not on every visit
+        from auth import has_flag, remember_flag
         st.session_state["_tonight_seen"] = True
-        st.balloons()
-        st.toast("🌙 Tonight unlocked!")
+        flag = f"hd_tonight_{uid}"
+        if not has_flag(flag):
+            remember_flag(flag)
+            st.balloons()
+            st.toast("🌙 Tonight unlocked!")
 
     header("Unlocked", "Tonight 🌙",
            "Say where you're heading. Your matches see it — everyone else only sees a headcount.")

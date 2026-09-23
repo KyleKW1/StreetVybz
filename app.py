@@ -177,13 +177,15 @@ def _register_page():
                                  min_value=date(date.today().year - 100, 1, 1), max_value=date.today(),
                                  help="Hidden is 18+ only.")
         if st.button("Create Account →", type="primary", use_container_width=True, key="reg_btn"):
-            from auth import validate_password, validate_email as _ve, hash_password
+            from auth import validate_password, validate_username, validate_email as _ve, hash_password
             import database as db
             import secrets as _secrets
 
             ok_pw, pw_msg = validate_password(pw)
             if not username.strip():
                 st.error("Enter a username.")
+            elif not validate_username(username):
+                st.error("Usernames are 3–32 letters, numbers or underscores (no spaces).")
             elif not _ve(email.strip()):
                 st.error("That email doesn't look right.")
             elif not ok_pw:
@@ -246,19 +248,27 @@ def _forgot_page():
             st.rerun()
 
 
+@st.cache_resource(show_spinner=False)
+def _schema_ready() -> bool:
+    """Create missing tables once per server process, not once per visitor.
+
+    Raises while the database is unreachable so the failure isn't cached and
+    the next run tries again.
+    """
+    import database as db
+    probe = db.create_connection()
+    if not probe:
+        raise RuntimeError("database unreachable")
+    probe.close()
+    db.ensure_tables()
+    _ensure_password_resets_table()
+    social_db.ensure_social_tables()
+    return True
+
+
 def _bootstrap_db():
-    if st.session_state.get("_db_bootstrapped"):
-        return
     try:
-        import database as db
-        probe = db.create_connection()
-        if not probe:
-            return  # database unreachable — retry setup on the next run
-        probe.close()
-        db.ensure_tables()
-        _ensure_password_resets_table()
-        social_db.ensure_social_tables()
-        st.session_state["_db_bootstrapped"] = True
+        _schema_ready()
     except Exception:
         pass
 
@@ -289,6 +299,7 @@ def _ensure_password_resets_table():
 
 
 def main():
+    social_db.new_run()
     _bootstrap_db()
 
     from auth import restore_session, flush_session_cookie

@@ -109,6 +109,19 @@ div[class*="st-key-mrow_"] div[data-testid="stColumn"] { min-width:0 !important;
 div.st-key-swipe .stButton > button, div.st-key-swipe .stButton > button[kind="primary"] {
   height:58px !important; font-size:15px !important; border-radius:99px !important; }
 
+/* Discover: Pass/Like stay pinned to the bottom of the screen while the card scrolls */
+div[data-testid="stLayoutWrapper"]:has(> div.st-key-swipe), div.st-key-swipe {
+  position:sticky !important; bottom:0; z-index:20; }
+div.st-key-swipe { padding:12px 0 14px !important;
+  background:linear-gradient(to bottom, rgba(10,10,11,0), var(--bg) 35%) !important; }
+
+/* Slim quiz nudge row on Discover */
+div.st-key-qnudge { background:var(--card); border:1px solid var(--border); border-radius:14px;
+  padding:10px 12px !important; margin-bottom:10px; }
+div.st-key-qnudge div[data-testid="stHorizontalBlock"] { flex-wrap:nowrap !important; gap:10px !important; }
+div.st-key-qnudge div[data-testid="stColumn"] { min-width:0 !important; }
+div.st-key-qnudge div[data-testid="stColumn"]:last-child { flex:0 0 118px !important; }
+
 /* Top nav: segmented control as one pill bar */
 div.st-key-nav, div.st-key-nav div[data-testid="stButtonGroup"] { width:100% !important; }
 div.st-key-nav div[data-testid="stButtonGroup"] > div {
