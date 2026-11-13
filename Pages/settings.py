@@ -85,7 +85,9 @@ def settings_page():
 </div>
 """)
     if st.button("→  Go to password reset", use_container_width=True, key="go_pw_reset"):
-        st.session_state.authenticated = False
+        for k in list(st.session_state.keys()):   # like logout: nothing carries over to the next login
+            del st.session_state[k]
+        st.session_state["_restore_tried"] = True
         st.session_state.page = "forgot"
         st.rerun()
 

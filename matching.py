@@ -1,9 +1,8 @@
 """
 matching.py — Pure matching logic for Hidden (no Streamlit, no DB).
 
-Hidden is a link-up app: who can see whom (eligibility), how far apart they
-are (proximity), and how much chemistry they have (similarity + the reasons
-shown on the card). Read Between The Lines answers drive most of the score.
+Who can see whom (eligibility), how far apart they are (proximity),
+and how alike they are (similarity + the reasons shown on the card).
 """
 
 import math
@@ -19,52 +18,14 @@ LIFESTYLE = {
 }
 
 INTENTS = {
-    "tonight": "Tonight only",
-    "regular": "Regular link-up",
-    "open":    "Open to either",
-}
-INTENT_ICONS = {"tonight": "🔥", "regular": "🔁", "open": "✨"}
-# Profiles saved before the switch from dating
-_LEGACY_INTENT = {"date": "regular", "linkup": "open", "both": "open"}
-
-STATUSES = {
-    "single": "Single",
-    "couple": "Couple",
-    "open":   "Open relationship",
-}
-
-HOSTING = {
-    "host":   "Can host",
-    "travel": "Can travel",
-    "either": "Host or travel",
-    "out":    "Meet out first",
+    "date":   "Dating",
+    "linkup": "Link-ups",
+    "both":   "Dating + link-ups",
 }
 
 GENDERS   = ["Woman", "Man", "Non-binary", "Other"]
 SHOW_ME   = ["Everyone", "Women", "Men"]
 _SHOW_MAP = {"Women": {"Woman"}, "Men": {"Man"}}
-
-# Read Between The Lines signals → names shown ONLY after a mutual match,
-# ONLY where both people share them, and ONLY if both opted in.
-DESIRE_LABELS = {
-    "verbal_arousal":       "Dirty talk",
-    "desired_intensity":    "Being wanted badly",
-    "authentic_exposure":   "Being seen with no filter",
-    "power_dynamic":        "Power dynamics",
-    "archetype_attraction": "A very specific type",
-    "stranger_fantasy":     "Strangers & new places",
-    "dom_active":           "Taking control",
-    "sub_active":           "Handing over control",
-    "taboo_arousal":        "Something never said out loud",
-    "exhib_active":         "Being watched",
-    "secret_fantasy":       "A fantasy never told",
-    "group_sex":            "More than two",
-    "taboo_fixation":       "A private fixation",
-    "elaborated_fantasy":   "A fully mapped-out fantasy",
-    "unnamed_fixation":     "Something not tried yet",
-}
-# Opposite halves that fit together — read between the lines
-_COMPLEMENTS = [("dom_active", "sub_active")]
 
 
 # ─── BASICS ───────────────────────────────────────────────────────────────────
@@ -105,14 +66,8 @@ def norm_city(city) -> str:
     return " ".join(str(city or "").lower().split())
 
 
-def norm_intent(intent) -> str | None:
-    intent = _LEGACY_INTENT.get(intent, intent)
-    return intent if intent in INTENTS else None
-
-
 def _intent_set(intent) -> set:
-    intent = norm_intent(intent)
-    return {"tonight", "regular"} if intent == "open" else {intent} if intent else set()
+    return {"date", "linkup"} if intent == "both" else {intent} if intent in INTENTS else set()
 
 
 def _wants(show_me, gender) -> bool:
@@ -122,38 +77,17 @@ def _wants(show_me, gender) -> bool:
 
 # ─── ELIGIBILITY + PROXIMITY ─────────────────────────────────────────────────
 
-def into_each_other(me: dict, them: dict) -> bool:
-    """Each person's gender is one the other is into."""
-    return (_wants(me.get("show_me"), them.get("gender"))
-            and _wants(them.get("show_me"), me.get("gender")))
-
-
 def shared_intents(me: dict, them: dict) -> set:
-    """Kinds of link-up both people are up for ("tonight" / "regular")."""
-    if not into_each_other(me, them):
-        return set()
-    return _intent_set(me.get("intent")) & _intent_set(them.get("intent"))
+    """Intents both people are open to, after dating gender preferences.
 
-
-def free_tonight(p: dict, tonight: str | None) -> bool:
-    return bool(tonight) and str(p.get("available_on") or "")[:10] == tonight
-
-
-def logistics(me: dict, them: dict) -> str | None:
-    """A short line on where it could happen, or None if it doesn't add anything."""
-    a, b = me.get("hosting"), them.get("hosting")
-    if not a or not b:
-        return None
-    can_host, can_travel = {"host", "either"}, {"travel", "either"}
-    if a in can_host and b in can_travel and not (a == b == "either"):
-        if a == "host" or b == "travel":
-            return "You can host, they can travel"
-    if b in can_host and a in can_travel and not (a == b == "either"):
-        if b == "host" or a == "travel":
-            return "They can host, you can travel"
-    if "out" in (a, b):
-        return "Meet out first"
-    return None
+    Dating only counts when each person's gender is one the other wants to see.
+    Link-ups ignore gender.
+    """
+    shared = _intent_set(me.get("intent")) & _intent_set(them.get("intent"))
+    if "date" in shared and not (_wants(me.get("show_me"), them.get("gender"))
+                                 and _wants(them.get("show_me"), me.get("gender"))):
+        shared.discard("date")
+    return shared
 
 
 def distance(me: dict, them: dict):
@@ -186,6 +120,37 @@ def is_candidate(me: dict, them: dict, today=None) -> bool:
     return bool(shared_intents(me, them)) and distance(me, them) is not None
 
 
+def filter_reasons(me: dict, others: list[dict], today=None) -> dict:
+    """Why nearby people aren't in Discover: counts by the first rule each one fails.
+
+    my_ages     — outside my age range (I can change this)
+    their_ages  — I'm outside theirs
+    intent      — not looking for the same thing
+    gender      — dating preferences don't line up
+    """
+    out = {"nearby": 0, "my_ages": 0, "their_ages": 0, "intent": 0, "gender": 0}
+    if not is_adult(me.get("birthdate"), today):
+        return out
+    my_age = age_on(me["birthdate"], today)
+    for them in others:
+        if (me.get("user_id") == them.get("user_id") or them.get("hidden")
+                or not is_adult(them.get("birthdate"), today) or distance(me, them) is None):
+            continue
+        out["nearby"] += 1
+        if is_candidate(me, them, today):
+            continue
+        their_age = age_on(them["birthdate"], today)
+        if not (int(me.get("age_min") or 18) <= their_age <= int(me.get("age_max") or 99)):
+            out["my_ages"] += 1
+        elif not (int(them.get("age_min") or 18) <= my_age <= int(them.get("age_max") or 99)):
+            out["their_ages"] += 1
+        elif not (_intent_set(me.get("intent")) & _intent_set(them.get("intent"))):
+            out["intent"] += 1
+        else:
+            out["gender"] += 1
+    return out
+
+
 # ─── SIMILARITY ───────────────────────────────────────────────────────────────
 
 def _jaccard(a, b):
@@ -193,28 +158,55 @@ def _jaccard(a, b):
     return len(a & b) / len(a | b) if (a or b) else None
 
 
-def _complements(a, b) -> list[tuple[str, str]]:
-    a, b = set(a or []), set(b or [])
-    return [(x, y) for x, y in _COMPLEMENTS
-            if (x in a and y in b and x not in b) or (y in a and x in b and y not in b)]
+# Short, readable names for the hidden-desire signals (Read Between The Lines, phase 2)
+DESIRE_LABELS = {
+    "verbal_arousal":       "Dirty talk",
+    "desired_intensity":    "Being wanted badly",
+    "authentic_exposure":   "Being truly seen",
+    "power_dynamic":        "Power dynamics",
+    "archetype_attraction": "A certain energy",
+    "stranger_fantasy":     "Strangers",
+    "dom_active":           "Taking control",
+    "sub_active":           "Giving up control",
+    "taboo_arousal":        "Taboo turn-ons",
+    "exhib_active":         "Being watched",
+    "secret_fantasy":       "An untold fantasy",
+    "group_sex":            "More than two",
+    "taboo_fixation":       "A guilty-pleasure category",
+    "elaborated_fantasy":   "A mapped-out fantasy",
+    "unnamed_fixation":     "Something not tried yet",
+}
 
 
-def shared_desires(my_quiz: dict | None, their_quiz: dict | None) -> list[str]:
-    """Names for the hidden desires two people overlap on (for the post-match reveal)."""
-    mine = set((my_quiz or {}).get("signals") or [])
-    theirs = set((their_quiz or {}).get("signals") or [])
-    out = [DESIRE_LABELS[s] for s in DESIRE_LABELS if s in mine and s in theirs]
-    for x, y in _complements(mine, theirs):
-        out.insert(0, "You lead, they follow" if x in mine else "They lead, you follow")
-    return out
+def shared_desires(mq: dict, tq: dict) -> list[str]:
+    """Hidden-desire signals both people said yes to — the only ones a match ever sees."""
+    mine = set((mq or {}).get("signals") or [])
+    return [s for s in DESIRE_LABELS if s in mine and s in set((tq or {}).get("signals") or [])]
+
+
+def quiz_match(mq: dict, tq: dict) -> int | None:
+    """0–100 from two quiz results (openness gap, shared desires, categories); None unless both took it."""
+    if not (mq and tq):
+        return None   # one side skipped the quiz: don't let that drag the score down
+    parts = []   # (weight, score)
+    if mq.get("openness") is not None and tq.get("openness") is not None:
+        parts.append((0.5, 1 - abs(int(mq["openness"]) - int(tq["openness"])) / 100))
+    sig = _jaccard(mq.get("signals"), tq.get("signals"))
+    if sig is not None:
+        parts.append((0.3, sig))
+    cats = _jaccard(mq.get("categories"), tq.get("categories"))
+    if cats is not None:
+        parts.append((0.2, cats))
+    if not parts:
+        return None
+    return round(100 * sum(w * s for w, s in parts) / sum(w for w, _ in parts))
 
 
 def similarity(me: dict, them: dict) -> tuple[int, list[str]]:
-    """Returns (0–100 chemistry score, short human reasons).
+    """Returns (0–100 score, short human reasons) from lifestyle + quiz answers.
 
-    Read Between The Lines answers carry most of the weight; lifestyle is the
-    rest. Hidden-desire signals are never named on the card — it says how many
-    you share, not what they are.
+    On Discover, hidden-desire signals only count toward the score: the card
+    says how many you share, never which ones (a match page names shared ones).
     """
     reasons, quiz_reasons = [], []
 
@@ -228,55 +220,29 @@ def similarity(me: dict, them: dict) -> tuple[int, list[str]]:
             reasons.append(f"{label}: both {opts[int(a)].lower()}")
     lifestyle = 1 - sum(diffs) / len(diffs) if diffs else 0.5
 
-    quiz_parts = []   # (weight, score)
     mq, tq = me.get("quiz") or {}, them.get("quiz") or {}
     if mq.get("openness") is not None and tq.get("openness") is not None:
-        gap = abs(int(mq["openness"]) - int(tq["openness"]))
-        quiz_parts.append((0.4, 1 - gap / 100))
-        if gap <= 10:
+        if abs(int(mq["openness"]) - int(tq["openness"])) <= 10:
             quiz_reasons.append("Same level of openness")
-    sig = _jaccard(mq.get("signals"), tq.get("signals"))
-    fits = _complements(mq.get("signals"), tq.get("signals"))
-    if sig is not None:
-        quiz_parts.append((0.45, min(1.0, sig + 0.25 * len(fits))))
-        shared = len(set(mq.get("signals") or []) & set(tq.get("signals") or []))
-        if fits:
-            quiz_reasons.append("Your desires fit together 🔥")
-        if shared:
-            quiz_reasons.append(f"{shared} hidden desire{'s' if shared != 1 else ''} in common")
-    cats = _jaccard(mq.get("categories"), tq.get("categories"))
-    if cats is not None:
-        quiz_parts.append((0.15, cats))
-    if mq.get("result") and mq.get("result") == tq.get("result"):
-        quiz_reasons.append(f"Both got “{tq['result']}”")
+    shared = len(shared_desires(mq, tq))
+    if shared:
+        quiz_reasons.append(f"{shared} hidden desire{'s' if shared != 1 else ''} in common")
 
-    if quiz_parts:
-        total_w = sum(w for w, _ in quiz_parts)
-        quiz = sum(w * s for w, s in quiz_parts) / total_w
-        score = 0.35 * lifestyle + 0.65 * quiz
-    else:
-        score = lifestyle
+    quiz = quiz_match(mq, tq)
+    score = lifestyle if quiz is None else 0.6 * lifestyle + 0.4 * quiz / 100
     return max(0, min(100, round(score * 100))), (quiz_reasons + reasons)[:3]
 
 
-def rank_candidates(me: dict, others: list[dict], today=None, tonight: str | None = None) -> list[dict]:
-    """Eligible people, annotated for the Discover card.
-
-    Order: people free tonight first, then chemistry, then distance.
-    """
+def rank_candidates(me: dict, others: list[dict], today=None) -> list[dict]:
+    """Eligible people, best match first, each annotated for the Discover card."""
     out = []
     for them in others:
         if not is_candidate(me, them, today):
             continue
         km, where = distance(me, them)
         score, reasons = similarity(me, them)
-        where_line = logistics(me, them)
-        if where_line:
-            reasons = reasons[:2] + [where_line]   # logistics always make the card
         out.append({**them, "age": age_on(them["birthdate"], today), "km": km,
                     "where": where, "score": score, "reasons": reasons,
-                    "free_tonight": free_tonight(them, tonight),
                     "shared_intents": sorted(shared_intents(me, them))})
-    out.sort(key=lambda c: (not c["free_tonight"], -c["score"],
-                            c["km"] if c["km"] is not None else 1e9))
+    out.sort(key=lambda c: (-c["score"], c["km"] if c["km"] is not None else 1e9))
     return out

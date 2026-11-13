@@ -66,6 +66,19 @@ def _report_db_down(e):
         pass
 
 
+def _checkout(pool, wait_secs: float = 3.0):
+    """Borrow a pooled connection. When every connection is busy (lots of people
+    online at once), wait briefly for one instead of treating it as an outage."""
+    deadline = time.time() + wait_secs
+    while True:
+        try:
+            return pool.get_connection()
+        except mysql.connector.errors.PoolError:
+            if time.time() >= deadline:
+                raise
+            time.sleep(0.05)
+
+
 def create_connection():
     global _db_down_until
     if not MYSQL_AVAILABLE or not DB_CONFIG.get("host"):
@@ -74,7 +87,10 @@ def create_connection():
         return None
     try:
         pool = _get_pool()
-        conn = pool.get_connection()
+        conn = _checkout(pool)
+    except mysql.connector.errors.PoolError as e:
+        print(f"[database] {e}")   # busy, not down: don't rebuild the pool or back off
+        return None
     except Exception as e:
         _get_pool.clear()
         _db_down_until = time.time() + _DB_RETRY_SECS
@@ -537,6 +553,27 @@ def verify_session_token(user_id: int, token: str) -> bool:
         return row is not None
     except Exception:
         return False
+    finally:
+        conn.close()
+
+
+def user_id_for_session_token(token: str):
+    """User id for a valid, unexpired session token; 0 if there's none; None if the DB is unreachable."""
+    conn = create_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT user_id FROM session_tokens
+               WHERE token = %s AND invalidated = 0 AND expires_at > NOW()""",
+            (token,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        return int(row[0]) if row else 0
+    except Exception:
+        return None
     finally:
         conn.close()
 
@@ -2490,7 +2527,7 @@ def get_compat_drop(code: str) -> dict | None:
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """SELECT cd.*,
+            """SELECT cd.*, (cd.expires_at > NOW()) AS is_live,
                       cq.result_name AS creator_result_name,
                       cq.openness_pct AS creator_openness_pct,
                       cq.dim_scores AS creator_dim_scores,

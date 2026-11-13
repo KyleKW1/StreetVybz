@@ -8,7 +8,7 @@ from html import escape
 
 import streamlit as st
 
-from matching import LIFESTYLE, INTENTS, INTENT_ICONS, STATUSES, HOSTING
+from matching import LIFESTYLE, INTENTS
 
 _APP_CSS = """
 <style>
@@ -18,6 +18,12 @@ button[data-testid="stExpandSidebarButton"] { display:none !important; }
 section.main .block-container, div[data-testid="stMainBlockContainer"] {
   max-width: 640px !important; padding-top: 1.2rem !important;
 }
+/* The transparent Streamlit header overlaps the top of the page (thanks to the
+   short padding above), so let clicks fall through it to our own buttons.
+   Its own toolbar controls stay clickable. */
+header[data-testid="stHeader"], header[data-testid="stHeader"] div { pointer-events: none; }
+header[data-testid="stHeader"] :is(button, a, [role="button"], [data-testid="stMainMenu"],
+  [data-testid="stToolbarActions"] *, [data-testid="stAppDeployButton"] *) { pointer-events: auto; }
 
 @keyframes hd-rise  { from{opacity:0;transform:translateY(22px) scale(.97)} to{opacity:1;transform:none} }
 @keyframes hd-pop   { 0%{transform:scale(.6);opacity:0} 60%{transform:scale(1.08);opacity:1} 100%{transform:scale(1)} }
@@ -103,6 +109,19 @@ div[class*="st-key-mrow_"] div[data-testid="stColumn"] { min-width:0 !important;
 div.st-key-swipe .stButton > button, div.st-key-swipe .stButton > button[kind="primary"] {
   height:58px !important; font-size:15px !important; border-radius:99px !important; }
 
+/* Discover: Pass/Like stay pinned to the bottom of the screen while the card scrolls */
+div[data-testid="stLayoutWrapper"]:has(> div.st-key-swipe), div.st-key-swipe {
+  position:sticky !important; bottom:0; z-index:20; }
+div.st-key-swipe { padding:12px 0 14px !important;
+  background:linear-gradient(to bottom, rgba(10,10,11,0), var(--bg) 35%) !important; }
+
+/* Slim quiz nudge row on Discover */
+div.st-key-qnudge { background:var(--card); border:1px solid var(--border); border-radius:14px;
+  padding:10px 12px !important; margin-bottom:10px; }
+div.st-key-qnudge div[data-testid="stHorizontalBlock"] { flex-wrap:nowrap !important; gap:10px !important; }
+div.st-key-qnudge div[data-testid="stColumn"] { min-width:0 !important; }
+div.st-key-qnudge div[data-testid="stColumn"]:last-child { flex:0 0 118px !important; }
+
 /* Top nav: segmented control as one pill bar */
 div.st-key-nav, div.st-key-nav div[data-testid="stButtonGroup"] { width:100% !important; }
 div.st-key-nav div[data-testid="stButtonGroup"] > div {
@@ -124,6 +143,21 @@ div.st-key-nav button[aria-checked="true"] * { color:#0a0a0b !important; }
 @media (max-width:480px) {
   div.st-key-nav button { font-size:10px !important; letter-spacing:0 !important; padding:6px 2px !important; }
 }
+
+/* Tertiary buttons read as quiet text links */
+.stButton > button[kind="tertiary"] {
+  background:transparent !important; border:0 !important; box-shadow:none !important;
+  color:var(--lime) !important; text-transform:none !important; letter-spacing:0 !important;
+  font-family:'DM Sans',sans-serif !important; font-size:14px !important;
+  min-height:0 !important; padding:4px 0 !important; }
+.stButton > button[kind="tertiary"] * { color:var(--lime) !important; }
+.stButton > button[kind="tertiary"]:hover { text-decoration:underline; transform:none !important; }
+
+/* Discover: the quiet report link sits centred under the card */
+div.st-key-disc_report, div.st-key-disc_report .stButton { display:flex !important; align-items:center !important; justify-content:center !important; width:100% !important; }
+div.st-key-disc_report [data-testid="stElementContainer"] { width:100% !important; }
+div.st-key-disc_report .stButton > button[kind="tertiary"],
+div.st-key-disc_report .stButton > button[kind="tertiary"] * { color:var(--muted) !important; font-size:12px !important; }
 
 .hd-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
 </style>
@@ -168,22 +202,8 @@ def waiting(text: str):
 
 
 def intent_chips(intents) -> str:
-    return "".join(f'<span class="hd-chip magenta">{INTENT_ICONS.get(i, "")} {esc(INTENTS[i])}</span>'
+    return "".join(f'<span class="hd-chip magenta">{"💘" if i == "date" else "🤝"} {esc(INTENTS[i])}</span>'
                    for i in intents if i in INTENTS)
-
-
-def setup_chips(profile: dict, free_tonight: bool = False) -> str:
-    """Free tonight / single-couple-open / host-travel chips."""
-    out = []
-    if free_tonight:
-        out.append('<span class="hd-chip lime">🔥 Free tonight</span>')
-    if profile.get("status") in STATUSES:
-        icon = {"single": "🙋", "couple": "👫", "open": "🔓"}[profile["status"]]
-        out.append(f'<span class="hd-chip cyan">{icon} {esc(STATUSES[profile["status"]])}</span>')
-    if profile.get("hosting") in HOSTING:
-        icon = {"host": "🏠", "travel": "🚗", "either": "🔄", "out": "🍸"}[profile["hosting"]]
-        out.append(f'<span class="hd-chip">{icon} {esc(HOSTING[profile["hosting"]])}</span>')
-    return "".join(out)
 
 
 def lifestyle_chips(profile: dict) -> str:
@@ -200,7 +220,7 @@ def lifestyle_chips(profile: dict) -> str:
 def score_ring(score: int) -> str:
     color = "var(--lime)" if score >= 75 else "var(--cyan)" if score >= 50 else "var(--amber)"
     return (f'<div class="hd-ring" style="--p:{int(score)};--c:{color};">'
-            f'<div><b>{int(score)}%</b><small>HEAT</small></div></div>')
+            f'<div><b>{int(score)}%</b><small>VIBE</small></div></div>')
 
 
 def open_quiz(return_to: str):
@@ -211,8 +231,5 @@ def open_quiz(return_to: str):
 
 
 def invite_link() -> str:
-    try:
-        base = st.secrets.get("APP_URL", "https://vivevaultapps.streamlit.app")
-    except Exception:
-        base = "https://vivevaultapps.streamlit.app"
-    return base.rstrip("/")
+    from config import APP_URL
+    return APP_URL

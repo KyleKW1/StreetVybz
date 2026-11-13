@@ -1,5 +1,6 @@
 """
-Pages/hotspots.py — Kingston hot spots. Where to go tonight.
+Pages/hotspots.py — Hot spots near you. Where to go tonight.
+Curated Kingston picks plus Google Places results for the user's own city.
 Vibe filter: Chill / Turn Up / Late Night
 """
 
@@ -53,6 +54,7 @@ SPOTS = [
 ]
 
 CURATED_NAMES = {s["name"].lower() for s in SPOTS}
+CURATED_CITY = "kingston"   # the hand-picked SPOTS above are all Kingston nights out
 
 FALLBACK_API_KEY = "YOUR_API_KEY"
 
@@ -78,8 +80,24 @@ def _rating_color(r):
 
 
 # ── Places API ────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=3600)
-def fetch_places_spots(api_key):
+def _norm_city(city) -> str:
+    return " ".join(str(city or "").lower().split())
+
+
+def is_curated_city(city) -> bool:
+    return CURATED_CITY in _norm_city(city)
+
+
+def _search_area(city) -> str:
+    """What to put after "bars in …". Plain "Kingston" would also match Kingston, Ontario."""
+    return "Kingston Jamaica" if not _norm_city(city) or is_curated_city(city) else str(city).strip()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_places_spots(api_key, city=None, lat=None, lng=None):
+    """Bars and cannabis spots in `city`, biased towards (lat, lng) when we have it."""
+    if not api_key or api_key == FALLBACK_API_KEY:
+        return []
     url = "https://places.googleapis.com/v1/places:searchText"
     headers = {
         "Content-Type": "application/json",
@@ -87,21 +105,25 @@ def fetch_places_spots(api_key):
         "X-Goog-FieldMask": "places.displayName,places.location,places.rating,places.userRatingCount,places.formattedAddress,places.googleMapsUri,places.types"
     }
 
+    area = _search_area(city)
     queries = [
-        ("bars in Kingston Jamaica", "drinks"),
-        ("nightlife Kingston Jamaica", "drinks"),
-        ("cannabis store Kingston Jamaica", "cannabis"),
-        ("weed shop Kingston Jamaica", "cannabis"),
-        ("herb house Kingston Jamaica", "cannabis"),
-        ("dispensary Kingston Jamaica", "cannabis"),
+        (f"bars in {area}", "drinks"),
+        (f"nightlife in {area}", "drinks"),
+        (f"cannabis dispensary in {area}", "cannabis"),
+        (f"weed shop in {area}", "cannabis"),
     ]
+    bias = ({"locationBias": {"circle": {"center": {"latitude": lat, "longitude": lng}, "radius": 20000.0}}}
+            if lat is not None and lng is not None else {})
 
     results = []
     seen = set(CURATED_NAMES)
 
     for q, base_type in queries:
-        r = requests.post(url, headers=headers, json={"textQuery": q})
-        data = r.json()
+        try:
+            r = requests.post(url, headers=headers, json={"textQuery": q, **bias}, timeout=8)
+            data = r.json()
+        except Exception:
+            continue
 
         for p in data.get("places", []):
             name = p["displayName"]["text"]
@@ -130,8 +152,13 @@ def fetch_places_spots(api_key):
     return results
 
 
-def get_all_spots(api_key):
-    return SPOTS + fetch_places_spots(api_key)
+def get_all_spots(api_key, city=None, lat=None, lng=None):
+    """Spots for `city` (default Kingston). Curated picks only show for Kingston."""
+    # ~10 km cache buckets, so nearby users share one lookup
+    lat = round(lat, 1) if lat is not None else None
+    lng = round(lng, 1) if lng is not None else None
+    curated = SPOTS if (city is None or is_curated_city(city)) else []
+    return curated + fetch_places_spots(api_key, _norm_city(city) or None, lat, lng)
 
 
 # ── Card component ────────────────────────────────────────────────────────────

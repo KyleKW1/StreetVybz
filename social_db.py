@@ -1,5 +1,5 @@
 """
-social_db.py — Storage for link-ups: profiles, swipes, matches,
+social_db.py — Storage for meeting people: profiles, swipes, matches,
 blind Q&A, chat, blocks/reports and Tonight check-ins.
 
 Uses the shared connection pool from database.py.
@@ -8,12 +8,13 @@ Uses the shared connection pool from database.py.
 import json
 from datetime import datetime, timedelta
 
+import streamlit as st
+
 from database import create_connection
 
 PROFILE_FIELDS = (
     "birthdate", "gender", "show_me", "intent", "bio", "weed", "drink", "party",
     "city", "location_mode", "lat", "lon", "max_km", "age_min", "age_max", "hidden",
-    "status", "hosting", "available_on", "reveal_desires",
 )
 REQUIRED_FIELDS = ("birthdate", "intent", "city", "weed", "drink", "party")
 
@@ -36,10 +37,6 @@ _DDL = [
         age_min       TINYINT UNSIGNED DEFAULT 18,
         age_max       TINYINT UNSIGNED DEFAULT 99,
         hidden        TINYINT(1)   NOT NULL DEFAULT 0,
-        status        VARCHAR(10),
-        hosting       VARCHAR(10),
-        available_on  DATE,
-        reveal_desires TINYINT(1)  NOT NULL DEFAULT 0,
         updated_at    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_profiles_city (city)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
@@ -93,25 +90,52 @@ _DDL = [
         PRIMARY KEY (user_id, night),
         INDEX idx_checkins_night (night, spot)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+    """CREATE TABLE IF NOT EXISTS bans (
+        user_id    INT PRIMARY KEY,
+        reason     VARCHAR(255),
+        banned_by  INT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
 ]
 
-
-# Columns added after launch: (column, definition). Added if missing.
-_PROFILE_COLUMNS = [
-    ("status",         "VARCHAR(10)"),
-    ("hosting",        "VARCHAR(10)"),
-    ("available_on",   "DATE"),
-    ("reveal_desires", "TINYINT(1) NOT NULL DEFAULT 0"),
+# Added to tables that already exist on live; each fails harmlessly once applied.
+_MIGRATIONS = [
+    "ALTER TABLE reports ADD COLUMN evidence JSON",
+    "ALTER TABLE reports ADD COLUMN reviewed_at DATETIME DEFAULT NULL",
 ]
 
-# Dating-era intents → link-up intents
-_INTENT_MIGRATION = """UPDATE profiles SET intent = CASE intent
-        WHEN 'date' THEN 'regular' WHEN 'linkup' THEN 'open' WHEN 'both' THEN 'open'
-        ELSE intent END
-    WHERE intent IN ('date', 'linkup', 'both')"""
+# SQL fragment: this user id isn't banned
+_NOT_BANNED = "NOT EXISTS (SELECT 1 FROM bans bn WHERE bn.user_id = {})"
 
 
 # ─── PLUMBING ─────────────────────────────────────────────────────────────────
+
+def new_run():
+    """Start of a full app run: forget the per-run memo (see _memo)."""
+    try:
+        st.session_state["_run_memo"] = {}
+    except Exception:
+        pass
+
+
+def _memo(key, fn):
+    """Reuse a read within one app run — the nav bar, the page and main() all
+    ask for the same profile and matches. Any write clears it."""
+    try:
+        memo = st.session_state.setdefault("_run_memo", {})
+    except Exception:
+        return fn()
+    if key not in memo:
+        memo[key] = fn()
+    return memo[key]
+
+
+def _forget():
+    try:
+        st.session_state["_run_memo"] = {}
+    except Exception:
+        pass
+
 
 def _run(fn, default=None):
     """Open a connection, run fn(conn), always close. Any error → default."""
@@ -148,6 +172,7 @@ def _fetchone(sql, params=()):
 
 def _write(sql, params=()):
     """Execute one write. Returns rowcount (≥0) on success, None on failure."""
+    _forget()
     def q(conn):
         cur = conn.cursor()
         cur.execute(sql, params)
@@ -174,14 +199,13 @@ def ensure_social_tables() -> bool:
         cur = conn.cursor()
         for ddl in _DDL:
             cur.execute(ddl)
-        cur.execute("""SELECT COLUMN_NAME FROM information_schema.COLUMNS
-                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'profiles'""")
-        have = {row[0] for row in cur.fetchall()}
-        for col, definition in _PROFILE_COLUMNS:
-            if col not in have:
-                cur.execute(f"ALTER TABLE profiles ADD COLUMN {col} {definition}")
-        cur.execute(_INTENT_MIGRATION)
         conn.commit()
+        for sql in _MIGRATIONS:
+            try:
+                cur.execute(sql)
+                conn.commit()
+            except Exception:
+                conn.rollback()
         cur.close()
         return True
     return bool(_run(q, False))
@@ -195,9 +219,9 @@ def tonight() -> str:
 # ─── PROFILES ─────────────────────────────────────────────────────────────────
 
 def get_profile(user_id: int) -> dict | None:
-    return _fetchone(
+    return _memo(("profile", user_id), lambda: _fetchone(
         """SELECT p.*, u.username FROM profiles p JOIN users u ON u.id = p.user_id
-           WHERE p.user_id = %s""", (user_id,))
+           WHERE p.user_id = %s""", (user_id,)))
 
 
 def profile_complete(profile: dict | None) -> bool:
@@ -219,15 +243,6 @@ def save_profile(user_id: int, fields: dict) -> bool:
     ) is not None
 
 
-def set_free_tonight(user_id: int, free: bool) -> bool:
-    """Flag (or unflag) this user as free tonight. Expires on its own at 6am."""
-    return save_profile(user_id, {"available_on": tonight() if free else None})
-
-
-def is_free_tonight(profile: dict | None) -> bool:
-    return bool(profile) and str(profile.get("available_on") or "")[:10] == tonight()
-
-
 # ─── DISCOVER ────────────────────────────────────────────────────────────────
 
 def load_candidate_pool(user_id: int, limit: int = 500) -> list:
@@ -243,6 +258,7 @@ def load_candidate_pool(user_id: int, limit: int = 500) -> list:
              AND NOT EXISTS (SELECT 1 FROM blocks b
                              WHERE (b.blocker_id = %s AND b.blocked_id = p.user_id)
                                 OR (b.blocker_id = p.user_id AND b.blocked_id = %s))
+             AND """ + _NOT_BANNED.format("p.user_id") + """
            ORDER BY p.updated_at DESC
            LIMIT %s""",
         (user_id, user_id, user_id, user_id, limit),
@@ -269,15 +285,57 @@ def load_quiz_summaries(user_ids: list) -> dict:
     out = {}
     for r in rows:
         dims = _json(r.get("dim_scores"), {}) or {}
-        raw = dims.get("hd_signals") or ""
-        signals = [] if raw in ("", "none") else [s.split(":")[0].strip() for s in raw.split(",") if s.strip()]
-        out[r["user_id"]] = {
-            "result": r.get("result_name") or None,
-            "openness": r.get("openness_pct"),
-            "signals": signals,
-            "categories": dims.get("selected") or [],
-        }
+        out[r["user_id"]] = {**_quiz_summary(r, dims), "shared": bool(dims.get(QUIZ_SHARED_KEY))}
     return out
+
+
+# Set on quiz results saved once the quiz said matches see your result. Older results
+# were taken under "never shown to anyone", so they only ever count toward the score.
+QUIZ_SHARED_KEY = "shown_to_matches"
+
+
+def _quiz_summary(r: dict, dims: dict) -> dict:
+    raw = dims.get("hd_signals") or ""
+    return {
+        "result": r.get("result_name") or None,
+        "openness": r.get("openness_pct"),
+        "signals": [] if raw in ("", "none") else [s.split(":")[0].strip() for s in raw.split(",") if s.strip()],
+        "categories": dims.get("selected") or [],
+    }
+
+
+def match_quiz_pair(user_id: int, other_id: int, matched_at) -> tuple:
+    """(mine, theirs, mine_is_private) for a match page; a side is None when it has nothing to show.
+
+    Only results saved as shown_to_matches count. Each side is pinned to the result it had
+    once both had one, so retaking the quiz after matching can't fish for the other's answers.
+    """
+    rows = _fetchall(
+        """SELECT user_id, id, completed_at, result_name, openness_pct, dim_scores
+           FROM quiz_results
+           WHERE user_id IN (%s, %s) AND quiz_type LIKE 'rbtl_v4_%%'
+           ORDER BY id""",
+        (user_id, other_id),
+    ) or []
+    by, private = {user_id: [], other_id: []}, False
+    for r in rows:
+        dims = _json(r.get("dim_scores"), {}) or {}
+        if dims.get(QUIZ_SHARED_KEY):
+            by[r["user_id"]].append((r, dims))
+        elif r["user_id"] == user_id:
+            private = True
+    mine, theirs = by[user_id], by[other_id]
+    if not (mine and theirs):
+        return (_quiz_summary(*mine[-1]) if mine else None,
+                _quiz_summary(*theirs[-1]) if theirs else None,
+                private and not mine)
+    starts = [t for t in (matched_at, mine[0][0].get("completed_at"), theirs[0][0].get("completed_at")) if t]
+    pin = max(starts) if starts else None
+
+    def pinned(side):
+        kept = [x for x in side if pin is None or not x[0].get("completed_at") or x[0]["completed_at"] <= pin]
+        return _quiz_summary(*(kept[-1] if kept else side[0]))
+    return pinned(mine), pinned(theirs), False
 
 
 def record_swipe(user_id: int, target_id: int, liked: bool) -> int | None:
@@ -302,6 +360,7 @@ def record_swipe(user_id: int, target_id: int, liked: bool) -> int | None:
         conn.commit()
         cur.close()
         return match_id
+    _forget()
     return _run(q, None)
 
 
@@ -353,13 +412,17 @@ def match_view(row: dict, user_id: int) -> dict:
 
 
 def load_matches(user_id: int) -> list:
+    return _memo(("matches", user_id), lambda: _load_matches(user_id))
+
+
+def _load_matches(user_id: int) -> list:
     rows = _fetchall(
         """SELECT m.*, u.username AS other_name,
                   lm.body AS last_message, lm.created_at AS last_at, lm.sender_id AS last_sender
            FROM matches m
            JOIN users u ON u.id = IF(m.user_a = %s, m.user_b, m.user_a)
            LEFT JOIN messages lm ON lm.id = (SELECT MAX(id) FROM messages WHERE match_id = m.id)
-           WHERE m.user_a = %s OR m.user_b = %s
+           WHERE (m.user_a = %s OR m.user_b = %s) AND """ + _NOT_BANNED.format("u.id") + """
            ORDER BY COALESCE(lm.created_at, m.created_at) DESC""",
         (user_id, user_id, user_id),
     )
@@ -371,7 +434,7 @@ def get_match(match_id: int, user_id: int) -> dict | None:
     row = _fetchone(
         """SELECT m.*, u.username AS other_name FROM matches m
            JOIN users u ON u.id = IF(m.user_a = %s, m.user_b, m.user_a)
-           WHERE m.id = %s AND (m.user_a = %s OR m.user_b = %s)""",
+           WHERE m.id = %s AND (m.user_a = %s OR m.user_b = %s) AND """ + _NOT_BANNED.format("u.id"),
         (user_id, match_id, user_id, user_id),
     )
     return match_view(row, user_id) if row else None
@@ -463,10 +526,76 @@ def load_blocked(user_id: int) -> list:
 
 
 def report_user(user_id: int, target_id: int, reason: str, details: str = "") -> bool:
+    """Save a report with the pair's recent chat attached, so it can still be reviewed
+    after a block deletes the match."""
+    a, b = sorted((user_id, target_id))
+    msgs = _fetchall(
+        """SELECT msg.sender_id, msg.body, msg.created_at FROM messages msg
+           JOIN matches m ON m.id = msg.match_id
+           WHERE m.user_a = %s AND m.user_b = %s
+           ORDER BY msg.id DESC LIMIT 50""", (a, b))
+    evidence = [{"from": "reporter" if r["sender_id"] == user_id else "reported",
+                 "body": r["body"], "at": str(r["created_at"])} for r in reversed(msgs)]
     return _write(
-        "INSERT INTO reports (reporter_id, reported_id, reason, details) VALUES (%s, %s, %s, %s)",
-        (user_id, target_id, reason[:64], (details or "")[:1000]),
+        """INSERT INTO reports (reporter_id, reported_id, reason, details, evidence)
+           VALUES (%s, %s, %s, %s, %s)""",
+        (user_id, target_id, reason[:64], (details or "")[:1000],
+         json.dumps(evidence) if evidence else None),
     ) is not None
+
+
+# ─── MODERATION (admins only; see Pages/admin.py) ───────────────────────────
+
+def is_banned(user_id: int) -> bool:
+    return bool(_fetchone("SELECT 1 AS x FROM bans WHERE user_id = %s", (user_id,)))
+
+
+def open_reports() -> list:
+    """Unreviewed reports, grouped by the person reported, most-reported first."""
+    rows = _fetchall(
+        """SELECT r.id, r.reported_id, r.reason, r.details, r.evidence, r.created_at,
+                  ru.username AS reporter, tu.username AS reported, tu.created_at AS joined,
+                  (SELECT COUNT(*) FROM reports r2 WHERE r2.reported_id = r.reported_id) AS all_time
+           FROM reports r
+           JOIN users tu ON tu.id = r.reported_id
+           LEFT JOIN users ru ON ru.id = r.reporter_id
+           WHERE r.reviewed_at IS NULL
+             AND """ + _NOT_BANNED.format("r.reported_id") + """
+           ORDER BY r.created_at DESC""")
+    people = {}
+    for r in rows:
+        p = people.setdefault(r["reported_id"], {
+            "user_id": r["reported_id"], "username": r["reported"], "joined": r["joined"],
+            "all_time": int(r["all_time"] or 0), "reports": []})
+        p["reports"].append({**r, "evidence": _json(r.get("evidence"), []) or []})
+    return sorted(people.values(), key=lambda p: -len(p["reports"]))
+
+
+def dismiss_reports(reported_id: int) -> bool:
+    return _write("UPDATE reports SET reviewed_at = NOW() WHERE reported_id = %s AND reviewed_at IS NULL",
+                  (reported_id,)) is not None
+
+
+def ban_user(user_id: int, admin_id: int, reason: str = "") -> bool:
+    """Ban someone: they can't log in and vanish from Discover, matches and Tonight.
+    Their data stays, so an unban puts everything back."""
+    ok = _write("""INSERT INTO bans (user_id, reason, banned_by) VALUES (%s, %s, %s)
+                   ON DUPLICATE KEY UPDATE reason = VALUES(reason)""",
+                (user_id, (reason or "")[:255], admin_id)) is not None
+    if ok:
+        _write("UPDATE session_tokens SET invalidated = 1 WHERE user_id = %s AND invalidated = 0", (user_id,))
+        dismiss_reports(user_id)
+    return ok
+
+
+def unban_user(user_id: int) -> bool:
+    return _write("DELETE FROM bans WHERE user_id = %s", (user_id,)) is not None
+
+
+def load_bans() -> list:
+    return _fetchall(
+        """SELECT b.user_id, b.reason, b.created_at, u.username FROM bans b
+           JOIN users u ON u.id = b.user_id ORDER BY b.created_at DESC LIMIT 100""")
 
 
 # ─── TONIGHT ─────────────────────────────────────────────────────────────────
@@ -498,7 +627,7 @@ def tonight_by_spot(user_id: int) -> dict:
                           WHERE (m.user_a = %s AND m.user_b = c.user_id)
                              OR (m.user_b = %s AND m.user_a = c.user_id)) AS is_match
            FROM checkins c JOIN users u ON u.id = c.user_id
-           WHERE c.night = %s""",
+           WHERE c.night = %s AND """ + _NOT_BANNED.format("c.user_id"),
         (user_id, user_id, tonight()),
     )
     out = {}
@@ -534,12 +663,17 @@ def delete_social_data(user_id: int) -> None:
     _write("DELETE FROM profiles WHERE user_id = %s", (user_id,))
 
 
-def community_size(user_id: int, city: str) -> dict:
-    """How many other people have profiles — overall and in this city."""
+def community_size(user_id: int, city: str) -> dict | None:
+    """How many other people have profiles (overall and in this city), and how
+    many this user passed on. None when the database can't be reached."""
     row = _fetchone(
         """SELECT COUNT(*) AS total,
-                  SUM(LOWER(TRIM(city)) = LOWER(TRIM(%s))) AS in_city
-           FROM profiles WHERE user_id <> %s AND hidden = 0 AND intent IS NOT NULL""",
-        (city or "", user_id),
-    ) or {}
-    return {"total": int(row.get("total") or 0), "in_city": int(row.get("in_city") or 0)}
+                  SUM(LOWER(TRIM(city)) = LOWER(TRIM(%s))) AS in_city,
+                  (SELECT COUNT(*) FROM swipes WHERE swiper_id = %s AND liked = 0) AS passed
+           FROM profiles p WHERE user_id <> %s AND hidden = 0 AND intent IS NOT NULL
+             AND """ + _NOT_BANNED.format("p.user_id"),
+        (city or "", user_id, user_id),
+    )
+    if row is None:
+        return None
+    return {k: int(row.get(k) or 0) for k in ("total", "in_city", "passed")}

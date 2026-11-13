@@ -136,6 +136,12 @@ def _reset_password(email: str, new_password: str) -> bool:
             (hash_password(new_password), email.strip()),
         )
         cur.execute("DELETE FROM password_resets WHERE email = %s", (email,))
+        # A new password signs out every device that stayed logged in
+        cur.execute(
+            """UPDATE session_tokens SET invalidated = 1
+               WHERE invalidated = 0 AND user_id IN (SELECT id FROM users WHERE LOWER(email) = LOWER(%s))""",
+            (email.strip(),),
+        )
         conn.commit()
         cur.close()
         return True
@@ -157,8 +163,8 @@ def _send_email(to_email: str, token=None, reset_type="password") -> bool:
         msg["To"]   = to_email
         if reset_type == "password":
             msg["Subject"] = "Hidden — Password Reset"
-            base_url  = st.secrets.get("APP_URL", "https://vivevaultapps.streamlit.app")
-            reset_url = f"{base_url.rstrip('/')}/?reset_token={token}"
+            from config import APP_URL
+            reset_url = f"{APP_URL}/?reset_token={token}"
             body = (
                 f"Click the link below to reset your password (valid 1 hour):\n\n"
                 f"{reset_url}\n\n"

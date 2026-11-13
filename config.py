@@ -38,5 +38,13 @@ except Exception:
         'smtp_server': 'smtp.gmail.com', 'smtp_port': 587,
     }
 
+# ── Public address (invite and password-reset links) ──────────────────────────
+# An APP_URL secret overrides it, e.g. while testing on another deployment.
+DEFAULT_APP_URL = "https://hiddenneeds.streamlit.app"
+try:
+    APP_URL = (st.secrets.get("APP_URL") or DEFAULT_APP_URL).rstrip("/")
+except Exception:
+    APP_URL = DEFAULT_APP_URL
+
 APP_TITLE = "Hidden"
 APP_ICON  = "⚡"

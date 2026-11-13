@@ -57,6 +57,9 @@ def authenticate_user(username: str, password: str):
     user = db.authenticate_user(username.strip(), password)
     if user:
         st.session_state[key] = 0
+        import social_db
+        if social_db.is_banned(user["id"]):
+            return False, "banned"
         # Session validation fails closed, so login must fail if the token
         # can't be stored — otherwise the user is kicked out on the next check.
         token = secrets.token_urlsafe(32)
@@ -106,6 +109,87 @@ def check_session_valid() -> bool:
         return db.verify_session_token(user["id"], token)
     except Exception:
         return False
+
+
+# ─── STAY LOGGED IN ───────────────────────────────────────────────────────────
+# The session token also lives in a browser cookie, so a refresh or a reopened
+# tab picks the session back up instead of landing on the login page.
+
+SESSION_COOKIE = "hd_session"
+_COOKIE_MAX_AGE = 30 * 24 * 3600   # matches session_tokens.expires_at
+
+
+def remember_session():
+    """Queue the cookie write; flush_session_cookie() does it on the next render."""
+    st.session_state["_cookie_set"] = st.session_state.get("session_token")
+
+
+def forget_session():
+    st.session_state["_cookie_clear"] = True
+
+
+def remember_flag(name: str):
+    """Remember a one-off (like "already celebrated") in this browser for a year."""
+    st.session_state.setdefault("_cookie_flags", []).append(name)
+
+
+def has_flag(name: str) -> bool:
+    try:
+        return bool(st.context.cookies.get(name))
+    except Exception:
+        return False
+
+
+def _cookie_js(name: str, value: str, age: int) -> str:
+    return ("document.cookie = '" + name + "=" + value + "; Max-Age=" + str(age)
+            + "; Path=/; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : '');")
+
+
+def flush_session_cookie():
+    """Write or clear cookies. Call once per run, from a run that doesn't rerun right away."""
+    token = st.session_state.pop("_cookie_set", None)
+    clear = st.session_state.pop("_cookie_clear", False)
+    flags = st.session_state.pop("_cookie_flags", [])
+    js = []
+    if token and re.fullmatch(r"[A-Za-z0-9_-]+", token):
+        js.append(_cookie_js(SESSION_COOKIE, token, _COOKIE_MAX_AGE))
+    elif clear:
+        js.append(_cookie_js(SESSION_COOKIE, "", 0))
+    js += [_cookie_js(f, "1", 365 * 24 * 3600) for f in flags if re.fullmatch(r"[A-Za-z0-9_]+", f)]
+    if js:
+        st.html("<script>" + "".join(js) + "</script>", unsafe_allow_javascript=True, width=1)
+
+
+def restore_session() -> bool:
+    """Log back in from the cookie, once per browser session. True if it worked."""
+    if st.session_state.get("_restore_tried"):
+        return False
+    st.session_state["_restore_tried"] = True
+    try:
+        token = st.context.cookies.get(SESSION_COOKIE)
+    except Exception:
+        token = None
+    if not token:
+        return False
+    import database as db
+    uid = db.user_id_for_session_token(token)
+    if uid == 0:            # expired or logged out elsewhere
+        forget_session()
+        return False
+    user = db.get_user_by_id(uid) if uid else None
+    if not user:
+        return False
+    import social_db
+    if social_db.is_banned(uid):
+        forget_session()
+        return False
+    st.session_state.authenticated = True
+    st.session_state.user = user
+    st.session_state.session_token = token
+    st.session_state.setdefault("tab", "discover")
+    import time
+    st.session_state["_session_checked_at"] = time.time()   # just verified it
+    return True
 
 
 # ─── AUTH PAGE UI ─────────────────────────────────────────────────────────────
@@ -269,4 +353,6 @@ def logout():
         pass
     for k in list(st.session_state.keys()):
         del st.session_state[k]
+    st.session_state["_restore_tried"] = True   # don't log straight back in from the old cookie
+    forget_session()
     st.rerun()

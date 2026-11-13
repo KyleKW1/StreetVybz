@@ -1,8 +1,8 @@
 """
 app.py — Hidden main entry point.
 
-Link-ups, not dating. Four tabs: Discover · Mutuals · Tonight (secret —
-unlocks at your first mutual) · Me.
+Four tabs: Discover · Matches · Tonight (secret — unlocks at your first match) · Me.
+New accounts see a short "How Hidden works" walkthrough (Pages/intro.py) before setup.
 """
 
 from datetime import date
@@ -49,8 +49,8 @@ def _nav(uid: int) -> str:
     todo = needs_action(social_db.load_matches(uid))
     unlocked = is_unlocked(uid)
     labels = {
-        "discover": "👀 Discover",
-        "matches":  "🔴 Mutuals" if todo else "🔥 Mutuals",   # red dot = a mutual is waiting on you
+        "discover": "🔥 Discover",
+        "matches":  "🔴 Matches" if todo else "💘 Matches",   # red dot = a match is waiting on you
         "tonight":  "🌙 Tonight" if unlocked else "🔒 ???",
         "me":       "👤 Me",
     }
@@ -99,6 +99,9 @@ def _render_auth():
         _register_page()
     elif page == "forgot":
         _forgot_page()
+    elif page == "intro":
+        from Pages.intro import intro_page
+        intro_page(logged_in=False)
     elif page == "reset_password":
         try:
             from password_reset import reset_password_page
@@ -114,11 +117,11 @@ def _login_page():
 <div style="max-width:400px; margin:60px auto 0; text-align:center; margin-bottom:32px;">
   <div class="hd-brand" style="font-size:72px; letter-spacing:8px;">HIDDEN</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:15px; color:var(--soft); margin-top:10px;">
-    Link up with people nearby who want what you want.
+    Meet people nearby who live like you do.
   </div>
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted); margin-top:8px;">
-    18+ · No dating · Read between the lines
+    18+ · Blind Q&amp;A before you chat
   </div>
 </div>
 """)
@@ -138,9 +141,13 @@ def _login_page():
                         st.session_state.authenticated = True
                         st.session_state.user          = user
                         st.session_state.tab           = "discover"
+                        from auth import remember_session
+                        remember_session()
                         st.rerun()
                     elif user == "locked":
                         st.error("Too many failed attempts. Try again in 10 minutes.")
+                    elif user == "banned":
+                        st.error("This account has been suspended for breaking Hidden's rules.")
                     else:
                         st.error("Wrong username or password.")
                 except Exception as e:
@@ -150,6 +157,9 @@ def _login_page():
             st.session_state.page = "register"; st.rerun()
         if st.button("Forgot password", use_container_width=True, key="go_forgot"):
             st.session_state.page = "forgot"; st.rerun()
+        if st.button("How does Hidden work?", use_container_width=True, key="go_intro", type="tertiary"):
+            from Pages.intro import open_intro
+            open_intro("login", logged_in=False)
 
 
 def _register_page():
@@ -169,13 +179,15 @@ def _register_page():
                                  min_value=date(date.today().year - 100, 1, 1), max_value=date.today(),
                                  help="Hidden is 18+ only.")
         if st.button("Create Account →", type="primary", use_container_width=True, key="reg_btn"):
-            from auth import validate_password, validate_email as _ve, hash_password
+            from auth import validate_password, validate_username, validate_email as _ve, hash_password
             import database as db
             import secrets as _secrets
 
             ok_pw, pw_msg = validate_password(pw)
             if not username.strip():
                 st.error("Enter a username.")
+            elif not validate_username(username):
+                st.error("Usernames are 3–32 letters, numbers or underscores (no spaces).")
             elif not _ve(email.strip()):
                 st.error("That email doesn't look right.")
             elif not ok_pw:
@@ -207,7 +219,10 @@ def _register_page():
                         st.session_state.session_token = token
                         st.session_state.authenticated = True
                         st.session_state.user          = user
-                        st.session_state.tab           = "discover"
+                        st.session_state.tab           = "intro"      # walkthrough, then setup
+                        st.session_state._intro_return = "setup"
+                        from auth import remember_session
+                        remember_session()
                         st.rerun()
                     elif status == db.CREATE_USER_DUP_USERNAME:
                         st.error("That username is already taken — try another.")
@@ -235,19 +250,27 @@ def _forgot_page():
             st.rerun()
 
 
+@st.cache_resource(show_spinner=False)
+def _schema_ready() -> bool:
+    """Create missing tables once per server process, not once per visitor.
+
+    Raises while the database is unreachable so the failure isn't cached and
+    the next run tries again.
+    """
+    import database as db
+    probe = db.create_connection()
+    if not probe:
+        raise RuntimeError("database unreachable")
+    probe.close()
+    db.ensure_tables()
+    _ensure_password_resets_table()
+    social_db.ensure_social_tables()
+    return True
+
+
 def _bootstrap_db():
-    if st.session_state.get("_db_bootstrapped"):
-        return
     try:
-        import database as db
-        probe = db.create_connection()
-        if not probe:
-            return  # database unreachable — retry setup on the next run
-        probe.close()
-        db.ensure_tables()
-        _ensure_password_resets_table()
-        social_db.ensure_social_tables()
-        st.session_state["_db_bootstrapped"] = True
+        _schema_ready()
     except Exception:
         pass
 
@@ -278,8 +301,18 @@ def _ensure_password_resets_table():
 
 
 def main():
+    social_db.new_run()
     _bootstrap_db()
 
+    from auth import restore_session, flush_session_cookie
+    if not is_authenticated():
+        restore_session()        # stay logged in across refreshes
+    _main()
+    flush_session_cookie()       # skipped when _main() reruns, so it waits for a run that renders
+
+
+def _main():
+    from auth import forget_session
     if not is_authenticated():
         _render_auth()
         return
@@ -292,6 +325,8 @@ def main():
             if not check_session_valid():
                 for k in list(st.session_state.keys()):
                     del st.session_state[k]
+                st.session_state["_restore_tried"] = True
+                forget_session()
                 st.warning("Your session has ended. Please log in again.")
                 _render_auth()
                 return
@@ -304,14 +339,20 @@ def main():
     # The quiz is a full-screen flow (from setup, Discover or Me)
     if st.session_state.get("tab") == "quiz":
         done = st.session_state.get("wwyd_phase") == "result"
-        if st.button("Done — show me who's up for it →" if done else "← Back to Hidden",
+        if st.button("Done — show me matches →" if done else "← Back to Hidden",
                      key="hd_quiz_exit", type="primary" if done else "secondary"):
             st.session_state.tab = st.session_state.pop("_quiz_return", "discover")
             st.session_state.pop("disc_queue", None)   # re-rank with the new answers
             st.session_state.pop("my_quiz", None)
+            st.session_state.pop("hd_drop", None)     # old drop code points at the old result
             st.rerun()
         from Pages.what_would_you_do import what_would_you_do_page
         what_would_you_do_page()
+        return
+
+    if st.session_state.get("tab") == "intro":
+        from Pages.intro import intro_page
+        intro_page()
         return
 
     if st.session_state.get("tab") == "quiz_offer":
