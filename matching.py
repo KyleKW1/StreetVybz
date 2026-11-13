@@ -1,8 +1,9 @@
 """
 matching.py — Pure matching logic for Hidden (no Streamlit, no DB).
 
-Who can see whom (eligibility), how far apart they are (proximity),
-and how alike they are (similarity + the reasons shown on the card).
+Hidden is a link-up app, not a dating app: who can see whom (eligibility),
+how far apart they are (proximity), and how much heat there is (similarity +
+the reasons shown on the card). Read Between The Lines carries most of it.
 """
 
 import math
@@ -18,10 +19,16 @@ LIFESTYLE = {
 }
 
 INTENTS = {
-    "date":   "Dating",
-    "linkup": "Link-ups",
-    "both":   "Dating + link-ups",
+    "tonight": "Tonight only",
+    "regular": "Regular link-up",
+    "open":    "Open to either",
 }
+INTENT_ICONS = {"tonight": "🔥", "regular": "🔁", "open": "✨"}
+# Profiles saved while Hidden was a dating app
+_LEGACY_INTENT = {"date": "regular", "linkup": "open", "both": "open"}
+
+STATUSES = {"single": "Single", "couple": "Couple", "open": "Open relationship"}
+HOSTING = {"host": "Can host", "travel": "Can travel", "either": "Host or travel", "out": "Meet out first"}
 
 GENDERS   = ["Woman", "Man", "Non-binary", "Other"]
 SHOW_ME   = ["Everyone", "Women", "Men"]
@@ -66,8 +73,14 @@ def norm_city(city) -> str:
     return " ".join(str(city or "").lower().split())
 
 
+def norm_intent(intent) -> str | None:
+    intent = _LEGACY_INTENT.get(intent, intent)
+    return intent if intent in INTENTS else None
+
+
 def _intent_set(intent) -> set:
-    return {"date", "linkup"} if intent == "both" else {intent} if intent in INTENTS else set()
+    intent = norm_intent(intent)
+    return {"tonight", "regular"} if intent == "open" else {intent} if intent else set()
 
 
 def _wants(show_me, gender) -> bool:
@@ -77,17 +90,36 @@ def _wants(show_me, gender) -> bool:
 
 # ─── ELIGIBILITY + PROXIMITY ─────────────────────────────────────────────────
 
-def shared_intents(me: dict, them: dict) -> set:
-    """Intents both people are open to, after dating gender preferences.
+def into_each_other(me: dict, them: dict) -> bool:
+    """Each person's gender is one the other is into."""
+    return (_wants(me.get("show_me"), them.get("gender"))
+            and _wants(them.get("show_me"), me.get("gender")))
 
-    Dating only counts when each person's gender is one the other wants to see.
-    Link-ups ignore gender.
-    """
-    shared = _intent_set(me.get("intent")) & _intent_set(them.get("intent"))
-    if "date" in shared and not (_wants(me.get("show_me"), them.get("gender"))
-                                 and _wants(them.get("show_me"), me.get("gender"))):
-        shared.discard("date")
-    return shared
+
+def shared_intents(me: dict, them: dict) -> set:
+    """Kinds of link-up both people are up for ("tonight" / "regular")."""
+    if not into_each_other(me, them):
+        return set()
+    return _intent_set(me.get("intent")) & _intent_set(them.get("intent"))
+
+
+def free_tonight(p: dict, tonight: str | None) -> bool:
+    return bool(tonight) and str(p.get("available_on") or "")[:10] == tonight
+
+
+def logistics(me: dict, them: dict) -> str | None:
+    """Where it could happen, when that's worth saying on the card."""
+    a, b = me.get("hosting"), them.get("hosting")
+    if not a or not b:
+        return None
+    can_host, can_travel = {"host", "either"}, {"travel", "either"}
+    if a in can_host and b in can_travel and (a == "host" or b == "travel"):
+        return "You can host, they can travel"
+    if b in can_host and a in can_travel and (b == "host" or a == "travel"):
+        return "They can host, you can travel"
+    if "out" in (a, b):
+        return "Meet out first"
+    return None
 
 
 def distance(me: dict, them: dict):
@@ -126,7 +158,7 @@ def filter_reasons(me: dict, others: list[dict], today=None) -> dict:
     my_ages     — outside my age range (I can change this)
     their_ages  — I'm outside theirs
     intent      — not looking for the same thing
-    gender      — dating preferences don't line up
+    gender      — not into each other's gender
     """
     out = {"nearby": 0, "my_ages": 0, "their_ages": 0, "intent": 0, "gender": 0}
     if not is_adult(me.get("birthdate"), today):
@@ -156,6 +188,16 @@ def filter_reasons(me: dict, others: list[dict], today=None) -> dict:
 def _jaccard(a, b):
     a, b = set(a or []), set(b or [])
     return len(a & b) / len(a | b) if (a or b) else None
+
+
+# Opposite halves that fit together — read between the lines
+_COMPLEMENTS = [("dom_active", "sub_active")]
+
+
+def desires_fit(mq: dict, tq: dict) -> bool:
+    """One wants to take control, the other wants to give it up."""
+    a, b = set((mq or {}).get("signals") or []), set((tq or {}).get("signals") or [])
+    return any((x in a and y in b) or (y in a and x in b) for x, y in _COMPLEMENTS)
 
 
 # Short, readable names for the hidden-desire signals (Read Between The Lines, phase 2)
@@ -190,20 +232,20 @@ def quiz_match(mq: dict, tq: dict) -> int | None:
         return None   # one side skipped the quiz: don't let that drag the score down
     parts = []   # (weight, score)
     if mq.get("openness") is not None and tq.get("openness") is not None:
-        parts.append((0.5, 1 - abs(int(mq["openness"]) - int(tq["openness"])) / 100))
+        parts.append((0.4, 1 - abs(int(mq["openness"]) - int(tq["openness"])) / 100))
     sig = _jaccard(mq.get("signals"), tq.get("signals"))
     if sig is not None:
-        parts.append((0.3, sig))
+        parts.append((0.45, min(1.0, sig + (0.25 if desires_fit(mq, tq) else 0))))
     cats = _jaccard(mq.get("categories"), tq.get("categories"))
     if cats is not None:
-        parts.append((0.2, cats))
+        parts.append((0.15, cats))
     if not parts:
         return None
     return round(100 * sum(w * s for w, s in parts) / sum(w for w, _ in parts))
 
 
 def similarity(me: dict, them: dict) -> tuple[int, list[str]]:
-    """Returns (0–100 score, short human reasons) from lifestyle + quiz answers.
+    """Returns (0–100 heat score, short human reasons): 65% quiz, 35% lifestyle.
 
     On Discover, hidden-desire signals only count toward the score: the card
     says how many you share, never which ones (a match page names shared ones).
@@ -225,24 +267,31 @@ def similarity(me: dict, them: dict) -> tuple[int, list[str]]:
         if abs(int(mq["openness"]) - int(tq["openness"])) <= 10:
             quiz_reasons.append("Same level of openness")
     shared = len(shared_desires(mq, tq))
+    if desires_fit(mq, tq):
+        quiz_reasons.append("Your desires fit together 🔥")
     if shared:
         quiz_reasons.append(f"{shared} hidden desire{'s' if shared != 1 else ''} in common")
 
     quiz = quiz_match(mq, tq)
-    score = lifestyle if quiz is None else 0.6 * lifestyle + 0.4 * quiz / 100
+    score = lifestyle if quiz is None else 0.35 * lifestyle + 0.65 * quiz / 100
     return max(0, min(100, round(score * 100))), (quiz_reasons + reasons)[:3]
 
 
-def rank_candidates(me: dict, others: list[dict], today=None) -> list[dict]:
-    """Eligible people, best match first, each annotated for the Discover card."""
+def rank_candidates(me: dict, others: list[dict], today=None, tonight: str | None = None) -> list[dict]:
+    """Eligible people for the Discover card: free tonight first, then heat, then distance."""
     out = []
     for them in others:
         if not is_candidate(me, them, today):
             continue
         km, where = distance(me, them)
         score, reasons = similarity(me, them)
+        where_line = logistics(me, them)
+        if where_line:
+            reasons = reasons[:2] + [where_line]   # logistics always make the card
         out.append({**them, "age": age_on(them["birthdate"], today), "km": km,
                     "where": where, "score": score, "reasons": reasons,
+                    "free_tonight": free_tonight(them, tonight),
                     "shared_intents": sorted(shared_intents(me, them))})
-    out.sort(key=lambda c: (-c["score"], c["km"] if c["km"] is not None else 1e9))
+    out.sort(key=lambda c: (not c["free_tonight"], -c["score"],
+                            c["km"] if c["km"] is not None else 1e9))
     return out

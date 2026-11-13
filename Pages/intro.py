@@ -17,7 +17,7 @@ _PREVIEW_DISCOVER = f"""
   </div>
   {score_ring(82)}
 </div>
-<div class="hd-intro-pills"><span>✕ Pass</span><span class="on">♥ Like</span></div>
+<div class="hd-intro-pills"><span>✕ Pass</span><span class="on">🔥 Up for it</span></div>
 """
 
 _PREVIEW_QA = """
@@ -33,8 +33,8 @@ _PREVIEW_QA = """
 _PREVIEW_WELCOME = """
 <div class="hd-intro-mock">
   <div class="hd-chips" style="margin:0;justify-content:center;">
-    <span class="hd-chip lime">🎚️ Vibe</span><span class="hd-chip">🎯 Quiz</span>
-    <span class="hd-chip cyan">🔥 Discover</span><span class="hd-chip magenta">💘 Q&amp;A</span>
+    <span class="hd-chip lime">🎚️ Setup</span><span class="hd-chip">🎯 Quiz</span>
+    <span class="hd-chip cyan">🔥 Discover</span><span class="hd-chip magenta">🔥 Q&amp;A</span>
     <span class="hd-chip amber">💬 Chat</span>
   </div>
 </div>
@@ -52,12 +52,12 @@ _PREVIEW_VIBE = """
 
 _PREVIEW_QUIZ = """
 <div class="hd-intro-mock" style="text-align:center;">
-  <div class="hd-kicker">Vibe score</div>
+  <div class="hd-kicker">Heat score</div>
   <div style="display:flex;height:12px;border-radius:99px;overflow:hidden;margin:10px 0 8px;">
-    <div style="flex:6;background:var(--cyan);"></div><div style="flex:4;background:var(--magenta);"></div>
+    <div style="flex:35;background:var(--cyan);"></div><div style="flex:65;background:var(--magenta);"></div>
   </div>
   <div style="display:flex;justify-content:space-between;" class="hd-kicker">
-    <span style="color:var(--cyan);">60% lifestyle</span><span style="color:var(--magenta);">40% quiz</span>
+    <span style="color:var(--cyan);">35% lifestyle</span><span style="color:var(--magenta);">65% quiz</span>
   </div>
 </div>
 """
@@ -66,7 +66,7 @@ _PREVIEW_SAFETY = """
 <div class="hd-intro-mock">
   <div class="hd-why" style="margin:0;padding:0;border:0;">
     <div>👻 &nbsp;Hide from Discover any time</div>
-    <div>⚑ &nbsp;Block or report from any match</div>
+    <div>⚑ &nbsp;Block or report anyone, any time</div>
     <div>🔒 &nbsp;Quiz results: only matches, or people you give a code</div>
     <div>📍 &nbsp;Distances are rough, never your exact spot</div>
   </div>
@@ -75,27 +75,27 @@ _PREVIEW_SAFETY = """
 
 SLIDES = [
     ("⚡", "Welcome to Hidden",
-     "Meet people nearby who live like you do. Here's how it works, in five quick steps.",
+     "Link up with people nearby who want what you want. No dating. Here's how it works, in five quick steps.",
      _PREVIEW_WELCOME),
-    ("🎚️", "1 · Set your vibe",
-     "Tell us how you roll with weed, drinks and parties, who you want to meet, and where you are. "
-     "You only see people who fit, and they only see you if you fit them.",
+    ("🎚️", "1 · Say what you're on",
+     "Tonight only, regular or either. Who you're into, whether you can host, how you roll with weed, "
+     "drinks and parties, and where you are. You only see people who fit, and they only see you if you fit them.",
      _PREVIEW_VIBE),
     ("🎯", "2 · Take the quiz",
-     "Read Between The Lines is a 5-minute scenario quiz. It sharpens your vibe score, and once you "
-     "match you'll see each other's result, freak score and the hidden desires you share.",
+     "Read Between The Lines is a 5-minute scenario quiz and 65% of your heat score. Once it's mutual "
+     "you'll see each other's result, freak score and the hidden desires you share.",
      _PREVIEW_QUIZ),
     ("🔥", "3 · Discover",
-     "One person at a time, best vibe first. The ring shows how alike you are. "
-     "Tap Like or Pass. If you both like each other, it's a match.",
+     "One person at a time. People free tonight come first, then the most heat. "
+     "Tap Up for it or Pass. If you're both up for it, it's mutual.",
      _PREVIEW_DISCOVER),
-    ("💘", "4 · Blind Q&A, then chat",
-     "Before anyone can message, you each ask 3 questions and answer theirs. "
+    ("🔥", "4 · Blind Q&A, then chat",
+     "Before anyone can message, you each ask 2 questions and answer theirs. "
      "Answers reveal at the same time, then the chat opens.",
      _PREVIEW_QA),
     ("🛡️", "5 · You're in control",
-     "Meet in public and tell a friend where you're going. You can hide, block or report any time. "
-     "And your first match unlocks something hidden… 🔒",
+     "First time with someone? Meet in public, tell a friend, and keep consent out loud. "
+     "Hide, block or report any time. And your first mutual unlocks something hidden… 🔒",
      _PREVIEW_SAFETY),
 ]
 

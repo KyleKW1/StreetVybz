@@ -7,8 +7,8 @@ import time
 import streamlit as st
 
 import social_db
-from matching import rank_candidates, filter_reasons, quiz_match, INTENTS
-from ui import (esc, header, avatar, intent_chips, lifestyle_chips,
+from matching import rank_candidates, filter_reasons, quiz_match, INTENTS, norm_intent
+from ui import (esc, header, avatar, intent_chips, lifestyle_chips, setup_chips,
                 score_ring, open_quiz, invite_link)
 
 _QUEUE_TTL = 300  # re-rank at most every 5 minutes
@@ -27,7 +27,7 @@ def _my_quiz(uid: int):
 def _load_queue(uid: int, me: dict) -> list:
     me = {**me, "quiz": _my_quiz(uid)}
     pool = social_db.load_candidate_pool(uid)
-    queue = rank_candidates(me, pool)
+    queue = rank_candidates(me, pool, tonight=social_db.tonight())
     st.session_state.disc_queue = queue
     st.session_state.disc_filtered = filter_reasons(me, pool)
     st.session_state.disc_loaded_at = time.time()
@@ -46,11 +46,11 @@ def _quiz_chip(c: dict, my_quiz) -> str:
 def _card(c: dict, my_quiz=None):
     reasons = "".join(f"<div>✦ {esc(r)}</div>" for r in c["reasons"])
     why = ('<div class="hd-why"><div class="hd-kicker" style="margin-bottom:6px;">'
-           f"Why you'd vibe</div>{reasons}</div>") if reasons else ""
+           f"Reading between the lines</div>{reasons}</div>") if reasons else ""
     bio = (f'<div class="hd-sub" style="margin-top:12px;color:var(--text);">“{esc(c["bio"])}”</div>'
            if c.get("bio") else "")
     st.html(f"""
-<div class="hd-card{' hot' if c['score'] >= 75 else ''}">
+<div class="hd-card{' hot' if c['score'] >= 75 or c.get('free_tonight') else ''}">
   <div style="display:flex;align-items:center;gap:16px;">
     {avatar(c['username'], c['user_id'])}
     <div style="flex:1;min-width:0;">
@@ -61,7 +61,7 @@ def _card(c: dict, my_quiz=None):
     </div>
     {score_ring(c['score'])}
   </div>
-  <div class="hd-chips">{_quiz_chip(c, my_quiz)}{intent_chips(c['shared_intents'])}{lifestyle_chips(c)}</div>
+  <div class="hd-chips">{setup_chips(c, c.get('free_tonight'))}{_quiz_chip(c, my_quiz)}{intent_chips(c['shared_intents'])}{lifestyle_chips(c)}</div>
   {bio}
   {why}
 </div>
@@ -72,10 +72,10 @@ def _its_a_match(m: dict):
     st.balloons()
     st.html(f"""
 <div class="hd-card hot" style="text-align:center;padding:40px 24px;">
-  <div style="font-size:56px;animation:hd-pop .7s both;">💘</div>
-  <div class="hd-brand" style="font-size:48px;margin:6px 0;">IT'S A MATCH</div>
-  <div class="hd-sub">You and <b style="color:var(--text);">{esc(m['name'])}</b> both said yes.<br>
-  Before you can chat, you each ask 3 questions — blind. Answers reveal together.</div>
+  <div style="font-size:56px;animation:hd-pop .7s both;">🔥</div>
+  <div class="hd-brand" style="font-size:48px;margin:6px 0;">IT'S MUTUAL</div>
+  <div class="hd-sub">You and <b style="color:var(--text);">{esc(m['name'])}</b> are both up for it.<br>
+  First a quick blind round: you each ask 2 questions. Answers reveal together.</div>
 </div>
 """)
     c1, c2 = st.columns(2)
@@ -84,7 +84,7 @@ def _its_a_match(m: dict):
             st.session_state.pop("just_matched", None)
             st.rerun()
     with c2:
-        if st.button("Start the Q&A →", type="primary", use_container_width=True, key="match_go"):
+        if st.button("Ask your questions →", type="primary", use_container_width=True, key="match_go"):
             st.session_state.pop("just_matched", None)
             st.session_state.open_match = m["id"]
             st.session_state.tab = "matches"
@@ -125,14 +125,14 @@ def _filter_story(me: dict, f: dict) -> tuple[str, bool] | None:
     share = blocked[reason] / f["nearby"]
     if share <= 0.5:
         return (f"{_people(f['nearby'])} nearby, but none match your age range, "
-                "who you date, or what you're looking for.", True)
+                "who you're into, or what you're looking for.", True)
     most, who = ("they're", "they") if share == 1 else ("most are", "most")
-    want = INTENTS.get(me.get("intent"), "the same thing").lower()
+    want = INTENTS.get(norm_intent(me.get("intent")), "the same thing").lower()
     text = {
         "my_ages":    f"{most} outside your age range ({me.get('age_min') or 18}–{me.get('age_max') or 99}).",
         "their_ages": f"you're outside the age range {who} want.",
         "intent":     f"{most} not looking for {want}.",
-        "gender":     f"{most} not a fit for who you want to date, or who they do.",
+        "gender":     f"{most} not a fit for who you're into, or who they're into.",
     }[reason]
     return f"{_people(f['nearby'])} nearby, but {text}", reason != "their_ages"
 
@@ -232,6 +232,18 @@ def _report_dialog(uid: int, c: dict):
         st.rerun()
 
 
+def _free_tonight_toggle(uid: int, me: dict):
+    free = social_db.is_free_tonight(me)
+    on = st.toggle("🔥  I'm free tonight", value=free, key="disc_free",
+                   help="Puts you at the top of Discover for people nearby. Switches itself off at 6am.")
+    if on != free:
+        if social_db.set_free_tonight(uid, on):
+            st.toast("You're showing as free tonight 🔥" if on else "Free tonight is off")
+            st.rerun()
+        else:
+            st.error("Couldn't update — try again.")
+
+
 def discover_page():
     uid = _uid()
     me = social_db.get_profile(uid) or {}
@@ -247,9 +259,10 @@ def discover_page():
 
     if queue:
         # Compact heading when there's a card, so Like/Pass fit on a phone screen
-        st.html('<div class="hd-kicker" style="margin:2px 0 10px;">Who\'s around · best vibe first</div>')
+        st.html('<div class="hd-kicker" style="margin:2px 0 10px;">Who\'s up for it · free tonight first</div>')
     else:
-        header("Discover", "Who's around")
+        header("Discover", "Who's up for it")
+    _free_tonight_toggle(uid, me)
 
     if me.get("hidden"):
         st.info("👻 You're hidden, so nobody can see you right now. Turn it off in **Me** to show up again.")
@@ -270,7 +283,7 @@ def discover_page():
         with col_pass:
             passed = st.button("✕  Pass", use_container_width=True, key=f"pass_{c['user_id']}")
         with col_like:
-            liked = st.button("♥  Like", type="primary", use_container_width=True,
+            liked = st.button("🔥  Up for it", type="primary", use_container_width=True,
                               key=f"like_{c['user_id']}")
 
     if passed or liked:
@@ -279,7 +292,7 @@ def discover_page():
         if match_id:
             st.session_state.just_matched = {"id": match_id, "name": c["username"]}
         elif liked:
-            st.toast(f"Liked {c['username']} — if they like you back, it's a match 💘")
+            st.toast(f"You're up for {c['username']} — if it's mutual, you'll know 🔥")
         st.rerun()
 
     more = len(queue) - 1

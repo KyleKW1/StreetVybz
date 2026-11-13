@@ -1,5 +1,5 @@
 """
-social_db.py — Storage for meeting people: profiles, swipes, matches,
+social_db.py — Storage for link-ups: profiles, swipes, matches,
 blind Q&A, chat, blocks/reports and Tonight check-ins.
 
 Uses the shared connection pool from database.py.
@@ -15,6 +15,7 @@ from database import create_connection
 PROFILE_FIELDS = (
     "birthdate", "gender", "show_me", "intent", "bio", "weed", "drink", "party",
     "city", "location_mode", "lat", "lon", "max_km", "age_min", "age_max", "hidden",
+    "status", "hosting", "available_on",
 )
 REQUIRED_FIELDS = ("birthdate", "intent", "city", "weed", "drink", "party")
 
@@ -102,6 +103,14 @@ _DDL = [
 _MIGRATIONS = [
     "ALTER TABLE reports ADD COLUMN evidence JSON",
     "ALTER TABLE reports ADD COLUMN reviewed_at DATETIME DEFAULT NULL",
+    # Link-ups (was a dating app)
+    "ALTER TABLE profiles ADD COLUMN status VARCHAR(10)",
+    "ALTER TABLE profiles ADD COLUMN hosting VARCHAR(10)",
+    "ALTER TABLE profiles ADD COLUMN available_on DATE",
+    """UPDATE profiles SET intent = CASE intent
+         WHEN 'date' THEN 'regular' WHEN 'linkup' THEN 'open' WHEN 'both' THEN 'open'
+         ELSE intent END
+       WHERE intent IN ('date', 'linkup', 'both')""",
 ]
 
 # SQL fragment: this user id isn't banned
@@ -217,6 +226,15 @@ def tonight() -> str:
 
 
 # ─── PROFILES ─────────────────────────────────────────────────────────────────
+
+def is_free_tonight(profile: dict | None) -> bool:
+    return bool(profile) and str(profile.get("available_on") or "")[:10] == tonight()
+
+
+def set_free_tonight(user_id: int, free: bool) -> bool:
+    """Flag (or unflag) this user as free tonight. Expires on its own at 6am."""
+    return save_profile(user_id, {"available_on": tonight() if free else None})
+
 
 def get_profile(user_id: int) -> dict | None:
     return _memo(("profile", user_id), lambda: _fetchone(

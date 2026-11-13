@@ -5,9 +5,9 @@ Pages/me.py — Your profile, the quiz, safety controls and account settings.
 import streamlit as st
 
 import social_db
-from matching import INTENTS
+from matching import INTENTS, norm_intent
 from Pages.profile_form import profile_form, age_text
-from ui import esc, avatar, lifestyle_chips, open_quiz
+from ui import esc, avatar, lifestyle_chips, setup_chips, open_quiz
 
 
 def _uid():
@@ -21,8 +21,8 @@ def _masthead(uid: int, p: dict):
   <div style="min-width:0;">
     <div class="hd-title" style="margin:0;overflow-wrap:anywhere;">{esc(p.get('username', ''))}<span
          style="color:var(--soft);font-size:28px;">{', ' + age_text(p) if age_text(p) else ''}</span></div>
-    <div class="hd-kicker" style="margin-top:4px;">📍 {esc(p.get('city') or '—')} · {esc(INTENTS.get(p.get('intent'), ''))}</div>
-    <div class="hd-chips" style="margin-bottom:0;">{lifestyle_chips(p)}</div>
+    <div class="hd-kicker" style="margin-top:4px;">📍 {esc(p.get('city') or '—')} · {esc(INTENTS.get(norm_intent(p.get('intent')), ''))}</div>
+    <div class="hd-chips" style="margin-bottom:0;">{setup_chips(p, social_db.is_free_tonight(p))}{lifestyle_chips(p)}</div>
   </div>
 </div>
 """)
@@ -30,7 +30,7 @@ def _masthead(uid: int, p: dict):
 
 def _hide_toggle(uid: int, p: dict):
     hidden = st.toggle("👻  Hide me from Discover", value=bool(p.get("hidden")), key="me_hidden",
-                       help="Nobody new will see you. Your matches and chats stay.")
+                       help="Nobody new will see you. Your mutuals and chats stay.")
     if hidden != bool(p.get("hidden")):
         if social_db.save_profile(uid, {"hidden": int(hidden)}):
             st.toast("You're hidden 👻" if hidden else "You're visible again ✨")
@@ -43,7 +43,7 @@ def _quiz_tab(uid: int):
         shared = ("Matches who took it too see your result, your freak score and only the hidden "
                   "desires you both share." if q.get("shared") else
                   "You took this before results were shown to matches, so it stays private. "
-                  "Retake the quiz to share it with your matches.")
+                  "Retake the quiz to share it with your mutuals.")
         st.html(f"""
 <div class="hd-card" style="padding:20px;">
   <div class="hd-kicker">Read Between The Lines</div>
@@ -54,8 +54,8 @@ def _quiz_tab(uid: int):
         label = "Retake the quiz →"
     else:
         st.html('<div class="hd-card" style="padding:20px;"><div class="hd-title" style="font-size:28px;">'
-                'Boost your matches</div><div class="hd-sub">Take the quiz and your matches get smarter — '
-                'it counts for 40% of the vibe score. Matches who took it too see your result, your '
+                'Read Between The Lines</div><div class="hd-sub">Take the quiz and your heat scores get real — '
+                'it counts for 65% of every one. Mutuals who took it too see your result, your '
                 'freak score and only the hidden desires you both share. Never your individual answers.</div></div>')
         label = "Take the quiz →"
     st.html("<div style='height:10px'></div>")
@@ -67,9 +67,20 @@ def _quiz_tab(uid: int):
 
 
 def _safety_tab(uid: int):
-    st.html('<div class="hd-sub" style="margin-bottom:12px;">Meet in public, tell a friend where you\'re '
-            'going, and never send money. Report anyone who makes you uncomfortable — from their match '
-            'page under ⚑.</div>')
+    st.html("""
+<div class="hd-card" style="padding:18px 20px;margin-bottom:12px;">
+  <div class="hd-kicker" style="margin-bottom:6px;">Link up smart</div>
+  <div class="hd-why" style="margin:0;padding:0;border:0;">
+    <div>🍸 &nbsp;First time? Meet somewhere public before anywhere private</div>
+    <div>📍 &nbsp;Send a friend the name, the spot and the time</div>
+    <div>🗣 &nbsp;Consent is out loud, every time — and anyone can change their mind</div>
+    <div>🛡 &nbsp;Bring protection. Don't rely on them to</div>
+    <div>🥃 &nbsp;Watch your drink. Keep your own ride home</div>
+    <div>💸 &nbsp;Never send money. Anyone asking gets reported</div>
+  </div>
+</div>""")
+    st.html('<div class="hd-sub" style="margin-bottom:12px;">Report anyone who makes you uncomfortable '
+            '— from their card in Discover or their page in Mutuals, under ⚑.</div>')
     blocked = social_db.load_blocked(uid)
     st.html('<div class="hd-kicker" style="margin:8px 0;">Blocked</div>')
     if not blocked:

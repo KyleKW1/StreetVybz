@@ -1,7 +1,7 @@
 """
-Pages/matches.py — Your matches: blind Q&A first, then chat.
+Pages/matches.py — Your mutuals: blind Q&A first, then chat.
 
-Flow per match: both write 3 questions (blind) → both answer the other's
+Flow per match: both write 2 questions (blind) → both answer the other's
 → everything reveals at once → chat opens.
 """
 
@@ -13,28 +13,29 @@ import social_db
 from Pages.quiz_reveal import match_quiz_card, screenshot_shield
 from ui import esc, header, empty_state, waiting, avatar
 
-N_QUESTIONS = 3
+N_QUESTIONS = 2
 
 QUESTION_SPARKS = [
-    "What's the most spontaneous thing you've done on a night out?",
-    "What's something you'd never say on a first date?",
-    "Weed, drinks or neither — what's your perfect Friday?",
-    "What's a secret talent nobody would guess?",
-    "What's the last thing that made you laugh out loud?",
-    "What's your biggest green flag in a person?",
-    "Where's the best spot in town that nobody knows about?",
-    "What's one thing you want to try but haven't yet?",
-    "What song instantly changes your mood?",
-    "What would your friends say you're too much of?",
     "What's your idea of a perfect link-up?",
-    "What's the boldest thing you've done for someone you liked?",
+    "Tonight, or are we taking our time?",
+    "Your place, mine, or somewhere in between?",
+    "What's a hard no for you? I'll tell you mine.",
+    "What should I know before we link?",
+    "What gets you in the mood fastest?",
+    "Drinks first, smoke first, or straight to it?",
+    "What's something you want to try but haven't yet?",
+    "What's the boldest move someone's made on you that worked?",
+    "Are you more lead or follow?",
+    "What would make you leave early — and what would make you stay?",
+    "What did you answer on the quiz that surprised you?",
 ]
 
-REPORT_REASONS = ["Fake profile / spam", "Harassment or threats", "Seems under 18",
-                  "Inappropriate messages", "Other"]
+REPORT_REASONS = ["Fake profile / spam", "Seems under 18", "Pushed past a no / ignored consent",
+                  "Harassment or threats", "Sent something I didn't ask for",
+                  "Asked for money / selling", "Other"]
 
 _STAGE_LABEL = {
-    "write":          ("✍️ Your move — ask your 3 questions", "var(--magenta)"),
+    "write":          ("✍️ Your move — ask your 2 questions", "var(--magenta)"),
     "wait_questions": ("⏳ Waiting for their questions",       "var(--muted)"),
     "answer":         ("💬 Your move — answer their questions", "var(--magenta)"),
     "wait_answers":   ("⏳ Waiting for their answers",          "var(--muted)"),
@@ -65,9 +66,9 @@ def _status_line(m: dict, uid: int) -> tuple[str, str]:
 
 
 def _match_list(uid: int, matches: list):
-    header("Matches", "Your people", "Ask blind, answer honest, then talk.")
+    header("Mutuals", "Who's up for you", "Ask blind, answer honest, then make plans.")
     if not matches:
-        empty_state("💘", "No matches yet", "Like people in Discover — when it's mutual they show up here.")
+        empty_state("🔥", "No mutuals yet", "Tap \u201cUp for it\u201d in Discover — when it's mutual they show up here.")
         return
     for m in matches:
         line, color = _status_line(m, uid)
@@ -110,7 +111,7 @@ def _spark(key: str):
 
 def _write_questions(m: dict, uid: int):
     st.html(f'<div class="hd-sub" style="margin-bottom:10px;">Ask <b style="color:var(--text);">'
-            f'{esc(m["other_name"])}</b> 3 things you actually want to know. They can\'t see yours '
+            f'{esc(m["other_name"])}</b> 2 things you need to know before you link. They can\'t see yours '
             f'until they\'ve written theirs.</div>')
     questions = []
     for i in range(N_QUESTIONS):
@@ -186,7 +187,7 @@ def _chat(m: dict, uid: int):
         msgs = social_db.load_messages(m["id"], uid)
         if not msgs:
             st.html('<div class="hd-sub" style="text-align:center;padding:24px 0;">'
-                    'Chat is open. Say something about their answers 👀</div>')
+                    'Chat is open. Pick up on something they said — then make a plan 👀</div>')
             return
         bubbles = "".join(
             f'<div class="hd-bubble {"me" if msg["sender_id"] == uid else "them"}">{esc(msg["body"])}'
@@ -242,12 +243,12 @@ def _match_detail(uid: int, match_id: int):
         st.rerun()
         return
 
-    if st.button("← Matches", key="back_matches"):
+    if st.button("← Mutuals", key="back_matches"):
         st.session_state.pop("open_match", None)
         st.rerun()
 
     st.html(f'<div style="display:flex;align-items:center;gap:14px;margin:8px 0 14px;">'
-            f'{avatar(m["other_name"], m["other_id"])}<div><div class="hd-kicker">Matched</div>'
+            f'{avatar(m["other_name"], m["other_id"])}<div><div class="hd-kicker">Mutual 🔥</div>'
             f'<div class="hd-title" style="margin:0;">{esc(m["other_name"])}</div></div></div>')
     screenshot_shield((st.session_state.get("user") or {}).get("username"))
     match_quiz_card(uid, m["other_id"], m["other_name"], m.get("created_at"), key=str(m["id"]))
