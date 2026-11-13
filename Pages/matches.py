@@ -1,8 +1,9 @@
 """
-Pages/matches.py — Your matches: blind Q&A first, then chat.
+Pages/matches.py — Your mutuals: a quick blind round first, then chat.
 
-Flow per match: both write 3 questions (blind) → both answer the other's
-→ everything reveals at once → chat opens.
+Flow per match: both write 2 questions (blind) → both answer the other's
+→ everything reveals at once, plus any Read Between The Lines desires you
+share (if you both opted in) → chat opens.
 """
 
 import random
@@ -10,30 +11,32 @@ import random
 import streamlit as st
 
 import social_db
+from matching import shared_desires
 from ui import esc, header, empty_state, waiting, avatar
 
-N_QUESTIONS = 3
+N_QUESTIONS = 2
 
 QUESTION_SPARKS = [
-    "What's the most spontaneous thing you've done on a night out?",
-    "What's something you'd never say on a first date?",
-    "Weed, drinks or neither — what's your perfect Friday?",
-    "What's a secret talent nobody would guess?",
-    "What's the last thing that made you laugh out loud?",
-    "What's your biggest green flag in a person?",
-    "Where's the best spot in town that nobody knows about?",
-    "What's one thing you want to try but haven't yet?",
-    "What song instantly changes your mood?",
-    "What would your friends say you're too much of?",
     "What's your idea of a perfect link-up?",
-    "What's the boldest thing you've done for someone you liked?",
+    "Tonight, or are we taking our time?",
+    "Your place, mine, or somewhere in between?",
+    "What's a hard no for you? I'll tell you mine.",
+    "What should I know before we link?",
+    "What gets you in the mood fastest?",
+    "Drinks first, smoke first, or straight to it?",
+    "What's something you want to try but haven't yet?",
+    "What's the boldest move someone's made on you that worked?",
+    "Are you more lead or follow?",
+    "What would make you leave early — and what would make you stay?",
+    "What did you answer on the quiz that surprised you?",
 ]
 
-REPORT_REASONS = ["Fake profile / spam", "Harassment or threats", "Seems under 18",
-                  "Inappropriate messages", "Other"]
+REPORT_REASONS = ["Fake profile / spam", "Seems under 18", "Pushed past a no / ignored consent",
+                  "Harassment or threats", "Sent something I didn't ask for",
+                  "Asked for money / selling", "Other"]
 
 _STAGE_LABEL = {
-    "write":          ("✍️ Your move — ask your 3 questions", "var(--magenta)"),
+    "write":          ("✍️ Your move — ask your 2 questions", "var(--magenta)"),
     "wait_questions": ("⏳ Waiting for their questions",       "var(--muted)"),
     "answer":         ("💬 Your move — answer their questions", "var(--magenta)"),
     "wait_answers":   ("⏳ Waiting for their answers",          "var(--muted)"),
@@ -64,9 +67,9 @@ def _status_line(m: dict, uid: int) -> tuple[str, str]:
 
 
 def _match_list(uid: int, matches: list):
-    header("Matches", "Your people", "Ask blind, answer honest, then talk.")
+    header("Mutuals", "Who's up for you", "Ask blind, answer honest, then make plans.")
     if not matches:
-        empty_state("💘", "No matches yet", "Like people in Discover — when it's mutual they show up here.")
+        empty_state("🔥", "No mutuals yet", "Tap \u201cUp for it\u201d in Discover — when it's mutual they show up here.")
         return
     for m in matches:
         line, color = _status_line(m, uid)
@@ -109,7 +112,7 @@ def _spark(key: str):
 
 def _write_questions(m: dict, uid: int):
     st.html(f'<div class="hd-sub" style="margin-bottom:10px;">Ask <b style="color:var(--text);">'
-            f'{esc(m["other_name"])}</b> 3 things you actually want to know. They can\'t see yours '
+            f'{esc(m["other_name"])}</b> 2 things you need to know before you link. They can\'t see yours '
             f'until they\'ve written theirs.</div>')
     questions = []
     for i in range(N_QUESTIONS):
@@ -174,9 +177,43 @@ def _exchange(title: str, questions: list, answers: list, color: str):
             f'<div class="hd-kicker" style="color:{color};margin-bottom:6px;">{esc(title)}</div>{rows}</div>')
 
 
+def _desire_reveal(m: dict, uid: int):
+    """Read Between The Lines overlap — only if BOTH opted in, only what they share."""
+    me = social_db.get_profile(uid) or {}
+    them = social_db.get_profile(m["other_id"]) or {}
+    if not me.get("reveal_desires"):
+        st.html('<div class="hd-sub" style="margin:4px 0 10px;">🔒 Turn on <b style="color:var(--text);">'
+                'Reveal shared desires</b> in Me to see what you and your mutuals both said yes to.</div>')
+        return
+    if not them.get("reveal_desires"):
+        st.html(f'<div class="hd-sub" style="margin:4px 0 10px;">🔒 {esc(m["other_name"])} keeps their '
+                'quiz private — read between the lines in the chat.</div>')
+        return
+    quiz = social_db.load_quiz_summaries([uid, m["other_id"]])
+    if not quiz.get(uid) or not quiz.get(m["other_id"]):
+        who = "You haven't" if not quiz.get(uid) else f"{m['other_name']} hasn't"
+        st.html(f'<div class="hd-sub" style="margin:4px 0 10px;">🎯 {esc(who)} taken Read Between The '
+                'Lines yet — nothing to compare.</div>')
+        return
+    shared = shared_desires(quiz[uid], quiz[m["other_id"]])
+    if not shared:
+        st.html('<div class="hd-card" style="padding:16px 18px;margin-bottom:10px;">'
+                '<div class="hd-kicker" style="color:var(--cyan);">Read between the lines</div>'
+                '<div class="hd-sub">No hidden desires in common on the quiz. Doesn\'t mean there\'s '
+                'nothing — just means you\'ll have to ask.</div></div>')
+        return
+    chips = "".join(f'<span class="hd-chip magenta">🔥 {esc(d)}</span>' for d in shared)
+    st.html(f'<div class="hd-card hot" style="padding:16px 18px;margin-bottom:10px;">'
+            f'<div class="hd-kicker" style="color:var(--magenta);">Read between the lines · you both said yes</div>'
+            f'<div class="hd-chips">{chips}</div>'
+            f'<div class="hd-sub" style="font-size:12px;">Only shared answers are shown. A yes on a quiz '
+            f'isn\'t a yes tonight — talk it through.</div></div>')
+
+
 def _chat(m: dict, uid: int):
     has_messages = bool(m.get("last_message")) or bool(social_db.load_messages(m["id"], uid, limit=1))
-    with st.expander("✨ Your blind Q&A", expanded=not has_messages):
+    with st.expander("✨ The reveal", expanded=not has_messages):
+        _desire_reveal(m, uid)
         _exchange(f"You asked {m['other_name']}", m["my_questions"], m["their_answers"], "var(--lime)")
         _exchange(f"{m['other_name']} asked you", m["their_questions"], m["my_answers"], "var(--magenta)")
 
@@ -185,7 +222,7 @@ def _chat(m: dict, uid: int):
         msgs = social_db.load_messages(m["id"], uid)
         if not msgs:
             st.html('<div class="hd-sub" style="text-align:center;padding:24px 0;">'
-                    'Chat is open. Say something about their answers 👀</div>')
+                    'Chat is open. Pick up on something they said — then make a plan 👀</div>')
             return
         bubbles = "".join(
             f'<div class="hd-bubble {"me" if msg["sender_id"] == uid else "them"}">{esc(msg["body"])}'
@@ -240,12 +277,12 @@ def _match_detail(uid: int, match_id: int):
         st.rerun()
         return
 
-    if st.button("← Matches", key="back_matches"):
+    if st.button("← Mutuals", key="back_matches"):
         st.session_state.pop("open_match", None)
         st.rerun()
 
     st.html(f'<div style="display:flex;align-items:center;gap:14px;margin:8px 0 14px;">'
-            f'{avatar(m["other_name"], m["other_id"])}<div><div class="hd-kicker">Matched</div>'
+            f'{avatar(m["other_name"], m["other_id"])}<div><div class="hd-kicker">Mutual 🔥</div>'
             f'<div class="hd-title" style="margin:0;">{esc(m["other_name"])}</div></div></div>')
     _progress(m["stage"])
 

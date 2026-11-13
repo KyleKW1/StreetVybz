@@ -8,8 +8,8 @@ from datetime import date
 import streamlit as st
 
 import social_db
-from matching import (LIFESTYLE, INTENTS, GENDERS, SHOW_ME, MIN_AGE,
-                      is_adult, age_on, round_coord)
+from matching import (LIFESTYLE, INTENTS, INTENT_ICONS, STATUSES, HOSTING, GENDERS,
+                      SHOW_ME, MIN_AGE, is_adult, age_on, round_coord, norm_intent)
 from ui import header, open_quiz
 
 
@@ -71,9 +71,9 @@ def profile_form(uid: int, profile: dict | None, key: str, submit_label: str) ->
         )
 
     intent = st.segmented_control(
-        "I'm here for", options=list(INTENTS), format_func=lambda k: {
-            "date": "💘 Dating", "linkup": "🤝 Link-ups", "both": "✨ Both"}[k],
-        default=p.get("intent") or "both", key=f"{key}_intent",
+        "Looking for", options=list(INTENTS),
+        format_func=lambda k: f"{INTENT_ICONS[k]} {INTENTS[k]}",
+        default=norm_intent(p.get("intent")) or "open", key=f"{key}_intent",
     )
 
     c1, c2 = st.columns(2)
@@ -82,9 +82,18 @@ def profile_form(uid: int, profile: dict | None, key: str, submit_label: str) ->
                               index=GENDERS.index(p["gender"]) if p.get("gender") in GENDERS else 0)
     with c2:
         show_me = p.get("show_me") or "Everyone"
-        if intent in ("date", "both"):
-            show_me = st.selectbox("Date", SHOW_ME, key=f"{key}_showme",
-                                   index=SHOW_ME.index(show_me) if show_me in SHOW_ME else 0)
+        show_me = st.selectbox("Into", SHOW_ME, key=f"{key}_showme",
+                               index=SHOW_ME.index(show_me) if show_me in SHOW_ME else 0)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        status_keys = list(STATUSES)
+        status = st.selectbox("Status", status_keys, format_func=STATUSES.get, key=f"{key}_status",
+                              index=status_keys.index(p["status"]) if p.get("status") in STATUSES else 0)
+    with c2:
+        host_keys = list(HOSTING)
+        hosting = st.selectbox("Where", host_keys, format_func=HOSTING.get, key=f"{key}_hosting",
+                               index=host_keys.index(p["hosting"]) if p.get("hosting") in HOSTING else 3)
 
     st.html('<div class="hd-kicker" style="margin:14px 0 4px;">Your lifestyle</div>')
     lifestyle = {}
@@ -109,8 +118,15 @@ def profile_form(uid: int, profile: dict | None, key: str, submit_label: str) ->
         location_capture(uid, p, key)
         st.caption("People without live location still show up if they're in the same city.")
 
-    bio = st.text_area("About you (optional)", value=p.get("bio") or "", key=f"{key}_bio",
-                       max_chars=300, height=90, placeholder="What's your ideal night out?")
+    bio = st.text_area("Your vibe (optional)", value=p.get("bio") or "", key=f"{key}_bio",
+                       max_chars=300, height=90,
+                       placeholder="What you're on, what you're not. Keep it a little mysterious.")
+
+    reveal = st.toggle(
+        "🔓 Reveal shared desires to mutuals", value=bool(p.get("reveal_desires")),
+        key=f"{key}_reveal",
+        help="After you both finish the blind Q&A, show the quiz desires you have IN COMMON. "
+             "Only when both of you turn this on. Nothing you don't share is ever shown.")
 
     if not st.button(submit_label, type="primary", use_container_width=True, key=f"{key}_save"):
         return False
@@ -122,7 +138,7 @@ def profile_form(uid: int, profile: dict | None, key: str, submit_label: str) ->
         st.error(f"Sorry — Hidden is for people {MIN_AGE} and over.")
         return False
     if not intent:
-        st.error("Pick what you're here for.")
+        st.error("Pick what you're looking for.")
         return False
     if not city.strip():
         st.error("Add your city or area so we can find people near you.")
@@ -131,6 +147,7 @@ def profile_form(uid: int, profile: dict | None, key: str, submit_label: str) ->
     fields = {
         "birthdate": birthdate if isinstance(birthdate, date) else str(birthdate)[:10],
         "intent": intent, "gender": gender, "show_me": show_me,
+        "status": status, "hosting": hosting, "reveal_desires": int(reveal),
         "city": city.strip(), "location_mode": mode, "max_km": max_km,
         "age_min": age_min, "age_max": age_max, "bio": bio.strip() or None, **lifestyle,
     }
@@ -149,8 +166,8 @@ def setup_page():
     if profile.get("birthdate") and not is_adult(profile["birthdate"]):
         header("Hidden", "18+ only", f"You must be {MIN_AGE} or older to use Hidden.")
         return
-    header("Step 1 of 2", "Set up your vibe",
-           "Tell us how you live and where you are — we'll find people who match.")
+    header("Step 1 of 2", "What are you on?",
+           "Tell us what you want, who you're into and where you are. We'll show you who's up for it nearby.")
     if profile_form(uid, profile, "setup", "Next →"):
         st.session_state.tab = "quiz_offer"
         st.rerun()
@@ -158,15 +175,16 @@ def setup_page():
 
 def quiz_offer_page():
     st.html('<div class="hd-brand" style="margin-bottom:10px;">HIDDEN</div>')
-    header("Step 2 of 2", "Sharpen your matches",
-           "Read Between The Lines is a quick scenario quiz. Your answers stay private — "
-           "they only power the vibe score.")
+    header("Step 2 of 2", "Read Between The Lines",
+           "The quiz is where the heat score comes from. Your answers stay private. "
+           "Matches only see desires you share, and only if you both opt in.")
     st.html("""
 <div class="hd-card" style="padding:20px 22px;">
   <div class="hd-why" style="margin:0;padding:0;border:0;">
     <div>🎭 &nbsp;Real-life scenarios — pick what you'd actually do</div>
-    <div>🔒 &nbsp;Hidden desires round — never shown to anyone</div>
-    <div>🎯 &nbsp;Worth 40% of every vibe score</div>
+    <div>🔒 &nbsp;Hidden desires round — your answers are never shown</div>
+    <div>🔓 &nbsp;Opt in and matches see only what you <i>both</i> said yes to</div>
+    <div>🔥 &nbsp;Worth 65% of every heat score</div>
     <div>⏱ &nbsp;About 5 minutes</div>
   </div>
 </div>""")

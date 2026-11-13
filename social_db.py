@@ -1,5 +1,5 @@
 """
-social_db.py — Storage for meeting people: profiles, swipes, matches,
+social_db.py — Storage for link-ups: profiles, swipes, matches,
 blind Q&A, chat, blocks/reports and Tonight check-ins.
 
 Uses the shared connection pool from database.py.
@@ -13,6 +13,7 @@ from database import create_connection
 PROFILE_FIELDS = (
     "birthdate", "gender", "show_me", "intent", "bio", "weed", "drink", "party",
     "city", "location_mode", "lat", "lon", "max_km", "age_min", "age_max", "hidden",
+    "status", "hosting", "available_on", "reveal_desires",
 )
 REQUIRED_FIELDS = ("birthdate", "intent", "city", "weed", "drink", "party")
 
@@ -35,6 +36,10 @@ _DDL = [
         age_min       TINYINT UNSIGNED DEFAULT 18,
         age_max       TINYINT UNSIGNED DEFAULT 99,
         hidden        TINYINT(1)   NOT NULL DEFAULT 0,
+        status        VARCHAR(10),
+        hosting       VARCHAR(10),
+        available_on  DATE,
+        reveal_desires TINYINT(1)  NOT NULL DEFAULT 0,
         updated_at    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_profiles_city (city)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
@@ -89,6 +94,21 @@ _DDL = [
         INDEX idx_checkins_night (night, spot)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
 ]
+
+
+# Columns added after launch: (column, definition). Added if missing.
+_PROFILE_COLUMNS = [
+    ("status",         "VARCHAR(10)"),
+    ("hosting",        "VARCHAR(10)"),
+    ("available_on",   "DATE"),
+    ("reveal_desires", "TINYINT(1) NOT NULL DEFAULT 0"),
+]
+
+# Dating-era intents → link-up intents
+_INTENT_MIGRATION = """UPDATE profiles SET intent = CASE intent
+        WHEN 'date' THEN 'regular' WHEN 'linkup' THEN 'open' WHEN 'both' THEN 'open'
+        ELSE intent END
+    WHERE intent IN ('date', 'linkup', 'both')"""
 
 
 # ─── PLUMBING ─────────────────────────────────────────────────────────────────
@@ -154,6 +174,13 @@ def ensure_social_tables() -> bool:
         cur = conn.cursor()
         for ddl in _DDL:
             cur.execute(ddl)
+        cur.execute("""SELECT COLUMN_NAME FROM information_schema.COLUMNS
+                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'profiles'""")
+        have = {row[0] for row in cur.fetchall()}
+        for col, definition in _PROFILE_COLUMNS:
+            if col not in have:
+                cur.execute(f"ALTER TABLE profiles ADD COLUMN {col} {definition}")
+        cur.execute(_INTENT_MIGRATION)
         conn.commit()
         cur.close()
         return True
@@ -190,6 +217,15 @@ def save_profile(user_id: int, fields: dict) -> bool:
         f"ON DUPLICATE KEY UPDATE {updates}",
         (user_id, *fields.values()),
     ) is not None
+
+
+def set_free_tonight(user_id: int, free: bool) -> bool:
+    """Flag (or unflag) this user as free tonight. Expires on its own at 6am."""
+    return save_profile(user_id, {"available_on": tonight() if free else None})
+
+
+def is_free_tonight(profile: dict | None) -> bool:
+    return bool(profile) and str(profile.get("available_on") or "")[:10] == tonight()
 
 
 # ─── DISCOVER ────────────────────────────────────────────────────────────────

@@ -1,7 +1,8 @@
 """
 app.py — Hidden main entry point.
 
-Four tabs: Discover · Matches · Tonight (secret — unlocks at your first match) · Me.
+Link-ups, not dating. Four tabs: Discover · Mutuals · Tonight (secret —
+unlocks at your first mutual) · Me.
 """
 
 from datetime import date
@@ -48,8 +49,8 @@ def _nav(uid: int) -> str:
     todo = needs_action(social_db.load_matches(uid))
     unlocked = is_unlocked(uid)
     labels = {
-        "discover": "🔥 Discover",
-        "matches":  "🔴 Matches" if todo else "💘 Matches",   # red dot = a match is waiting on you
+        "discover": "👀 Discover",
+        "matches":  "🔴 Mutuals" if todo else "🔥 Mutuals",   # red dot = a mutual is waiting on you
         "tonight":  "🌙 Tonight" if unlocked else "🔒 ???",
         "me":       "👤 Me",
     }
@@ -113,11 +114,11 @@ def _login_page():
 <div style="max-width:400px; margin:60px auto 0; text-align:center; margin-bottom:32px;">
   <div class="hd-brand" style="font-size:72px; letter-spacing:8px;">HIDDEN</div>
   <div style="font-family:'DM Sans',sans-serif; font-size:15px; color:var(--soft); margin-top:10px;">
-    Meet people nearby who live like you do.
+    Link up with people nearby who want what you want.
   </div>
   <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
               text-transform:uppercase; color:var(--muted); margin-top:8px;">
-    18+ · Blind Q&amp;A before you chat
+    18+ · No dating · Read between the lines
   </div>
 </div>
 """)
@@ -303,7 +304,7 @@ def main():
     # The quiz is a full-screen flow (from setup, Discover or Me)
     if st.session_state.get("tab") == "quiz":
         done = st.session_state.get("wwyd_phase") == "result"
-        if st.button("Done — show me matches →" if done else "← Back to Hidden",
+        if st.button("Done — show me who's up for it →" if done else "← Back to Hidden",
                      key="hd_quiz_exit", type="primary" if done else "secondary"):
             st.session_state.tab = st.session_state.pop("_quiz_return", "discover")
             st.session_state.pop("disc_queue", None)   # re-rank with the new answers

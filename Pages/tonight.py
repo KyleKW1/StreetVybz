@@ -1,6 +1,6 @@
 """
-Pages/tonight.py — Secret feature, unlocked by your first match.
-Pick where you're heading tonight and see which of your matches are going too.
+Pages/tonight.py — Secret feature, unlocked by your first mutual.
+Pick where you're heading tonight and see which of your mutuals are going too.
 """
 
 import streamlit as st
@@ -28,11 +28,11 @@ def _locked():
 <div class="hd-card" style="text-align:center;padding:56px 24px;">
   <div class="hd-lock">🔒</div>
   <div class="hd-brand" style="font-size:clamp(26px,8vw,40px);letter-spacing:3px;margin:10px 0 6px;">SOMETHING'S HIDDEN HERE</div>
-  <div class="hd-sub">Get your first match to unlock it.<br>
+  <div class="hd-sub">Get your first mutual to unlock it.<br>
   <span style="color:var(--muted);">Hint: it's about where the night takes you.</span></div>
 </div>
 """)
-    if st.button("Go find a match →", type="primary", use_container_width=True, key="tonight_go"):
+    if st.button("Go find someone →", type="primary", use_container_width=True, key="tonight_go"):
         st.session_state.tab = "discover"
         st.rerun()
 
@@ -49,7 +49,7 @@ def tonight_page():
         st.toast("🌙 Tonight unlocked!")
 
     header("Unlocked", "Tonight 🌙",
-           "Say where you're heading. Your matches see it — everyone else only sees a headcount.")
+           "Say where you're heading. Your mutuals see it — everyone else only sees a headcount.")
 
     mine = social_db.my_check_in(uid)
     going = social_db.tonight_by_spot(uid)
@@ -80,7 +80,7 @@ def tonight_page():
         with c1:
             bits = []
             if info["matches"]:
-                bits.append(f'<span class="hd-chip magenta">💘 {esc(", ".join(info["matches"]))} going</span>')
+                bits.append(f'<span class="hd-chip magenta">🔥 {esc(", ".join(info["matches"]))} going</span>')
             if info["count"]:
                 bits.append(f'<span class="hd-chip">👥 {info["count"]} heading here</span>')
             if bits:

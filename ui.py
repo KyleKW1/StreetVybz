@@ -8,7 +8,7 @@ from html import escape
 
 import streamlit as st
 
-from matching import LIFESTYLE, INTENTS
+from matching import LIFESTYLE, INTENTS, INTENT_ICONS, STATUSES, HOSTING
 
 _APP_CSS = """
 <style>
@@ -168,8 +168,22 @@ def waiting(text: str):
 
 
 def intent_chips(intents) -> str:
-    return "".join(f'<span class="hd-chip magenta">{"💘" if i == "date" else "🤝"} {esc(INTENTS[i])}</span>'
+    return "".join(f'<span class="hd-chip magenta">{INTENT_ICONS.get(i, "")} {esc(INTENTS[i])}</span>'
                    for i in intents if i in INTENTS)
+
+
+def setup_chips(profile: dict, free_tonight: bool = False) -> str:
+    """Free tonight / single-couple-open / host-travel chips."""
+    out = []
+    if free_tonight:
+        out.append('<span class="hd-chip lime">🔥 Free tonight</span>')
+    if profile.get("status") in STATUSES:
+        icon = {"single": "🙋", "couple": "👫", "open": "🔓"}[profile["status"]]
+        out.append(f'<span class="hd-chip cyan">{icon} {esc(STATUSES[profile["status"]])}</span>')
+    if profile.get("hosting") in HOSTING:
+        icon = {"host": "🏠", "travel": "🚗", "either": "🔄", "out": "🍸"}[profile["hosting"]]
+        out.append(f'<span class="hd-chip">{icon} {esc(HOSTING[profile["hosting"]])}</span>')
+    return "".join(out)
 
 
 def lifestyle_chips(profile: dict) -> str:
@@ -186,7 +200,7 @@ def lifestyle_chips(profile: dict) -> str:
 def score_ring(score: int) -> str:
     color = "var(--lime)" if score >= 75 else "var(--cyan)" if score >= 50 else "var(--amber)"
     return (f'<div class="hd-ring" style="--p:{int(score)};--c:{color};">'
-            f'<div><b>{int(score)}%</b><small>VIBE</small></div></div>')
+            f'<div><b>{int(score)}%</b><small>HEAT</small></div></div>')
 
 
 def open_quiz(return_to: str):
