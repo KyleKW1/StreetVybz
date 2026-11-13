@@ -9,24 +9,26 @@ from ui import avatar, score_ring
 
 # Small mock-ups of the real screens, so each slide shows what it's describing.
 _PREVIEW_DISCOVER = f"""
-<div class="hd-intro-mock" style="display:flex;align-items:center;gap:12px;">
-  {avatar("Jay", 2, small=True)}
-  <div style="flex:1;min-width:0;">
-    <div class="hd-title" style="font-size:24px;margin:0;">Jay, 26</div>
-    <div class="hd-kicker">📍 3 km away</div>
-  </div>
-  {score_ring(82)}
+<div class="hd-intro-mock" style="display:flex;gap:8px;">
+  <div class="hd-tile hot" style="flex:1;min-width:0;margin:0;">{avatar("Jay", 2, small=True)}
+    <div class="hd-tile-name">Jay, 26</div><div class="hd-tile-meta">3 km · <b>82%</b></div>
+    <div class="hd-tile-badges"><span class="hd-tile-badge lime">🔥 Tonight</span></div></div>
+  <div class="hd-tile" style="flex:1;min-width:0;margin:0;">{avatar("Rae", 1, small=True)}
+    <div class="hd-tile-name">Rae, 24</div><div class="hd-tile-meta">5 km · <b>74%</b></div>
+    <div class="hd-tile-badges"></div></div>
+  <div class="hd-tile" style="flex:1;min-width:0;margin:0;">{avatar("Dre", 3, small=True)}
+    <div class="hd-tile-name">Dre, 29</div><div class="hd-tile-meta">8 km · <b>61%</b></div>
+    <div class="hd-tile-badges"></div></div>
 </div>
-<div class="hd-intro-pills"><span>✕ Pass</span><span class="on">🔥 Up for it</span></div>
+<div class="hd-post-quote" style="margin-top:10px;"><div class="hd-kicker">📌 Tonight post</div>
+  Can host after 11, New Kingston side. Drinks here.</div>
 """
 
 _PREVIEW_QA = """
 <div class="hd-intro-mock">
-  <div class="hd-intro-steps">
-    <span class="on">1 · Ask</span><span>2 · Answer</span><span>3 · Reveal</span><span>4 · Chat</span>
-  </div>
-  <div class="hd-bubble them" style="max-width:100%;">What's your perfect Friday?</div>
-  <div class="hd-bubble me" style="max-width:100%;filter:blur(4px);">Hidden until you both answer</div>
+  <div class="hd-kicker">📩 Request for you</div>
+  <div class="hd-post-quote">Saw your post. I'm close. Say the word.</div>
+  <div class="hd-intro-pills"><span>Ignore</span><span class="on">🔥 Accept</span></div>
 </div>
 """
 
@@ -34,7 +36,7 @@ _PREVIEW_WELCOME = """
 <div class="hd-intro-mock">
   <div class="hd-chips" style="margin:0;justify-content:center;">
     <span class="hd-chip lime">🎚️ Setup</span><span class="hd-chip">🎯 Quiz</span>
-    <span class="hd-chip cyan">🔥 Discover</span><span class="hd-chip magenta">🔥 Q&amp;A</span>
+    <span class="hd-chip cyan">👀 Nearby</span><span class="hd-chip magenta">📌 Posts</span><span class="hd-chip">📩 Request</span>
     <span class="hd-chip amber">💬 Chat</span>
   </div>
 </div>
@@ -82,20 +84,20 @@ SLIDES = [
      "drinks and parties, and where you are. You only see people who fit, and they only see you if you fit them.",
      _PREVIEW_VIBE),
     ("🎯", "2 · Take the quiz",
-     "Read Between The Lines is a 5-minute scenario quiz and 65% of your heat score. Once it's mutual "
+     "Read Between The Lines is a 5-minute scenario quiz and 65% of your heat score. Once you link "
      "you'll see each other's result, freak score and the hidden desires you share.",
      _PREVIEW_QUIZ),
-    ("🔥", "3 · Discover",
-     "One person at a time. People free tonight come first, then the most heat. "
-     "Tap Up for it or Pass. If you're both up for it, it's mutual.",
+    ("👀", "3 · See who's around",
+     "A grid of everyone nearby who fits, free tonight first, then by heat. "
+     "Or post what you're on tonight — it's gone at 6am.",
      _PREVIEW_DISCOVER),
-    ("🔥", "4 · Blind Q&A, then chat",
-     "Before anyone can message, you each ask 2 questions and answer theirs. "
-     "Answers reveal at the same time, then the chat opens.",
+    ("🔥", "4 · Send a link request",
+     "Tap someone or reply to a post with a short note. If they accept, chat opens. "
+     "If they ignore it, you're never told. Nobody can message you without your yes.",
      _PREVIEW_QA),
     ("🛡️", "5 · You're in control",
      "First time with someone? Meet in public, tell a friend, and keep consent out loud. "
-     "Hide, block or report any time. And your first mutual unlocks something hidden… 🔒",
+     "Hide, block or report any time. And your first link unlocks something hidden… 🔒",
      _PREVIEW_SAFETY),
 ]
 

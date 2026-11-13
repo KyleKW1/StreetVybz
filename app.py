@@ -1,8 +1,8 @@
 """
 app.py — Hidden main entry point.
 
-Link-ups, not dating. Four tabs: Discover · Mutuals · Tonight (secret —
-unlocks at your first mutual) · Me.
+Link-ups, not dating. Four tabs: Discover (grid + tonight posts) · Links
+(requests + chats) · Tonight (secret — unlocks at your first link) · Me.
 New accounts see a short "How Hidden works" walkthrough (Pages/intro.py) before setup.
 """
 
@@ -47,11 +47,11 @@ def _nav(uid: int) -> str:
     from Pages.matches import needs_action
     from Pages.tonight import is_unlocked
 
-    todo = needs_action(social_db.load_matches(uid))
+    todo = needs_action(uid)
     unlocked = is_unlocked(uid)
     labels = {
         "discover": "👀 Discover",
-        "matches":  "🔴 Mutuals" if todo else "🔥 Mutuals",   # red dot = a mutual is waiting on you
+        "matches":  f"🔴 Links · {todo}" if todo else "🔥 Links",   # red dot = requests waiting on you
         "tonight":  "🌙 Tonight" if unlocked else "🔒 ???",
         "me":       "👤 Me",
     }
@@ -60,7 +60,7 @@ def _nav(uid: int) -> str:
     if current not in TABS:
         current = "discover"
     # Clicks update `tab` via _on_nav before this runs; anything still out of sync
-    # is a programmatic change (e.g. "Start the Q&A →"), so move the pill to match.
+    # is a programmatic change (e.g. "Open chat →"), so move the pill to match.
     if st.session_state.get("nav") != current:
         st.session_state.nav = current
 
@@ -343,7 +343,7 @@ def _main():
         if st.button("Done — show me who's up for it →" if done else "← Back to Hidden",
                      key="hd_quiz_exit", type="primary" if done else "secondary"):
             st.session_state.tab = st.session_state.pop("_quiz_return", "discover")
-            st.session_state.pop("disc_queue", None)   # re-rank with the new answers
+            st.session_state.pop("disc_people", None)   # re-rank with the new answers
             st.session_state.pop("my_quiz", None)
             st.session_state.pop("hd_drop", None)     # old drop code points at the old result
             st.rerun()

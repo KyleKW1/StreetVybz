@@ -1,6 +1,8 @@
 """
-social_db.py — Storage for link-ups: profiles, swipes, matches,
-blind Q&A, chat, blocks/reports and Tonight check-ins.
+social_db.py — Storage for link-ups: profiles, link requests, tonight posts,
+links (the matches table) and chat, blocks/reports and Tonight check-ins.
+
+Swipes and the blind Q&A columns are from the dating-app era and no longer used.
 
 Uses the shared connection pool from database.py.
 """
@@ -90,6 +92,27 @@ _DDL = [
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (user_id, night),
         INDEX idx_checkins_night (night, spot)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+    """CREATE TABLE IF NOT EXISTS link_requests (
+        id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        sender_id    INT NOT NULL,
+        target_id    INT NOT NULL,
+        note         VARCHAR(300) NOT NULL,
+        post_id      BIGINT UNSIGNED NULL,
+        status       VARCHAR(10) NOT NULL DEFAULT 'pending',
+        created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        responded_at DATETIME NULL,
+        UNIQUE KEY uq_request_pair (sender_id, target_id),
+        INDEX idx_requests_target (target_id, status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+    """CREATE TABLE IF NOT EXISTS posts (
+        id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id    INT NOT NULL,
+        night      DATE NOT NULL,
+        body       VARCHAR(280) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_post_night (user_id, night),
+        INDEX idx_posts_night (night)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
     """CREATE TABLE IF NOT EXISTS bans (
         user_id    INT PRIMARY KEY,
@@ -264,22 +287,20 @@ def save_profile(user_id: int, fields: dict) -> bool:
 # ─── DISCOVER ────────────────────────────────────────────────────────────────
 
 def load_candidate_pool(user_id: int, limit: int = 500) -> list:
-    """Visible profiles this user hasn't swiped on and has no block with."""
+    """Visible profiles this user has no block with (the grid shows everyone who fits)."""
     rows = _fetchall(
         """SELECT p.*, u.username FROM profiles p
            JOIN users u ON u.id = p.user_id
            WHERE p.user_id <> %s AND p.hidden = 0
              AND p.birthdate IS NOT NULL AND p.intent IS NOT NULL AND p.city IS NOT NULL
              AND p.weed IS NOT NULL AND p.drink IS NOT NULL AND p.party IS NOT NULL
-             AND NOT EXISTS (SELECT 1 FROM swipes s
-                             WHERE s.swiper_id = %s AND s.target_id = p.user_id)
              AND NOT EXISTS (SELECT 1 FROM blocks b
                              WHERE (b.blocker_id = %s AND b.blocked_id = p.user_id)
                                 OR (b.blocker_id = p.user_id AND b.blocked_id = %s))
              AND """ + _NOT_BANNED.format("p.user_id") + """
            ORDER BY p.updated_at DESC
            LIMIT %s""",
-        (user_id, user_id, user_id, user_id, limit),
+        (user_id, user_id, user_id, limit),
     )
     quiz = load_quiz_summaries([r["user_id"] for r in rows])
     for r in rows:
@@ -394,10 +415,11 @@ def _side(row: dict, user_id: int) -> tuple[str, str]:
 
 
 def qa_stage(row: dict, user_id: int) -> str:
-    """Where this user is in the blind Q&A for a match.
+    """Links chat straight away now. (Kept for old dating-era rows; always "open".)"""
+    return "open"
 
-    write → wait_questions → answer → wait_answers → open (chat unlocked)
-    """
+
+def _old_qa_stage(row: dict, user_id: int) -> str:
     me, them = _side(row, user_id)
     if not _json(row.get(f"{me}_questions")):
         return "write"
@@ -493,6 +515,205 @@ def unmatch(match_id: int, user_id: int) -> bool:
         return False
     _write("DELETE FROM messages WHERE match_id = %s", (match_id,))
     return bool(_write("DELETE FROM matches WHERE id = %s", (match_id,)))
+
+
+# ─── LINK REQUESTS ───────────────────────────────────────────────────────────
+
+REQUESTS_PER_DAY = 30
+
+
+def _blocked_either_way(a: int, b: int) -> bool:
+    return bool(_fetchone(
+        """SELECT 1 AS x FROM blocks WHERE (blocker_id = %s AND blocked_id = %s)
+                                       OR (blocker_id = %s AND blocked_id = %s) LIMIT 1""",
+        (a, b, b, a)))
+
+
+def _make_link(cur, a: int, b: int, first_sender: int, first_note: str) -> int | None:
+    """Create the link (a matches row) and post the request note as the first message."""
+    lo, hi = sorted((a, b))
+    cur.execute("INSERT IGNORE INTO matches (user_a, user_b) VALUES (%s, %s)", (lo, hi))
+    fresh = cur.rowcount == 1
+    cur.execute("SELECT id FROM matches WHERE user_a = %s AND user_b = %s", (lo, hi))
+    row = cur.fetchone()
+    match_id = row[0] if row else None
+    if match_id and fresh and first_note:
+        cur.execute("INSERT INTO messages (match_id, sender_id, body) VALUES (%s, %s, %s)",
+                    (match_id, first_sender, first_note[:1000]))
+    return match_id
+
+
+def send_link_request(user_id: int, target_id: int, note: str, post_id: int | None = None) -> tuple:
+    """Returns (status, match_id). status: sent | linked | already | limit | blocked | error.
+
+    If they already sent you one, sending back links you straight away.
+    """
+    note = (note or "").strip()[:300]
+    if not note or user_id == target_id:
+        return "error", None
+    if _blocked_either_way(user_id, target_id) or is_banned(user_id):
+        return "blocked", None
+    sent_today = _fetchone(
+        """SELECT COUNT(*) AS n FROM link_requests
+           WHERE sender_id = %s AND created_at >= NOW() - INTERVAL 1 DAY""", (user_id,)) or {}
+    if int(sent_today.get("n") or 0) >= REQUESTS_PER_DAY:
+        return "limit", None
+
+    def q(conn):
+        cur = conn.cursor()
+        lo, hi = sorted((user_id, target_id))
+        cur.execute("SELECT id FROM matches WHERE user_a = %s AND user_b = %s", (lo, hi))
+        row = cur.fetchone()
+        if row:
+            cur.close()
+            return "already", row[0]
+        cur.execute("""SELECT id, note FROM link_requests
+                       WHERE sender_id = %s AND target_id = %s AND status = 'pending'""",
+                    (target_id, user_id))
+        theirs = cur.fetchone()
+        if theirs:   # they asked first — this is a yes
+            cur.execute("""UPDATE link_requests SET status = 'accepted', responded_at = NOW()
+                           WHERE id = %s""", (theirs[0],))
+            match_id = _make_link(cur, user_id, target_id, target_id, theirs[1])
+            cur.execute("INSERT INTO messages (match_id, sender_id, body) VALUES (%s, %s, %s)",
+                        (match_id, user_id, note))
+            conn.commit()
+            cur.close()
+            return "linked", match_id
+        cur.execute(
+            # A request that became a link which has since ended can be sent again;
+            # a pending or ignored one stays as it was (ignored is never revealed).
+            """INSERT INTO link_requests (sender_id, target_id, note, post_id) VALUES (%s, %s, %s, %s)
+               ON DUPLICATE KEY UPDATE
+                 note       = IF(status = 'accepted', VALUES(note), note),
+                 post_id    = IF(status = 'accepted', VALUES(post_id), post_id),
+                 created_at = IF(status = 'accepted', NOW(), created_at),
+                 status     = IF(status = 'accepted', 'pending', status)""",
+            (user_id, target_id, note, post_id))
+        conn.commit()
+        cur.close()
+        return "sent", None
+    _forget()
+    return _run(q, ("error", None))
+
+
+def accept_link_request(user_id: int, request_id: int) -> int | None:
+    """Accept a request sent to me. Returns the link (match) id."""
+    def q(conn):
+        cur = conn.cursor()
+        cur.execute("""SELECT sender_id, note FROM link_requests
+                       WHERE id = %s AND target_id = %s AND status = 'pending'""",
+                    (request_id, user_id))
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            return None
+        cur.execute("UPDATE link_requests SET status = 'accepted', responded_at = NOW() WHERE id = %s",
+                    (request_id,))
+        match_id = _make_link(cur, user_id, row[0], row[0], row[1])
+        conn.commit()
+        cur.close()
+        return match_id
+    _forget()
+    return _run(q, None)
+
+
+def ignore_link_request(user_id: int, request_id: int) -> bool:
+    """Ignore a request. The sender isn't told — it just stays 'requested' for them."""
+    _forget()
+    return bool(_write("""UPDATE link_requests SET status = 'ignored', responded_at = NOW()
+                          WHERE id = %s AND target_id = %s AND status = 'pending'""",
+                       (request_id, user_id)))
+
+
+def load_incoming_requests(user_id: int) -> list:
+    """Pending requests to me (newest first), with the sender's profile and any post they replied to."""
+    return _memo(("incoming", user_id), lambda: _fetchall(
+        """SELECT r.id AS request_id, r.note, r.created_at AS requested_at, r.post_id,
+                  po.body AS post_body, p.*, u.username
+           FROM link_requests r
+           JOIN users u ON u.id = r.sender_id
+           JOIN profiles p ON p.user_id = r.sender_id
+           LEFT JOIN posts po ON po.id = r.post_id
+           WHERE r.target_id = %s AND r.status = 'pending'
+             AND NOT EXISTS (SELECT 1 FROM blocks b
+                             WHERE (b.blocker_id = %s AND b.blocked_id = r.sender_id)
+                                OR (b.blocker_id = r.sender_id AND b.blocked_id = %s))
+             AND """ + _NOT_BANNED.format("r.sender_id") + """
+           ORDER BY r.id DESC LIMIT 100""",
+        (user_id, user_id, user_id)))
+
+
+def count_incoming_requests(user_id: int) -> int:
+    return len(load_incoming_requests(user_id) or [])
+
+
+def load_outgoing_requests(user_id: int) -> list:
+    """Requests I've sent that haven't become links (ignored ones still read as waiting)."""
+    return _fetchall(
+        """SELECT r.id AS request_id, r.target_id AS user_id, r.note, r.created_at AS requested_at,
+                  u.username
+           FROM link_requests r JOIN users u ON u.id = r.target_id
+           WHERE r.sender_id = %s AND r.status IN ('pending', 'ignored')
+             AND NOT EXISTS (SELECT 1 FROM blocks b
+                             WHERE (b.blocker_id = %s AND b.blocked_id = r.target_id)
+                                OR (b.blocker_id = r.target_id AND b.blocked_id = %s))
+           ORDER BY r.id DESC LIMIT 100""",
+        (user_id, user_id, user_id))
+
+
+def link_states(user_id: int) -> dict:
+    """{other_user_id: ("linked", match_id) | ("sent", None) | ("received", request_id)}"""
+    out = {}
+    for r in load_outgoing_requests(user_id) or []:
+        out[r["user_id"]] = ("sent", None)
+    for r in load_incoming_requests(user_id) or []:
+        out[r["user_id"]] = ("received", r["request_id"])
+    for m in load_matches(user_id) or []:
+        out[m["other_id"]] = ("linked", m["id"])
+    return out
+
+
+# ─── TONIGHT POSTS ───────────────────────────────────────────────────────────
+
+def save_post(user_id: int, body: str) -> bool:
+    """One post per person per night; posting again replaces it. Gone at 6am."""
+    body = (body or "").strip()[:280]
+    if not body:
+        return False
+    _forget()
+    return _write(
+        """INSERT INTO posts (user_id, night, body) VALUES (%s, %s, %s)
+           ON DUPLICATE KEY UPDATE body = VALUES(body), created_at = NOW()""",
+        (user_id, tonight(), body)) is not None
+
+
+def delete_post(user_id: int) -> bool:
+    _forget()
+    return _write("DELETE FROM posts WHERE user_id = %s AND night = %s",
+                  (user_id, tonight())) is not None
+
+
+def my_post(user_id: int) -> dict | None:
+    return _fetchone("SELECT id, body, created_at FROM posts WHERE user_id = %s AND night = %s",
+                     (user_id, tonight()))
+
+
+def load_posts(user_id: int) -> list:
+    """Tonight's posts from other visible people I have no block with (newest first).
+    The page filters these down to people who fit, like the grid."""
+    return _fetchall(
+        """SELECT po.id AS post_id, po.body, po.created_at AS posted_at, p.*, u.username
+           FROM posts po
+           JOIN profiles p ON p.user_id = po.user_id
+           JOIN users u ON u.id = po.user_id
+           WHERE po.night = %s AND po.user_id <> %s AND p.hidden = 0
+             AND NOT EXISTS (SELECT 1 FROM blocks b
+                             WHERE (b.blocker_id = %s AND b.blocked_id = po.user_id)
+                                OR (b.blocker_id = po.user_id AND b.blocked_id = %s))
+             AND """ + _NOT_BANNED.format("po.user_id") + """
+           ORDER BY po.created_at DESC LIMIT 200""",
+        (tonight(), user_id, user_id, user_id))
 
 
 # ─── CHAT ────────────────────────────────────────────────────────────────────
@@ -663,7 +884,9 @@ def export_social_data(user_id: int) -> dict:
     profile = get_profile(user_id) or {}
     return {
         "profile": {k: str(v) if v is not None else None for k, v in profile.items()},
-        "matches": [{k: str(v) for k, v in m.items()} for m in load_matches(user_id)],
+        "links": [{k: str(v) for k, v in m.items()} for m in load_matches(user_id)],
+        "requests_sent": [{k: str(v) for k, v in r.items()} for r in load_outgoing_requests(user_id)],
+        "post_tonight": {k: str(v) for k, v in (my_post(user_id) or {}).items()},
     }
 
 
@@ -674,24 +897,25 @@ def delete_social_data(user_id: int) -> None:
     for sql in (
         "DELETE FROM matches  WHERE user_a = %s OR user_b = %s",
         "DELETE FROM swipes   WHERE swiper_id = %s OR target_id = %s",
+        "DELETE FROM link_requests WHERE sender_id = %s OR target_id = %s",
         "DELETE FROM blocks   WHERE blocker_id = %s OR blocked_id = %s",
     ):
         _write(sql, (user_id, user_id))
     _write("DELETE FROM checkins WHERE user_id = %s", (user_id,))
+    _write("DELETE FROM posts WHERE user_id = %s", (user_id,))
     _write("DELETE FROM profiles WHERE user_id = %s", (user_id,))
 
 
 def community_size(user_id: int, city: str) -> dict | None:
-    """How many other people have profiles (overall and in this city), and how
-    many this user passed on. None when the database can't be reached."""
+    """How many other people have profiles (overall and in this city).
+    None when the database can't be reached."""
     row = _fetchone(
         """SELECT COUNT(*) AS total,
-                  SUM(LOWER(TRIM(city)) = LOWER(TRIM(%s))) AS in_city,
-                  (SELECT COUNT(*) FROM swipes WHERE swiper_id = %s AND liked = 0) AS passed
+                  SUM(LOWER(TRIM(city)) = LOWER(TRIM(%s))) AS in_city
            FROM profiles p WHERE user_id <> %s AND hidden = 0 AND intent IS NOT NULL
              AND """ + _NOT_BANNED.format("p.user_id"),
-        (city or "", user_id, user_id),
+        (city or "", user_id),
     )
     if row is None:
         return None
-    return {k: int(row.get(k) or 0) for k in ("total", "in_city", "passed")}
+    return {k: int(row.get(k) or 0) for k in ("total", "in_city")}

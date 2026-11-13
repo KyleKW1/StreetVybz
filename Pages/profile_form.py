@@ -45,7 +45,7 @@ def location_capture(uid: int, profile: dict, key: str):
             lat, lon = loc["coords"]["latitude"], loc["coords"]["longitude"]
             if social_db.save_profile(uid, {"lat": round_coord(lat), "lon": round_coord(lon)}):
                 st.session_state.pop(pending, None)
-                st.session_state.pop("disc_queue", None)
+                st.session_state.pop("disc_people", None)
                 st.toast("Location updated 📍")
                 st.rerun()
             else:
@@ -147,7 +147,7 @@ def profile_form(uid: int, profile: dict | None, key: str, submit_label: str) ->
         "age_min": age_min, "age_max": age_max, "bio": bio.strip() or None, **lifestyle,
     }
     if social_db.save_profile(uid, fields):
-        st.session_state.pop("disc_queue", None)
+        st.session_state.pop("disc_people", None)
         return True
     st.error("Couldn't save — check your connection and try again.")
     return False
@@ -174,12 +174,12 @@ def setup_page():
 def quiz_offer_page():
     st.html('<div class="hd-brand" style="margin-bottom:10px;">HIDDEN</div>')
     header("Step 2 of 2", "Read Between The Lines",
-           "The quiz is where your heat score comes from, and mutuals who take it too see your result.")
+           "The quiz is where your heat score comes from, and anyone you link with who took it too sees your result.")
     st.html("""
 <div class="hd-card" style="padding:20px 22px;">
   <div class="hd-why" style="margin:0;padding:0;border:0;">
     <div>🎭 &nbsp;Real-life scenarios — pick what you'd actually do</div>
-    <div>🔒 &nbsp;Hidden desires: a mutual only sees the ones you both share</div>
+    <div>🔒 &nbsp;Hidden desires: a link only sees the ones you both share</div>
     <div>🔥 &nbsp;Worth 65% of every heat score</div>
     <div>⏱ &nbsp;About 5 minutes</div>
   </div>

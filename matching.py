@@ -277,21 +277,29 @@ def similarity(me: dict, them: dict) -> tuple[int, list[str]]:
     return max(0, min(100, round(score * 100))), (quiz_reasons + reasons)[:3]
 
 
+def describe(me: dict, them: dict, today=None, tonight: str | None = None,
+             require_fit: bool = True) -> dict | None:
+    """One person annotated for a tile, post or request: age, where, heat score, reasons.
+
+    With require_fit, returns None for anyone who doesn't fit (the grid and posts).
+    Incoming requests pass require_fit=False: they already found you.
+    """
+    if require_fit and not is_candidate(me, them, today):
+        return None
+    km, where = distance(me, them) or (None, "")
+    score, reasons = similarity(me, them)
+    where_line = logistics(me, them)
+    if where_line:
+        reasons = reasons[:2] + [where_line]   # logistics always make the card
+    return {**them, "age": age_on(them.get("birthdate"), today), "km": km,
+            "where": where, "score": score, "reasons": reasons,
+            "free_tonight": free_tonight(them, tonight),
+            "shared_intents": sorted(shared_intents(me, them))}
+
+
 def rank_candidates(me: dict, others: list[dict], today=None, tonight: str | None = None) -> list[dict]:
-    """Eligible people for the Discover card: free tonight first, then heat, then distance."""
-    out = []
-    for them in others:
-        if not is_candidate(me, them, today):
-            continue
-        km, where = distance(me, them)
-        score, reasons = similarity(me, them)
-        where_line = logistics(me, them)
-        if where_line:
-            reasons = reasons[:2] + [where_line]   # logistics always make the card
-        out.append({**them, "age": age_on(them["birthdate"], today), "km": km,
-                    "where": where, "score": score, "reasons": reasons,
-                    "free_tonight": free_tonight(them, tonight),
-                    "shared_intents": sorted(shared_intents(me, them))})
+    """Everyone who fits, for the grid: free tonight first, then heat, then distance."""
+    out = [d for d in (describe(me, them, today, tonight) for them in others) if d]
     out.sort(key=lambda c: (not c["free_tonight"], -c["score"],
                             c["km"] if c["km"] is not None else 1e9))
     return out

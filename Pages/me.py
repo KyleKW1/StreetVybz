@@ -30,7 +30,7 @@ def _masthead(uid: int, p: dict):
 
 def _hide_toggle(uid: int, p: dict):
     hidden = st.toggle("👻  Hide me from Discover", value=bool(p.get("hidden")), key="me_hidden",
-                       help="Nobody new will see you. Your mutuals and chats stay.")
+                       help="Nobody new will see you. Your links and chats stay.")
     if hidden != bool(p.get("hidden")):
         if social_db.save_profile(uid, {"hidden": int(hidden)}):
             st.toast("You're hidden 👻" if hidden else "You're visible again ✨")
@@ -43,7 +43,7 @@ def _quiz_tab(uid: int):
         shared = ("Matches who took it too see your result, your freak score and only the hidden "
                   "desires you both share." if q.get("shared") else
                   "You took this before results were shown to matches, so it stays private. "
-                  "Retake the quiz to share it with your mutuals.")
+                  "Retake the quiz to share it with your links.")
         st.html(f"""
 <div class="hd-card" style="padding:20px;">
   <div class="hd-kicker">Read Between The Lines</div>
@@ -55,7 +55,7 @@ def _quiz_tab(uid: int):
     else:
         st.html('<div class="hd-card" style="padding:20px;"><div class="hd-title" style="font-size:28px;">'
                 'Read Between The Lines</div><div class="hd-sub">Take the quiz and your heat scores get real — '
-                'it counts for 65% of every one. Mutuals who took it too see your result, your '
+                'it counts for 65% of every one. Links who took it too see your result, your '
                 'freak score and only the hidden desires you both share. Never your individual answers.</div></div>')
         label = "Take the quiz →"
     st.html("<div style='height:10px'></div>")
@@ -80,7 +80,7 @@ def _safety_tab(uid: int):
   </div>
 </div>""")
     st.html('<div class="hd-sub" style="margin-bottom:12px;">Report anyone who makes you uncomfortable '
-            '— from their card in Discover or their page in Mutuals, under ⚑.</div>')
+            '— from their card in Discover or their chat in Links, under ⚑.</div>')
     blocked = social_db.load_blocked(uid)
     st.html('<div class="hd-kicker" style="margin:8px 0;">Blocked</div>')
     if not blocked:
@@ -92,7 +92,7 @@ def _safety_tab(uid: int):
         with c2:
             if st.button("Unblock", key=f"unblock_{b['user_id']}", use_container_width=True):
                 social_db.unblock_user(uid, b["user_id"])
-                st.session_state.pop("disc_queue", None)
+                st.session_state.pop("disc_people", None)
                 st.rerun()
 
 
