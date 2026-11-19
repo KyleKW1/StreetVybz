@@ -2,321 +2,99 @@
 # CSS is injected at most once per Streamlit rerun.
 # Call apply_custom_styles() / inject_page_css() as many times as you like —
 # only the first call in each render cycle actually writes to the DOM.
+#
+# Most widget styling (colours, radius, font) now comes from the theme in
+# .streamlit/config.toml. This file only covers what the theme can't.
 
 import streamlit as st
 
 _BASE_CSS = """
 <style>
-@import url("https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&display=swap");
 :root {
-  --bg:#0a0a0b; --surface:#111114; --card:#18181d;
-  --border:#2a2a35; --lime:#c6ff00; --magenta:#ff2d78;
-  --cyan:#00e5ff; --amber:#ffb300;
-  --text:#f0f0f5; --muted:#5a5a72; --soft:#9090aa;
-  --radius: 10px;
-  --radius-sm: 6px;
-  --radius-lg: 16px;
+  /* Hidden: after dark. Black for night use, warm whites, and two lights:
+     sodium (tonight / your move) and red bulb (desire / the quiz). */
+  --night:#000000; --surface:#0f0d0b; --card:#16130f; --raised:#1e1a16; --line:#2b2724;
+  --ink:#f2ece4; --smoke:#a79f95; --dim:#8a8178;
+  --sodium:#ff9f2e; --bulb:#e8435a;
+  --font:'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Old names, still used by inline styles across the pages */
+  --bg:var(--night); --border:var(--line); --text:var(--ink); --soft:var(--smoke); --muted:var(--dim);
+  --lime:var(--sodium); --amber:var(--sodium); --magenta:var(--bulb); --cyan:var(--smoke);
+
+  --radius: 14px;
+  --radius-sm: 10px;
+  --radius-lg: 20px;
 }
 
 * { box-sizing: border-box; }
 
-/* ── App background ───────────────────────────────────────────── */
-.stApp,
-.stApp > div,
-section[data-testid="stMain"],
-section[data-testid="stMain"] > div,
-.main,
-.main > div,
-div[data-testid="stAppViewContainer"],
-div[data-testid="stAppViewContainer"] > section {
-  background: var(--bg) !important;
-  color: var(--text) !important;
+.stApp, .stApp button, .stApp input, .stApp textarea, .stMarkdown, .stMarkdown p {
+  font-family: var(--font) !important;
 }
+.stApp { background: var(--night) !important; color: var(--ink) !important; }
+section.main .block-container { padding-bottom: 3rem !important; }
 
-section.main .block-container {
-  padding-bottom: 3rem !important;
-  max-width: 860px;
+/* ── Buttons: sentence case, no glow ───────────────────────────── */
+.stButton button, .stDownloadButton button, .stFormSubmitButton button {
+  font-weight: 600 !important; font-size: 15px !important; letter-spacing: 0 !important;
+  text-transform: none !important; box-shadow: none !important;
+  min-height: 46px; transition: background-color .15s, border-color .15s, color .15s !important;
 }
-
-/* ── Sidebar ──────────────────────────────────────────────────── */
-section[data-testid="stSidebar"],
-section[data-testid="stSidebar"] > div {
-  background: #0d0d10 !important;
-  border-right: 1px solid var(--border) !important;
+.stButton button[kind="secondary"], .stDownloadButton button, .stFormSubmitButton button {
+  background: transparent !important; color: var(--ink) !important; border: 1px solid var(--line) !important;
 }
-section[data-testid="stSidebar"] * {
-  color: #c8c8d8 !important;
+.stButton button[kind="secondary"] *, .stDownloadButton button *, .stFormSubmitButton button * {
+  color: inherit !important;
 }
-section[data-testid="stSidebar"] .stButton > button {
-  background: transparent !important;
-  border: 1px solid var(--border) !important;
-  color: #c8c8d8 !important;
-  border-radius: var(--radius-sm) !important;
-  font-family: 'Space Mono', monospace !important;
-  font-size: 11px !important;
-  letter-spacing: 1px !important;
-  text-transform: uppercase !important;
-  transition: all 0.2s !important;
-  text-align: left !important;
-  box-shadow: none !important;
+.stButton button[kind="secondary"]:hover, .stDownloadButton button:hover,
+.stFormSubmitButton button:hover { border-color: var(--smoke) !important; color: var(--ink) !important; }
+.stButton button[kind="primary"] {
+  background: var(--sodium) !important; border-color: var(--sodium) !important; color: #000 !important;
 }
-section[data-testid="stSidebar"] .stButton > button:hover {
-  background: rgba(198,255,0,0.06) !important;
-  border-color: var(--lime) !important;
-  color: var(--lime) !important;
-  box-shadow: none !important;
-  transform: none !important;
-}
-/* Active sidebar item (primary type) */
-section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
-  background: rgba(198,255,0,0.10) !important;
-  border-color: var(--lime) !important;
-  color: var(--lime) !important;
-  font-weight: 700 !important;
-}
-
-/* ── Global buttons ───────────────────────────────────────────── */
-.stButton > button,
-button[kind="secondary"],
-button[data-testid="baseButton-secondary"] {
-  background: var(--card) !important;
-  color: var(--soft) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius-sm) !important;
-  font-family: 'Space Mono', monospace !important;
-  font-size: 10px !important;
-  letter-spacing: 1.5px !important;
-  text-transform: uppercase !important;
-  transition: all 0.18s ease !important;
-  box-shadow: none !important;
-}
-.stButton > button:hover {
-  border-color: var(--lime) !important;
-  color: var(--lime) !important;
-  background: rgba(198,255,0,0.05) !important;
-  box-shadow: 0 2px 12px rgba(198,255,0,0.08) !important;
-  transform: none !important;
-}
-
-/* Primary buttons — lime, always */
-.stButton > button[kind="primary"],
-button[kind="primary"],
-button[data-testid="baseButton-primary"] {
-  background: var(--lime) !important;
-  color: #0a0a0b !important;
-  border: 1px solid var(--lime) !important;
-  border-radius: var(--radius-sm) !important;
-  font-family: 'Space Mono', monospace !important;
-  font-size: 10px !important;
-  letter-spacing: 1.5px !important;
-  text-transform: uppercase !important;
-  font-weight: 700 !important;
-  box-shadow: 0 2px 14px rgba(198,255,0,0.18) !important;
-  transition: all 0.18s ease !important;
-}
-.stButton > button[kind="primary"]:hover {
-  background: #d4ff1a !important;
-  border-color: #d4ff1a !important;
-  color: #0a0a0b !important;
-  box-shadow: 0 4px 24px rgba(198,255,0,0.28) !important;
-  transform: none !important;
-}
-.stButton > button[kind="primary"]:disabled,
-.stButton > button[kind="primary"][disabled] {
-  background: var(--border) !important;
-  color: var(--muted) !important;
-  border-color: var(--border) !important;
-  opacity: 0.5 !important;
-  box-shadow: none !important;
-}
+.stButton button[kind="primary"] * { color: #000 !important; }
+.stButton button[kind="primary"]:hover { background: #ffb257 !important; border-color: #ffb257 !important; }
+.stButton button:disabled { opacity: .5 !important; }
+.stButton button[kind="primary"]:disabled { opacity: 1 !important; background: var(--raised) !important;
+  border-color: var(--raised) !important; }
+.stButton button[kind="primary"]:disabled * { color: var(--dim) !important; }
+.stButton button:focus-visible { outline: 2px solid var(--sodium) !important; outline-offset: 2px !important; }
 
 /* ── Inputs ───────────────────────────────────────────────────── */
-.stTextInput > div > div > input,
-.stNumberInput > div > div > input,
-.stTextArea > div > div > textarea,
-input[type="text"],
-input[type="password"],
-textarea {
-  background: var(--card) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius-sm) !important;
-  color: var(--text) !important;
-  font-family: 'DM Sans', sans-serif !important;
-  transition: border-color 0.15s, box-shadow 0.15s !important;
+.stTextInput input, .stTextArea textarea, .stNumberInput input {
+  font-size: 16px !important;   /* 16px stops iOS zooming into the field */
 }
-.stTextInput > div > div > input:focus,
-.stNumberInput > div > div > input:focus,
-.stTextArea > div > div > textarea:focus {
-  border-color: var(--lime) !important;
-  box-shadow: 0 0 0 3px rgba(198,255,0,0.10) !important;
-  outline: none !important;
-}
-.stTextInput label,
-.stNumberInput label,
-.stTextArea label,
-.stSelectbox label,
-.stSlider label,
-.stRadio > label,
-.stDateInput label,
-.stTimeInput label {
-  font-family: 'Space Mono', monospace !important;
-  font-size: 9px !important;
-  letter-spacing: 2px !important;
-  text-transform: uppercase !important;
-  color: var(--muted) !important;
-}
+[data-testid="stWidgetLabel"] p { font-size: 14px !important; color: var(--smoke) !important; font-weight: 500 !important; }
 
-/* ── Select / Dropdown ────────────────────────────────────────── */
-.stSelectbox > div > div,
-.stSelectbox > div > div > div {
-  background: var(--card) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius-sm) !important;
-  color: var(--text) !important;
-}
-div[data-baseweb="select"] > div {
-  background: var(--card) !important;
-  border-color: var(--border) !important;
-  border-radius: var(--radius-sm) !important;
-  color: var(--text) !important;
-}
+/* ── Markdown / captions ──────────────────────────────────────── */
+.stMarkdown p, div[data-testid="stMarkdownContainer"] p { color: var(--smoke); }
+div[data-testid="stCaptionContainer"], .stCaption { color: var(--dim) !important; font-size: 13px !important; }
 
-/* ── Radio buttons ────────────────────────────────────────────── */
-div[data-testid="stRadio"] > div > label {
-  background: var(--card) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius-sm) !important;
-  color: var(--soft) !important;
-  font-family: 'Space Mono', monospace !important;
-  font-size: 10px !important;
-  transition: all 0.15s !important;
-}
-div[data-testid="stRadio"] > div > label:hover {
-  border-color: var(--lime) !important;
-  color: var(--lime) !important;
-}
-div[data-testid="stRadio"] > div > label[data-checked="true"] {
-  background: rgba(198,255,0,0.12) !important;
-  border-color: var(--lime) !important;
-  color: var(--lime) !important;
-}
-
-/* ── Expander ─────────────────────────────────────────────────── */
-details[data-testid="stExpander"],
-div[data-testid="stExpander"] {
-  background: var(--card) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius) !important;
-  overflow: hidden !important;
-}
-details summary,
-div[data-testid="stExpander"] summary {
-  color: var(--soft) !important;
-  font-family: 'Space Mono', monospace !important;
-  font-size: 10px !important;
-  letter-spacing: 1px !important;
-  text-transform: uppercase !important;
-  border-radius: var(--radius) !important;
-}
-
-/* ── Toggle ───────────────────────────────────────────────────── */
-div[data-testid="stToggle"] label {
-  color: var(--soft) !important;
-  font-family: 'DM Sans', sans-serif !important;
-  font-size: 13px !important;
-}
-
-/* ── Alerts / info boxes ──────────────────────────────────────── */
-.stAlert,
-div[data-testid="stAlert"] {
-  border-radius: var(--radius-sm) !important;
-  font-family: 'DM Sans', sans-serif !important;
-  font-size: 13px !important;
-  background: var(--card) !important;
-  border: 1px solid var(--border) !important;
-  color: var(--soft) !important;
-}
-
-/* ── Progress bar ─────────────────────────────────────────────── */
-.stProgress > div > div > div,
-div[data-testid="stProgressBar"] > div {
-  background: var(--lime) !important;
-  border-radius: 99px !important;
-}
-.stProgress > div > div {
-  background: var(--border) !important;
-  border-radius: 99px !important;
-}
+/* ── Alerts: quiet, no coloured slabs ─────────────────────────── */
+div[data-testid="stAlert"] > div { background: var(--card) !important; border: 1px solid var(--line) !important; }
+div[data-testid="stAlert"] p { color: var(--ink) !important; }
 
 /* ── Toast ────────────────────────────────────────────────────── */
-div[data-testid="stToast"] {
-  background: var(--card) !important;
-  border: 1px solid var(--lime) !important;
-  border-radius: var(--radius-sm) !important;
-  color: var(--text) !important;
-  font-family: 'Space Mono', monospace !important;
-  font-size: 10px !important;
-  box-shadow: 0 4px 20px rgba(198,255,0,0.12) !important;
-}
+div[data-testid="stToast"] { background: var(--raised) !important; border: 1px solid var(--line) !important;
+  color: var(--ink) !important; font-size: 14px !important; }
 
-/* ── Download button ──────────────────────────────────────────── */
-.stDownloadButton > button {
-  background: transparent !important;
-  color: var(--soft) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius-sm) !important;
-  font-family: 'Space Mono', monospace !important;
-  font-size: 10px !important;
-  letter-spacing: 1.5px !important;
-  text-transform: uppercase !important;
-}
-.stDownloadButton > button:hover {
-  border-color: var(--lime) !important;
-  color: var(--lime) !important;
-  background: rgba(198,255,0,0.05) !important;
-}
-
-/* ── Markdown / text ──────────────────────────────────────────── */
-.stMarkdown, .stMarkdown p,
-div[data-testid="stMarkdownContainer"] p {
-  color: var(--soft) !important;
-  font-family: 'DM Sans', sans-serif !important;
-}
+/* ── Expander ─────────────────────────────────────────────────── */
+div[data-testid="stExpander"] details { border-color: var(--line) !important; }
+div[data-testid="stExpander"] summary p { color: var(--smoke) !important; font-size: 14px !important; }
 
 /* ── Scrollbar ────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 5px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 99px;
-}
-::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+::-webkit-scrollbar-track { background: var(--night); }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
 
 /* ── Hide Streamlit chrome ────────────────────────────────────── */
 #MainMenu { visibility: hidden; }
 footer    { visibility: hidden; }
 header[data-testid="stHeader"] { background: transparent !important; }
 
-/* ── Number input stepper buttons ────────────────────────────── */
-.stNumberInput button {
-  background: var(--card) !important;
-  border-color: var(--border) !important;
-  border-radius: var(--radius-sm) !important;
-  color: var(--muted) !important;
-}
-
-/* ── Card-like containers in st.html ─────────────────────────── */
-/* Rounded corners applied globally to any inline card divs       */
-[style*="border-radius:4px"] { border-radius: var(--radius) !important; }
-[style*="border-radius: 4px"] { border-radius: var(--radius) !important; }
-[style*="border-radius:3px"] { border-radius: var(--radius-sm) !important; }
-[style*="border-radius: 3px"] { border-radius: var(--radius-sm) !important; }
-
-/* ── Soft glow on lime-bordered elements ──────────────────────── */
-[style*="border-color:var(--lime)"],
-[style*="border:1px solid var(--lime)"],
-[style*="border-top:2px solid var(--lime)"] {
-  box-shadow: 0 2px 18px rgba(198,255,0,0.06) !important;
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 </style>
 """

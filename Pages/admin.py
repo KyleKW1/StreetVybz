@@ -56,7 +56,7 @@ def _person(uid: int, p: dict):
                     st.toast(f"Banned {p['username']}")
                     st.rerun()
                 else:
-                    st.error("Couldn't ban — try again.")
+                    st.error("Couldn't ban. Try again.")
         with c2:
             if st.button("Dismiss", use_container_width=True, key=f"dismiss_{p['user_id']}"):
                 social_db.dismiss_reports(p["user_id"])
@@ -74,7 +74,7 @@ def admin_page(uid: int):
         _person(uid, p)
 
     bans = social_db.load_bans()
-    st.html('<div class="hd-kicker" style="margin:18px 0 8px;">Banned</div>')
+    st.html('<div class="hd-h3">Banned</div>')
     if not bans:
         st.caption("Nobody is banned.")
     for b in bans:

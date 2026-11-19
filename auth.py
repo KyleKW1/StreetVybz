@@ -198,8 +198,8 @@ CSS = """
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg:#0a0a0b; --card:#18181d; --border:#2a2a35;
-  --lime:#c6ff00; --text:#f0f0f5; --muted:#5a5a72; --soft:#9090aa;
+  --bg:#000000; --card:#16130f; --border:#2b2724;
+  --lime:#ff9f2e; --text:#f2ece4; --muted:#8a8178; --soft:#a79f95;
 }
 .auth-card {
   background:var(--card);
@@ -214,23 +214,23 @@ CSS = """
   to   { opacity:1; transform:translateY(0); }
 }
 .auth-wordmark {
-  font-family:'Bebas Neue',sans-serif;
-  font-size:48px; letter-spacing:4px; line-height:1;
+  font-family:var(--font);font-weight:800;font-stretch:118%;
+  font-size:48px; letter-spacing:normal; line-height:1;
   color:var(--text); margin-bottom:4px; text-align:center;
 }
 .auth-wordmark span { color:var(--lime); }
 .auth-tagline {
-  font-family:'Space Mono',monospace; font-size:10px;
-  color:var(--muted); letter-spacing:2px; text-transform:uppercase;
+  font-family:var(--font); font-size:12px;
+  color:var(--muted); letter-spacing:normal; text-transform:none;
   margin:0; text-align:center;
 }
 .auth-divider { height:1px; background:var(--border); margin:20px 0 16px; }
 .auth-section-label {
-  font-family:'Space Mono',monospace; font-size:9px;
-  text-transform:uppercase; letter-spacing:3px; color:var(--lime); margin-bottom:4px;
+  font-family:var(--font); font-size:12px;
+  text-transform:none; letter-spacing:normal; color:var(--lime); margin-bottom:4px;
 }
 .auth-hint {
-  font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);
+  font-family:var(--font); font-size:12px; color:var(--muted);
   text-align:center; margin-top:12px;
 }
 </style>
@@ -261,7 +261,7 @@ def login_page():
 
         col_a, col_b = st.columns(2)
         with col_a:
-            if st.button("Sign In →", use_container_width=True, type="primary", key="login_btn"):
+            if st.button("Log in", use_container_width=True, type="primary", key="login_btn"):
                 if username and password:
                     success, user = authenticate_user(username, password)
                     if success:
@@ -313,7 +313,7 @@ def register_page():
 
         col_a, col_b = st.columns(2)
         with col_a:
-            if st.button("Create Account →", use_container_width=True, type="primary", key="register_btn"):
+            if st.button("Create account", use_container_width=True, type="primary", key="register_btn"):
                 ok_pw, pw_msg = validate_password(password)
                 if not username or not email or not password:
                     st.error("All fields are required.")
@@ -335,7 +335,7 @@ def register_page():
                     else:
                         st.error(message)
         with col_b:
-            if st.button("← Back", use_container_width=True, type="secondary", key="back_login"):
+            if st.button("Back", use_container_width=True, type="secondary", key="back_login"):
                 st.session_state.page = 'login'
                 st.rerun()
 

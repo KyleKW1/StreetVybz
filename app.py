@@ -12,7 +12,7 @@ import streamlit as st
 
 st.set_page_config(
     page_title="Hidden",
-    page_icon="⚡",
+    page_icon=":material/visibility_off:",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
@@ -43,31 +43,35 @@ def _on_nav():
 
 
 def _nav(uid: int) -> str:
-    """Brand + pill bar. Returns the selected tab."""
+    """Wordmark + pill bar. Returns the selected tab."""
     from Pages.matches import needs_action
     from Pages.tonight import is_unlocked
+    from ui import wordmark
 
     todo = needs_action(uid)
     unlocked = is_unlocked(uid)
-    labels = {
-        "discover": "👀 Discover",
-        "matches":  f"🔴 Links · {todo}" if todo else "🔥 Links",   # red dot = requests waiting on you
-        "tonight":  "🌙 Tonight" if unlocked else "🔒 ???",
-        "me":       "👤 Me",
-    }
+    labels = {"discover": "Discover", "matches": "Links", "tonight": "Tonight", "me": "Me"}
 
     current = st.session_state.get("tab", "discover")
     if current not in TABS:
         current = "discover"
     # Clicks update `tab` via _on_nav before this runs; anything still out of sync
-    # is a programmatic change (e.g. "Open chat →"), so move the pill to match.
+    # is a programmatic change (e.g. "Open chat"), so move the pill to match.
     if st.session_state.get("nav") != current:
         st.session_state.nav = current
 
-    st.html('<div class="hd-brand" style="margin-bottom:10px;">HIDDEN</div>')
+    # Requests waiting on you: a sodium count on Links. Locked Tonight: the label sits behind the tint.
+    extra = ""
+    if todo:
+        extra += ('div.st-key-nav button:nth-child(2) p::after { content:"%d"; display:inline-block; margin-left:6px;'
+                  ' min-width:18px; padding:0 5px; border-radius:99px; background:var(--sodium); color:#000;'
+                  ' font-size:12px; line-height:18px; font-weight:700; }' % int(todo))
+    if not unlocked:
+        extra += "div.st-key-nav button:nth-child(3) p { filter:blur(3.5px); }"
+    st.html(f'<div style="margin:2px 0 12px;">{wordmark()}</div>' + (f"<style>{extra}</style>" if extra else ""))
     st.segmented_control("Navigate", TABS, format_func=labels.get, key="nav", on_change=_on_nav,
                          label_visibility="collapsed", required=True, width="stretch")
-    st.html("<div style='height:6px'></div>")
+    st.html("<div style='height:4px'></div>")
     return current
 
 
@@ -114,16 +118,14 @@ def _render_auth():
 
 
 def _login_page():
-    st.html("""
-<div style="max-width:400px; margin:60px auto 0; text-align:center; margin-bottom:32px;">
-  <div class="hd-brand" style="font-size:72px; letter-spacing:8px;">HIDDEN</div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:15px; color:var(--soft); margin-top:10px;">
+    from ui import wordmark
+    st.html(f"""
+<div style="max-width:420px; margin:56px auto 36px;">
+  {wordmark(xl=True)}
+  <div class="hd-sub" style="font-size:18px; color:var(--ink); margin-top:18px; max-width:30ch;">
     Link up with people nearby who want what you want.
   </div>
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--muted); margin-top:8px;">
-    18+ · No dating · Read between the lines
-  </div>
+  <div class="hd-note" style="margin-top:8px;">18+ only. Not a dating app.</div>
 </div>
 """)
     _, c, _ = st.columns([1, 2, 1])
@@ -131,7 +133,7 @@ def _login_page():
         username = st.text_input("Username or email", key="login_username", placeholder="your_username")
         password = st.text_input("Password", type="password", key="login_password")
         st.html("<div style='height:6px'></div>")
-        if st.button("Log In →", type="primary", use_container_width=True, key="login_btn"):
+        if st.button("Log in", type="primary", use_container_width=True, key="login_btn"):
             if not username or not password:
                 st.error("Enter username and password.")
             else:
@@ -154,20 +156,22 @@ def _login_page():
                 except Exception as e:
                     st.error(f"Login error: {e}")
         st.html("<div style='height:8px'></div>")
-        if st.button("New here? Create account", use_container_width=True, key="go_register"):
+        if st.button("Create an account", use_container_width=True, key="go_register"):
             st.session_state.page = "register"; st.rerun()
-        if st.button("Forgot password", use_container_width=True, key="go_forgot"):
+        if st.button("Forgot your password?", key="go_forgot", type="tertiary"):
             st.session_state.page = "forgot"; st.rerun()
-        if st.button("How does Hidden work?", use_container_width=True, key="go_intro", type="tertiary"):
+        if st.button("How Hidden works", key="go_intro", type="tertiary"):
             from Pages.intro import open_intro
             open_intro("login", logged_in=False)
 
 
 def _register_page():
-    st.html("""
-<div style="max-width:400px; margin:60px auto 0; text-align:center; margin-bottom:32px;">
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:40px; color:var(--text);
-              letter-spacing:3px;">CREATE ACCOUNT</div>
+    from ui import wordmark
+    st.html(f"""
+<div style="max-width:420px; margin:40px auto 24px;">
+  {wordmark()}
+  <div class="hd-title" style="margin-top:28px;">Create your account</div>
+  <div class="hd-sub">Your username is the only thing people see until you link.</div>
 </div>
 """)
     _, c, _ = st.columns([1, 2, 1])
@@ -179,7 +183,7 @@ def _register_page():
         birthday = st.date_input("Birthday", value=None, key="reg_bd", format="DD/MM/YYYY",
                                  min_value=date(date.today().year - 100, 1, 1), max_value=date.today(),
                                  help="Hidden is 18+ only.")
-        if st.button("Create Account →", type="primary", use_container_width=True, key="reg_btn"):
+        if st.button("Create account", type="primary", use_container_width=True, key="reg_btn"):
             from auth import validate_password, validate_username, validate_email as _ve, hash_password
             import database as db
             import secrets as _secrets
@@ -198,7 +202,7 @@ def _register_page():
             elif not birthday:
                 st.error("Add your birthday.")
             elif not is_adult(birthday):
-                st.error("Sorry — Hidden is for people 18 and over.")
+                st.error("Hidden is for people 18 and over.")
             else:
                 try:
                     # create_user now returns (uid, status_code)
@@ -214,7 +218,7 @@ def _register_page():
                             created = False
                         if not created:
                             social_db.save_profile(uid, {"birthdate": birthday})
-                            st.success("Account created — please log in.")
+                            st.success("Account created. Log in to continue.")
                             st.stop()
                         social_db.save_profile(uid, {"birthdate": birthday})
                         st.session_state.session_token = token
@@ -226,15 +230,15 @@ def _register_page():
                         remember_session()
                         st.rerun()
                     elif status == db.CREATE_USER_DUP_USERNAME:
-                        st.error("That username is already taken — try another.")
+                        st.error("That username is taken. Try another.")
                     elif status == db.CREATE_USER_DUP_EMAIL:
                         st.error("An account with that email already exists. Try logging in.")
                     else:
-                        st.error("Registration failed — please try again.")
+                        st.error("Couldn't create your account. Try again.")
                 except Exception as e:
                     st.error(f"Registration error: {e}")
 
-        if st.button("← Back to login", use_container_width=True, key="reg_back"):
+        if st.button("Back to log in", key="reg_back", type="tertiary"):
             st.session_state.page = "login"; st.rerun()
 
 
@@ -246,7 +250,7 @@ def _forgot_page():
         forgot_password_page()
     except Exception as e:
         st.error(f"Password reset error: {e}")
-        if st.button("← Back to login"):
+        if st.button("Back to log in"):
             st.session_state.page = "login"
             st.rerun()
 
@@ -340,8 +344,9 @@ def _main():
     # The quiz is a full-screen flow (from setup, Discover or Me)
     if st.session_state.get("tab") == "quiz":
         done = st.session_state.get("wwyd_phase") == "result"
-        if st.button("Done — show me who's up for it →" if done else "← Back to Hidden",
-                     key="hd_quiz_exit", type="primary" if done else "secondary"):
+        if st.button("See who's up for it" if done else "Back to Hidden",
+                     key="hd_quiz_exit", type="primary" if done else "tertiary",
+                     icon=None if done else ":material/arrow_back:"):
             st.session_state.tab = st.session_state.pop("_quiz_return", "discover")
             st.session_state.pop("disc_people", None)   # re-rank with the new answers
             st.session_state.pop("my_quiz", None)
@@ -364,7 +369,8 @@ def _main():
     # No complete profile yet (new user, or existing user from before matching) → setup
     profile = social_db.get_profile(uid)
     if not social_db.profile_complete(profile):
-        st.html('<div class="hd-brand" style="margin-bottom:10px;">HIDDEN</div>')
+        from ui import wordmark
+        st.html(f'<div style="margin:2px 0 6px;">{wordmark()}</div>')
         from Pages.profile_form import setup_page
         setup_page()
         return

@@ -45,22 +45,22 @@ def summary_from_row(result_name, openness, dim_scores) -> dict | None:
 
 def _tile(label: str, q: dict) -> str:
     return (f'<div class="hd-qz-tile"><div class="hd-kicker">{esc(label)}</div>'
-            f'<div class="hd-qz-name">{result_icon(q.get("result"))} {esc(q.get("result") or "—")}</div>'
+            f'<div class="hd-qz-name">{esc(q.get("result") or "No result yet")}</div>'
             f'<div class="hd-qz-freak">Freak score <b>{int(q.get("openness") or 0)}%</b></div></div>')
 
 
 _CSS = """
 <style>
-.hd-qz { background:linear-gradient(160deg,#1c1c24 0%,#131318 100%); border:1px solid rgba(255,45,120,.35);
-  border-radius:18px; padding:16px; margin:0 0 16px; }
+.hd-qz { background:var(--card); box-shadow:inset 0 0 0 1px rgba(232,67,90,.45);
+  border-radius:var(--radius); padding:16px; margin:0 0 16px; font-family:var(--font); }
 .hd-qz-row { display:flex; gap:10px; }
-.hd-qz-tile { flex:1; min-width:0; background:#111116; border:1px solid var(--border); border-radius:12px; padding:10px 12px; }
-.hd-qz-name { font-family:'Bebas Neue',sans-serif; font-size:21px; letter-spacing:1px; color:var(--text);
-  line-height:1.1; margin-top:4px; }
-.hd-qz-freak { font-family:'Space Mono',monospace; font-size:10px; color:var(--amber); margin-top:4px; }
-.hd-qz-freak b { font-size:13px; }
-.hd-qz-match { display:flex; align-items:baseline; justify-content:center; gap:8px; margin:12px 0 6px; }
-.hd-qz-match b { font-family:'Bebas Neue',sans-serif; font-size:40px; color:var(--lime); line-height:1; }
+.hd-qz-tile { flex:1; min-width:0; background:var(--raised); border-radius:10px; padding:10px 12px; }
+.hd-qz-name { font-family:var(--font); font-weight:800; font-stretch:112%; font-size:18px; color:var(--ink);
+  line-height:1.15; margin-top:4px; letter-spacing:-0.01em; }
+.hd-qz-freak { font-family:var(--font); font-size:13px; color:var(--smoke); margin-top:4px; font-variant-numeric:tabular-nums; }
+.hd-qz-freak b { color:#ff8a98; }
+.hd-qz-match { margin:14px 0 4px; font-family:var(--font); font-size:15px; color:var(--smoke); }
+.hd-qz-match b { font-weight:800; font-size:22px; color:var(--ink); margin-right:6px; }
 </style>
 """
 
@@ -70,16 +70,15 @@ def comparison_html(me_label: str, mq: dict, them_label: str, tq: dict, name_des
     pct = quiz_match(mq, tq)
     shared = shared_desires(mq, tq)
     if name_desires:
-        chips = "".join(f'<span class="hd-chip magenta">🔥 {esc(DESIRE_LABELS[s])}</span>' for s in shared)
+        chips = "".join(f'<span class="hd-chip bulb">{esc(DESIRE_LABELS[s])}</span>' for s in shared)
         desires = (f'<div class="hd-kicker" style="margin-top:10px;">Hidden desires you share</div>'
                    f'<div class="hd-chips" style="margin:6px 0 0;">{chips}</div>' if shared else
-                   '<div class="hd-sub" style="margin-top:8px;text-align:center;">No hidden desires in common yet.</div>')
+                   '<div class="hd-sub" style="margin-top:8px;">No hidden desires in common yet.</div>')
     else:
         n = len(shared)
-        desires = (f'<div class="hd-sub" style="margin-top:8px;text-align:center;">'
-                   f'🔥 {n} hidden desire{"s" if n != 1 else ""} in common</div>')
-    match = (f'<div class="hd-qz-match"><b>{pct}%</b><span class="hd-kicker">quiz match</span></div>'
-             if pct is not None else "")
+        desires = (f'<div class="hd-sub" style="margin-top:8px;">'
+                   f'{n} hidden desire{"s" if n != 1 else ""} in common</div>')
+    match = (f'<div class="hd-qz-match"><b>{pct}%</b>quiz match</div>' if pct is not None else "")
     return (_CSS + f'<div class="hd-qz"><div class="hd-kicker" style="margin-bottom:8px;">Read Between The Lines</div>'
             f'<div class="hd-qz-row">{_tile(me_label, mq)}{_tile(them_label, tq)}</div>{match}{desires}</div>')
 
@@ -111,7 +110,7 @@ def match_quiz_card(uid: int, other_id: int, other_name: str, matched_at, key: s
     with st.container(key=f"qzn_{key}"):
         c1, c2 = st.columns([3, 1.3], vertical_alignment="center")
         with c1:
-            st.html(f'<div class="hd-sub" style="line-height:1.4;"><b style="color:var(--text);">🎯 Quiz match'
+            st.html(f'<div class="hd-sub" style="line-height:1.4;"><b style="color:var(--ink);">Quiz match'
                     f'</b><br>{text}</div>')
         with c2:
             if not mq and st.button("Retake quiz" if mine_private else "Take quiz", key=f"qz_take_{key}",
@@ -168,7 +167,7 @@ def _drop_view(uid: int, code: str):
     tq = summary_from_row(drop.get(f"{them_side}_result_name"), drop.get(f"{them_side}_openness_pct"),
                           drop.get(f"{them_side}_dim_scores"))
     if not (mq and tq):
-        st.error("Couldn't load both results — try again.")
+        st.error("Couldn't load both results. Try again.")
         return
     st.html(comparison_html("You", mq, "Them", tq, name_desires=False))
 
@@ -177,7 +176,7 @@ def drop_codes_section(uid: int):
     """Me › Quiz: get your own code, or enter someone else's."""
     import database as db
     s = _drops(uid)
-    st.html('<div class="hd-kicker" style="margin:22px 0 4px;">Compare with anyone</div>'
+    st.html('<div class="hd-h3">Compare with anyone</div>'
             '<div class="hd-sub" style="margin-bottom:10px;">Share a code and whoever enters it sees both results, '
             'both freak scores and how many hidden desires you share. Never which ones. Entering someone '
             'else\'s code shows them yours too.</div>')
@@ -187,19 +186,19 @@ def drop_codes_section(uid: int):
         s["mine"] = mine = None
     if mine:
         used = bool(mine.get("partner_id"))
-        st.html(f'<div class="hd-card" style="text-align:center;padding:16px;"><div class="hd-kicker">Your code · '
-                f'{"used" if used else "valid 7 days"}</div><div class="hd-brand" '
-                f'style="font-size:40px;letter-spacing:8px;">{esc(s["mine"])}</div></div>')
+        st.html(f'<div class="hd-panel"><div class="hd-kicker">Your code, '
+                f'{"already used" if used else "valid for 7 days"}</div><div class="hd-title hd-num" '
+                f'style="font-size:36px;letter-spacing:.08em;margin:4px 0 0;">{esc(s["mine"])}</div></div>')
         if st.button("See who used it", use_container_width=True, key="drop_mine"):
             s["view"] = s["mine"]
     if (not mine or mine.get("partner_id")) and st.button(
-            "◈ Get a new code" if mine else "◈ Get my code", use_container_width=True, key="drop_new"):
+            "Get a new code" if mine else "Get my code", use_container_width=True, key="drop_new"):
         latest = db.load_latest_rbtl_result(uid)
         new = db.create_compat_drop(uid, latest["id"]) if latest and latest.get("id") else None
         if new:
             s["mine"], s["view"] = new, None
             st.rerun()
-        st.error("Couldn't make a code — try again.")
+        st.error("Couldn't make a code. Try again.")
 
     with st.form("drop_enter", border=False, clear_on_submit=True):
         c1, c2 = st.columns([3, 1.3], vertical_alignment="bottom")

@@ -22,7 +22,7 @@ SPOTS = [
         "rating": 4.6, "reviews": 475,
         "address": "7b Skyline Dr, Kingston",
         "maps": "https://maps.google.com/?q=Kingston+Dub+Club+Jamaica",
-        "color": "#c6ff00", "lat": 18.0331659, "lng": -76.7452831,
+        "color": "#ff9f2e", "lat": 18.0331659, "lng": -76.7452831,
         "source": "curated",
     },
     {
@@ -35,7 +35,7 @@ SPOTS = [
         "rating": 4.2, "reviews": 157,
         "address": "1 Weed Street, Drax Hall, St. Ann",
         "maps": "https://maps.google.com/?q=Kaya+Herb+House+Drax+Hall+Jamaica",
-        "color": "#c6ff00", "lat": 18.4239339, "lng": -77.1745351,
+        "color": "#ff9f2e", "lat": 18.4239339, "lng": -77.1745351,
         "source": "curated",
     },
     {
@@ -48,7 +48,7 @@ SPOTS = [
         "rating": 4.1, "reviews": 3145,
         "address": "7-9 Ardenne Rd, Kingston",
         "maps": "https://maps.google.com/?q=Ribbiz+UltraLounge+Kingston",
-        "color": "#ffb300", "lat": 18.01547, "lng": -76.78409,
+        "color": "#ff9f2e", "lat": 18.01547, "lng": -76.78409,
         "source": "curated",
     },
 ]
@@ -76,7 +76,7 @@ def _assign_vibe(types, name):
 
 
 def _rating_color(r):
-    return "#c6ff00" if r >= 4.5 else "#ffb300" if r >= 4 else "#00e5ff"
+    return "#ff9f2e" if r >= 4.5 else "#ff9f2e" if r >= 4 else "#a79f95"
 
 
 # ── Places API ────────────────────────────────────────────────────────────────
@@ -165,49 +165,21 @@ def get_all_spots(api_key, city=None, lat=None, lng=None):
 def spot_card(s):
     # Places results are external data — escape every text field before rendering.
     s = {k: _html.escape(v) if isinstance(v, str) else v for k, v in s.items()}
-    type_color = "#c6ff00" if s["type"] == "cannabis" else "#ffb300"
-    type_label = "CANNABIS" if s["type"] == "cannabis" else "DRINKS"
-    rating_color = _rating_color(s["rating"])
-    tip_html = ""
-    if s.get("tip"):
-        tip_html = f"""
-        <div style="background:#111114;border:1px solid #2a2a35;border-radius:4px;
-            padding:8px 12px;margin-bottom:12px;">
-            <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
-                color:#5a5a72;text-transform:uppercase;">TIP</span>
-            <p style="color:#9090aa;font-size:12px;margin:4px 0 0;line-height:1.5;">{s["tip"]}</p>
-        </div>"""
-
+    type_label = "Cannabis" if s["type"] == "cannabis" else "Drinks"
+    tip_html = (f'<p style="color:var(--smoke);font-size:14px;margin:10px 0 0;line-height:1.5;">'
+                f'<b style="color:var(--ink);font-weight:600;">Tip:</b> {s["tip"]}</p>') if s.get("tip") else ""
     st.html(f"""
-    <div style="background:#18181d;border:1px solid #2a2a35;border-left:3px solid {type_color};
-        border-radius:6px;padding:20px 24px;margin-bottom:12px;font-family:'DM Sans',sans-serif;">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
-            <div>
-                <span style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:#f0f0f5;
-                    letter-spacing:1px;line-height:1.1;">{s['name']}</span>
-                <div style="margin-top:6px;">
-                    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
-                        text-transform:uppercase;color:{type_color};background:{type_color}18;
-                        border:1px solid {type_color}40;padding:2px 8px;border-radius:2px;
-                        margin-right:8px;">{type_label}</span>
-                    <span style="font-family:'Space Mono',monospace;font-size:9px;
-                        letter-spacing:1px;color:{rating_color};">
-                        ⭐ {s['rating']} <span style="color:#5a5a72;">({s['reviews']:,})</span>
-                    </span>
-                </div>
-            </div>
-            <span style="font-size:24px;line-height:1;">{s['tag']}</span>
-        </div>
-        <p style="color:#9090aa;font-size:13px;margin:10px 0 6px;font-style:italic;line-height:1.5;">
-            {s['one_line']}</p>
-        <p style="color:#5a5a72;font-size:12px;font-family:'Space Mono',monospace;margin:0 0 4px;">
-            {s['address']}</p>
-        <p style="color:#5a5a72;font-size:11px;margin:0 0 12px;">{s['details']}</p>
+    <div style="background:var(--card);border-radius:var(--radius);padding:16px 18px;margin-bottom:10px;
+        font-family:var(--font);">
+        <div style="font-weight:700;font-stretch:112%;font-size:20px;color:var(--ink);line-height:1.15;
+            letter-spacing:-0.01em;">{s['name']}</div>
+        <div style="font-size:13px;color:var(--dim);margin-top:4px;font-variant-numeric:tabular-nums;">
+            {type_label}, rated {s['rating']} ({s['reviews']:,} reviews)</div>
+        <p style="color:var(--ink);font-size:15px;margin:10px 0 6px;line-height:1.45;">{s['one_line']}</p>
+        <p style="color:var(--smoke);font-size:13px;margin:0;line-height:1.5;">{s['address']}<br>{s['details']}</p>
         {tip_html}
-        <a href="{s['maps']}" target="_blank" style="font-family:'Space Mono',monospace;
-            font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#00e5ff;
-            text-decoration:none;border-bottom:1px solid #00e5ff40;padding-bottom:1px;">
-            Open in Maps →</a>
+        <a href="{s['maps']}" target="_blank" style="display:inline-block;margin-top:10px;font-size:14px;
+            font-weight:600;color:var(--sodium);text-decoration:none;">Open in Maps</a>
     </div>
     """)
 
@@ -218,12 +190,12 @@ def hotspots_page():
 
     st.html("""
     <div style="margin-bottom:4px;">
-        <span style="font-family:'Bebas Neue',sans-serif;font-size:40px;color:#f0f0f5;letter-spacing:2px;">
+        <span style="font-family:var(--font);font-weight:800;font-stretch:118%;font-size:40px;color:#f2ece4;letter-spacing:normal;">
             Where to go tonight
         </span>
     </div>
-    <p style="font-family:'Space Mono',monospace;font-size:11px;letter-spacing:2px;
-        color:#5a5a72;text-transform:uppercase;margin-bottom:28px;">
+    <p style="font-family:var(--font);font-size:12px;letter-spacing:normal;
+        color:#8a8178;text-transform:none;margin-bottom:28px;">
         Drinks · Cannabis · Picked by someone who's been
     </p>
     """)
@@ -238,8 +210,8 @@ def hotspots_page():
         st.session_state.type_filter = "all"
 
     # ── Vibe filter pills ─────────────────────────────────────────────────────
-    st.html("""<p style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
-        color:#5a5a72;text-transform:uppercase;margin-bottom:4px;">VIBE</p>""")
+    st.html("""<p style="font-family:var(--font);font-size:12px;letter-spacing:normal;
+        color:#8a8178;text-transform:none;margin-bottom:4px;">VIBE</p>""")
 
     vibe_options = {"All": "all", "Chill 🌿": "chill", "Turn Up 🔥": "turn_up", "Late Night 🌙": "late_night"}
     vcols = st.columns(len(vibe_options))
@@ -253,8 +225,8 @@ def hotspots_page():
                 st.rerun()
 
     # ── Type filter pills ─────────────────────────────────────────────────────
-    st.html("""<p style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;
-        color:#5a5a72;text-transform:uppercase;margin:16px 0 4px;">TYPE</p>""")
+    st.html("""<p style="font-family:var(--font);font-size:12px;letter-spacing:normal;
+        color:#8a8178;text-transform:none;margin:16px 0 4px;">TYPE</p>""")
 
     type_options = {"All": "all", "Drinks 🥃": "drinks", "Cannabis 🌿": "cannabis"}
     tcols = st.columns(len(type_options))
@@ -281,8 +253,8 @@ def hotspots_page():
 
     if not visible:
         st.html("""
-        <div style="text-align:center;padding:60px 0;color:#5a5a72;
-            font-family:'Space Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;">
+        <div style="text-align:center;padding:60px 0;color:#8a8178;
+            font-family:var(--font);font-size:12px;letter-spacing:normal;text-transform:none;">
             No spots match that filter
         </div>
         """)

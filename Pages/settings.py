@@ -36,20 +36,12 @@ def settings_page():
 
     # ── Data export ───────────────────────────────────────────────────────────
     st.html("""
-<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
-  Your Data
-</div>
-<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
-            padding:16px 18px; margin-bottom:16px;">
-  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
-    Download everything we have on you — your profile, matches, quiz results and history.
-    JSON format. You own your data.
-  </div>
-</div>
+<div class="hd-h3" style="margin-top:6px;">Your data</div>
+<div class="hd-sub" style="margin-bottom:12px;">Download everything Hidden has on you: your profile, links,
+  quiz results and history, as a JSON file.</div>
 """)
 
-    if st.button("↓  Export all my data", use_container_width=True, key="export_data"):
+    if st.button("Export all my data", use_container_width=True, key="export_data"):
         with st.spinner("Gathering your data…"):
             data = _db("export_user_data", uid, default={})
             try:
@@ -59,7 +51,7 @@ def settings_page():
                 pass
         if data:
             st.download_button(
-                "↓ Download data.json",
+                "Download data.json",
                 data=json.dumps(data, indent=2, default=str),
                 file_name="hidden_data.json",
                 mime="application/json",
@@ -73,18 +65,11 @@ def settings_page():
 
     # ── Password ──────────────────────────────────────────────────────────────
     st.html("""
-<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:12px;">
-  Password
-</div>
-<div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
-            padding:16px 18px; margin-bottom:8px;">
-  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
-    Change your password via the forgot password flow — enter your email and you'll get a reset link.
-  </div>
-</div>
+<div class="hd-h3">Password</div>
+<div class="hd-sub" style="margin-bottom:12px;">To change it, use password reset. Enter your email and
+  you'll get a reset link.</div>
 """)
-    if st.button("→  Go to password reset", use_container_width=True, key="go_pw_reset"):
+    if st.button("Go to password reset", use_container_width=True, key="go_pw_reset"):
         for k in list(st.session_state.keys()):   # like logout: nothing carries over to the next login
             del st.session_state[k]
         st.session_state["_restore_tried"] = True
@@ -95,18 +80,9 @@ def settings_page():
 
     # ── Danger zone ───────────────────────────────────────────────────────────
     st.html("""
-<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--magenta); margin-bottom:12px;">
-  Danger Zone
-</div>
-<div style="background:#1a0a0e; border:1px solid var(--magenta); border-radius:4px;
-            padding:16px 18px; margin-bottom:16px;">
-  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">
-    Deleting your account removes your profile, matches, chats, quiz results and all personal data.
-    This <strong style="color:var(--magenta);">
-    cannot be undone</strong>.
-  </div>
-</div>
+<div class="hd-h3">Delete your account</div>
+<div class="hd-sub" style="margin-bottom:12px;">This removes your profile, links, chats, quiz results and
+  all personal data. <b style="color:var(--ink);">It can't be undone.</b></div>
 """)
 
     st.session_state.setdefault("delete_confirm_1", False)
@@ -143,7 +119,7 @@ def settings_page():
                             del st.session_state[k]
                         st.rerun()
                     else:
-                        st.error("Deletion failed — try again or contact support.")
+                        st.error("Deletion failed. Try again or contact support.")
                 else:
                     st.error(f"Type '{_username()}' exactly to confirm.")
         with col_no:

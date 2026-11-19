@@ -23,11 +23,11 @@ def _uid():
 def location_capture(uid: int, profile: dict, key: str):
     """Ask the browser for a location; store it rounded to ~1 km."""
     has_fix = profile.get("lat") is not None
-    st.caption("📍 Location set — others only ever see a rough distance."
-               if has_fix else "📍 No location yet — tap below and allow access in your browser.")
+    st.caption("Location set. Others only ever see a rough distance."
+               if has_fix else "No location yet. Tap below and allow access in your browser.")
 
     pending = f"_geo_pending_{key}"
-    if st.button("📍 Update my location" if has_fix else "📍 Use my current location",
+    if st.button("Update my location" if has_fix else "Use my current location",
                  key=f"geo_btn_{key}", use_container_width=True):
         st.session_state[pending] = st.session_state.get(pending, 0) + 1
 
@@ -35,7 +35,7 @@ def location_capture(uid: int, profile: dict, key: str):
         try:
             from streamlit_js_eval import get_geolocation
         except ImportError:
-            st.error("Live location isn't available right now — use City only.")
+            st.error("Live location isn't available right now. Use City only.")
             st.session_state.pop(pending, None)
             return
         loc = get_geolocation(component_key=f"geo_{key}_{st.session_state[pending]}")
@@ -46,10 +46,10 @@ def location_capture(uid: int, profile: dict, key: str):
             if social_db.save_profile(uid, {"lat": round_coord(lat), "lon": round_coord(lon)}):
                 st.session_state.pop(pending, None)
                 st.session_state.pop("disc_people", None)
-                st.toast("Location updated 📍")
+                st.toast("Location updated")
                 st.rerun()
             else:
-                st.error("Couldn't save your location — try again.")
+                st.error("Couldn't save your location. Try again.")
         else:
             st.session_state.pop(pending, None)
             st.warning("Location was blocked or unavailable. Allow it in your browser settings, "
@@ -73,7 +73,7 @@ def profile_form(uid: int, profile: dict | None, key: str, submit_label: str) ->
 
     intent = st.segmented_control(
         "Looking for", options=list(INTENTS),
-        format_func=lambda k: f"{INTENT_ICONS[k]} {INTENTS[k]}",
+        format_func=INTENTS.get,
         default=norm_intent(p.get("intent")) or "open", key=f"{key}_intent",
     )
 
@@ -96,7 +96,7 @@ def profile_form(uid: int, profile: dict | None, key: str, submit_label: str) ->
         hosting = st.selectbox("Where", host_keys, format_func=HOSTING.get, key=f"{key}_hosting",
                                index=host_keys.index(p["hosting"]) if p.get("hosting") in HOSTING else 3)
 
-    st.html('<div class="hd-kicker" style="margin:14px 0 4px;">Your lifestyle</div>')
+    st.html('<div class="hd-h3">Your lifestyle</div>')
     lifestyle = {}
     for field, (label, opts) in LIFESTYLE.items():
         current = p.get(field)
@@ -107,12 +107,12 @@ def profile_form(uid: int, profile: dict | None, key: str, submit_label: str) ->
     age_min, age_max = st.slider("Show me people aged", MIN_AGE, 80, key=f"{key}_ages",
                                  value=(int(p.get("age_min") or MIN_AGE), min(80, int(p.get("age_max") or 80))))
 
-    st.html('<div class="hd-kicker" style="margin:14px 0 4px;">Where you are</div>')
+    st.html('<div class="hd-h3">Where you are</div>')
     city = st.text_input("City / area", value=p.get("city") or "", key=f"{key}_city",
                          placeholder="e.g. Kingston", max_chars=100)
     mode = st.radio("Match by", ["live", "city"], horizontal=True, key=f"{key}_mode",
                     index=0 if p.get("location_mode") == "live" else 1,
-                    format_func=lambda m: "📍 Live distance" if m == "live" else "🏙 City only")
+                    format_func=lambda m: "Live distance" if m == "live" else "City only")
     max_km = int(p.get("max_km") or 25)
     if mode == "live":
         max_km = st.slider("Max distance (km)", 1, 100, max_km, key=f"{key}_km")
@@ -130,7 +130,7 @@ def profile_form(uid: int, profile: dict | None, key: str, submit_label: str) ->
         st.error("Add your birthday.")
         return False
     if not is_adult(birthdate):
-        st.error(f"Sorry — Hidden is for people {MIN_AGE} and over.")
+        st.error(f"Hidden is for people {MIN_AGE} and over.")
         return False
     if not intent:
         st.error("Pick what you're looking for.")
@@ -149,7 +149,7 @@ def profile_form(uid: int, profile: dict | None, key: str, submit_label: str) ->
     if social_db.save_profile(uid, fields):
         st.session_state.pop("disc_people", None)
         return True
-    st.error("Couldn't save — check your connection and try again.")
+    st.error("Couldn't save. Check your connection and try again.")
     return False
 
 
@@ -161,31 +161,33 @@ def setup_page():
     if profile.get("birthdate") and not is_adult(profile["birthdate"]):
         header("Hidden", "18+ only", f"You must be {MIN_AGE} or older to use Hidden.")
         return
+    st.html('<div class="hd-note" style="margin-top:12px;">Step 1 of 2</div>')
     header("Step 1 of 2", "What are you on?",
            "Tell us what you want, who you're into and where you are. We'll show you who's up for it nearby.")
     if st.button("How does Hidden work?", key="setup_intro", type="tertiary"):
         from Pages.intro import open_intro
         open_intro("setup")
-    if profile_form(uid, profile, "setup", "Next →"):
+    if profile_form(uid, profile, "setup", "Next"):
         st.session_state.tab = "quiz_offer"
         st.rerun()
 
 
 def quiz_offer_page():
-    st.html('<div class="hd-brand" style="margin-bottom:10px;">HIDDEN</div>')
+    from ui import wordmark
+    st.html(f'<div style="margin:2px 0 6px;">{wordmark()}</div><div class="hd-note" style="margin-top:12px;">Step 2 of 2</div>')
     header("Step 2 of 2", "Read Between The Lines",
            "The quiz is where your heat score comes from, and anyone you link with who took it too sees your result.")
     st.html("""
-<div class="hd-card" style="padding:20px 22px;">
+<div class="hd-panel">
   <div class="hd-why" style="margin:0;padding:0;border:0;">
-    <div>🎭 &nbsp;Real-life scenarios — pick what you'd actually do</div>
-    <div>🔒 &nbsp;Hidden desires: a link only sees the ones you both share</div>
-    <div>🔥 &nbsp;Worth 65% of every heat score</div>
-    <div>⏱ &nbsp;About 5 minutes</div>
+    <div>Real-life scenarios. Pick what you'd actually do.</div>
+    <div>Hidden desires: a link only sees the ones you both share.</div>
+    <div>Worth 65% of every heat score.</div>
+    <div>About 5 minutes.</div>
   </div>
 </div>""")
     st.html("<div style='height:12px'></div>")
-    if st.button("Take the quiz →", type="primary", use_container_width=True, key="offer_take"):
+    if st.button("Take the quiz", type="primary", use_container_width=True, key="offer_take"):
         open_quiz("discover")
     if st.button("Skip for now", use_container_width=True, key="offer_skip"):
         st.session_state.tab = "discover"

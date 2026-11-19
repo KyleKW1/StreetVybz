@@ -268,7 +268,7 @@ def similarity(me: dict, them: dict) -> tuple[int, list[str]]:
             quiz_reasons.append("Same level of openness")
     shared = len(shared_desires(mq, tq))
     if desires_fit(mq, tq):
-        quiz_reasons.append("Your desires fit together 🔥")
+        quiz_reasons.append("Your desires fit together")
     if shared:
         quiz_reasons.append(f"{shared} hidden desire{'s' if shared != 1 else ''} in common")
 

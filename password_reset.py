@@ -155,7 +155,7 @@ def _reset_password(email: str, new_password: str) -> bool:
 
 def _send_email(to_email: str, token=None, reset_type="password") -> bool:
     if not APP_EMAIL or not APP_EMAIL_PASSWORD:
-        st.warning("Email not configured — check secrets.")
+        st.warning("Email isn't configured. Check the app secrets.")
         return False
     try:
         msg = EmailMessage()
@@ -206,8 +206,8 @@ _CSS = """
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg:#0a0a0b; --card:#18181d; --border:#2a2a35;
-  --lime:#c6ff00; --text:#f0f0f5; --muted:#5a5a72; --soft:#9090aa;
+  --bg:#000000; --card:#16130f; --border:#2b2724;
+  --lime:#ff9f2e; --text:#f2ece4; --muted:#8a8178; --soft:#a79f95;
 }
 .vv-wrap {
   max-width: 400px;
@@ -227,20 +227,20 @@ _CSS = """
   to   { opacity:1; transform:translateY(0); }
 }
 .vv-wordmark {
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: 48px; letter-spacing: 4px; line-height: 1;
+  font-family: var(--font);font-weight:800;font-stretch:118%;
+  font-size: 48px; letter-spacing:normal; line-height: 1;
   color: var(--text); margin-bottom: 4px; text-align: center;
 }
 .vv-wordmark span { color: var(--lime); }
 .vv-tagline {
-  font-family: 'Space Mono', monospace; font-size: 10px;
-  color: var(--muted); letter-spacing: 2px; text-transform: uppercase;
+  font-family: var(--font); font-size:12px;
+  color: var(--muted); letter-spacing:normal; text-transform:none;
   margin: 0; text-align: center;
 }
 .vv-divider { height: 1px; background: var(--border); margin: 20px 0 16px; }
 .vv-label {
-  font-family: 'Space Mono', monospace; font-size: 9px;
-  text-transform: uppercase; letter-spacing: 3px;
+  font-family: var(--font); font-size:12px;
+  text-transform:none; letter-spacing:normal;
   color: var(--lime); margin-bottom: 0;
 }
 </style>
@@ -273,7 +273,7 @@ def forgot_password_page():
 
         col_a, col_b = st.columns(2)
         with col_a:
-            if st.button("Send Email →", use_container_width=True, type="primary", key="recovery_send"):
+            if st.button("Send email", use_container_width=True, type="primary", key="recovery_send"):
                 if not email:
                     st.error("Enter your email address.")
                 elif not validate_email(email):
@@ -284,7 +284,7 @@ def forgot_password_page():
                     if recovery_type == "Reset Password":
                         token = secrets.token_urlsafe(32)
                         if _save_reset_token(email, token) and _send_email(email, token, "password"):
-                            st.success("Reset link sent — check your inbox.")
+                            st.success("Reset link sent. Check your inbox.")
                         else:
                             st.error("Something went wrong. Try again.")
                     else:
@@ -293,7 +293,7 @@ def forgot_password_page():
                         else:
                             st.error("Something went wrong. Try again.")
         with col_b:
-            if st.button("← Back", use_container_width=True, type="secondary", key="recovery_back"):
+            if st.button("Back", use_container_width=True, type="secondary", key="recovery_back"):
                 st.session_state.page = "login"
                 st.rerun()
 
@@ -314,7 +314,7 @@ def reset_password_page():
         token = st.session_state.get("reset_token")
         if not token:
             st.error("Invalid or expired reset link.")
-            if st.button("← Back to login", key="rp_back_notoken"):
+            if st.button("Back to log in", key="rp_back_notoken"):
                 st.session_state.page = "login"
                 st.rerun()
             return
@@ -322,7 +322,7 @@ def reset_password_page():
         valid, email = _verify_reset_token(token)
         if not valid:
             st.error("This link is invalid or has expired.")
-            if st.button("Request new link →", key="rp_new_link"):
+            if st.button("Request a new link", key="rp_new_link"):
                 st.session_state.page = "forgot"
                 st.session_state.pop("reset_token", None)
                 st.rerun()
@@ -335,7 +335,7 @@ def reset_password_page():
 
         col_a, col_b = st.columns(2)
         with col_a:
-            if st.button("Reset →", use_container_width=True, type="primary", key="rp_submit"):
+            if st.button("Reset password", use_container_width=True, type="primary", key="rp_submit"):
                 ok_pw, pw_msg = validate_password(new_pw)
                 if not new_pw:
                     st.error("Enter a password.")
@@ -349,7 +349,7 @@ def reset_password_page():
                     st.session_state.page = "login"
                     st.rerun()
                 else:
-                    st.error("Reset failed — try again.")
+                    st.error("Reset failed. Try again.")
         with col_b:
             if st.button("Cancel", use_container_width=True, type="secondary", key="rp_cancel"):
                 st.session_state.pop("reset_token", None)

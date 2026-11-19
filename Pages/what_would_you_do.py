@@ -257,83 +257,34 @@ _ANSWER_OPTION_RULE = """ANSWER OPTIONS — sexually honest, not sanitised:
 # ─── CSS ──────────────────────────────────────────────────────────────────────
 
 def inject_css():
+    # Colours, fonts and buttons come from the app theme (styles.py); this only
+    # styles the answer options as tappable rows.
     st.html("""
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
-:root {
-  --bg:#0a0a0b; --surface:#111114; --card:#18181d; --border:#2a2a35;
-  --lime:#c6ff00; --magenta:#ff2d78; --cyan:#00e5ff; --amber:#ffb300;
-  --text:#f0f0f5; --muted:#5a5a72; --soft:#9090aa;
-}
-.stApp { background:var(--bg) !important; }
-section[data-testid="stMain"] { background:var(--bg) !important; }
-section.main .block-container { padding-top:2rem !important; max-width:820px !important; }
-section[data-testid="stSidebar"] { background:#0d0d10 !important; border-right:1px solid var(--border) !important; }
-section[data-testid="stSidebar"] * { color:#c8c8d8 !important; }
-section[data-testid="stSidebar"] .stButton > button {
-  background:transparent !important; border:1px solid var(--border) !important;
-  color:#c8c8d8 !important; border-radius:4px !important;
-  font-family:'Space Mono',monospace !important; font-size:11px !important;
-  letter-spacing:1px !important; text-transform:uppercase !important;
-}
-section[data-testid="stSidebar"] .stButton > button:hover {
-  background:#1a1a20 !important; border-color:var(--lime) !important;
-  color:var(--lime) !important; box-shadow:none !important;
-}
-.stButton > button {
-  background:transparent !important; color:var(--soft) !important;
-  border:1px solid var(--border) !important; border-radius:3px !important;
-  font-family:'Space Mono',monospace !important; font-size:10px !important;
-  letter-spacing:1.5px !important; text-transform:uppercase !important;
-  transition:all 0.15s !important; box-shadow:none !important;
-}
-.stButton > button:hover { border-color:var(--lime) !important; color:var(--lime) !important; }
-.stButton > button[kind="primary"] {
-  background:var(--magenta) !important; color:#fff !important;
-  border-color:var(--magenta) !important; font-weight:700 !important;
-}
-.stButton > button[kind="primary"]:hover {
-  background:#ff5590 !important; box-shadow:0 0 20px rgba(255,45,120,0.25) !important;
-}
-.stButton > button:disabled { opacity:0.35 !important; cursor:not-allowed !important; }
-.stProgress > div > div > div { background:var(--magenta) !important; }
-#MainMenu { visibility:hidden; } footer { visibility:hidden; }
+section.main .block-container { padding-top:2rem !important; }
 div[data-testid="stRadio"] > label { display:none !important; }
 div[data-testid="stRadioGroup"] { gap:8px !important; flex-direction:column !important; }
 div[data-testid="stRadio"], div[data-testid="stRadioGroup"],
 div[data-testid="stRadioGroup"] > div { width:100% !important; }
 label[data-testid="stRadioOption"] {
-  background:var(--card) !important; border:1px solid var(--border) !important;
-  border-radius:3px !important; padding:12px 16px !important; margin:0 !important;
-  cursor:pointer !important; transition:all 0.15s !important; width:100% !important;
+  background:var(--card) !important; border:1px solid var(--line) !important;
+  border-radius:12px !important; padding:13px 16px !important; margin:0 !important;
+  cursor:pointer !important; transition:border-color .15s, background-color .15s !important; width:100% !important;
 }
 label[data-testid="stRadioOption"], label[data-testid="stRadioOption"] p {
-  font-family:'DM Sans',sans-serif !important; font-size:14px !important;
-  letter-spacing:normal !important; text-transform:none !important;
-  color:var(--soft) !important; line-height:1.55 !important;
+  font-family:var(--font) !important; font-size:15px !important;
+  color:var(--ink) !important; line-height:1.5 !important;
 }
-label[data-testid="stRadioOption"]:hover {
-  border-color:var(--lime) !important; background:#1c1c22 !important;
-}
-label[data-testid="stRadioOption"]:hover p { color:var(--text) !important; }
+label[data-testid="stRadioOption"]:hover { border-color:var(--smoke) !important; }
 label[data-testid="stRadioOption"]:has(input:checked) {
-  background:rgba(255,45,120,0.12) !important; border-color:var(--magenta) !important;
-  border-left-width:3px !important;
+  background:rgba(232,67,90,.10) !important; border-color:var(--bulb) !important;
 }
-label[data-testid="stRadioOption"]:has(input:checked) p { color:var(--text) !important; }
-@keyframes card-enter {
-  from { opacity:0; transform:translateY(14px) scale(0.98); }
-  to   { opacity:1; transform:translateY(0) scale(1); }
-}
-.enter-card { animation:card-enter 0.3s cubic-bezier(0.19,1,0.22,1) both; }
+@keyframes fade-in { from{opacity:0} to{opacity:1} }
+.enter-card, .fade-in { animation:fade-in .25s ease both; }
 .live-dot {
   display:inline-block; width:6px; height:6px; border-radius:50%;
-  background:var(--magenta); animation:pulse-dot 1.4s infinite;
-  vertical-align:middle; margin-right:6px;
+  background:var(--bulb); vertical-align:middle; margin-right:6px;
 }
-@keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
-@keyframes fade-in { from{opacity:0} to{opacity:1} }
-.fade-in { animation:fade-in 0.5s ease both; }
 </style>
 """)
 
@@ -363,7 +314,7 @@ def _debug_uid_info():
 def _show_persistent_db_error():
     err = st.session_state.get("wwyd_db_error", "")
     if err:
-        st.error(f"⚠️ DB: {err}")
+        st.error(f"Database error: {err}")
 
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -993,11 +944,11 @@ def _render_community_pulse(q_hash: str, chosen_idx: int, opt_labels: list, slot
 
     st.html(f"""
 <div style="margin-top:20px; margin-bottom:6px;">
-  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:8px;">
+  <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+              text-transform:none; color:var(--muted); margin-bottom:8px;">
     How {total} others answered
   </div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:11px; color:var(--amber);
+  <div style="font-family:var(--font); font-size:12px; color:var(--amber);
               font-style:italic; margin-bottom:12px; line-height:1.5;">{hook}</div>
 </div>
 """)
@@ -1010,11 +961,11 @@ def _render_community_pulse(q_hash: str, chosen_idx: int, opt_labels: list, slot
         st.html(f"""
 <div style="margin-bottom:10px;">
   <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px; gap:8px;">
-    <div style="font-family:'DM Sans',sans-serif; font-size:11px; color:{lcolor};
+    <div style="font-family:var(--font); font-size:12px; color:{lcolor};
                 max-width:82%; line-height:1.4;">
       {'▶ ' if is_me else ''}{label[:80]}{'…' if len(label)>80 else ''}
     </div>
-    <div style="font-family:'Space Mono',monospace; font-size:10px; color:{lcolor};
+    <div style="font-family:var(--font); font-size:12px; color:{lcolor};
                 flex-shrink:0; font-weight:{'700' if is_me else '400'};">{pct}%</div>
   </div>
   <div style="height:3px; background:var(--border); border-radius:2px;">
@@ -1116,23 +1067,14 @@ def _update_selections_in_db(selected_cats: list):
 def _render_header():
     if st.session_state.get("wwyd_phase") != "start":
         # Question screens: a slim label, so the question sits at the top of a phone screen
-        st.html('<div style="font-family:\'Space Mono\',monospace; font-size:9px; letter-spacing:4px; '
-                'text-transform:uppercase; color:var(--magenta); margin:4px 0 18px;">Read Between The Lines</div>')
+        st.html('<div style="font-family:var(--font); font-size:12px; letter-spacing:normal; '
+                'text-transform:none; color:var(--magenta); margin:4px 0 18px;">Read Between The Lines</div>')
         _show_persistent_db_error()
         return
     st.html("""
-<div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:28px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:6px;">
-    Hidden · Desire Quiz
-  </div>
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(44px,9vw,68px);
-              color:var(--text); letter-spacing:3px; line-height:0.92; margin-bottom:6px;">
-    READ BETWEEN<br><span style="color:var(--magenta);">THE LINES</span>
-  </div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-top:4px;">
-    Real scenarios. Hidden desires. Your full profile.
-  </div>
+<div style="padding-bottom:6px; margin:10px 0 18px;">
+  <div class="hd-title" style="font-size:clamp(36px,10vw,54px); line-height:.98;">Read between<br>the lines</div>
+  <div class="hd-sub" style="margin-top:14px;">Real scenarios, the desires you don't say out loud, and a profile at the end.</div>
 </div>
 """)
     _show_persistent_db_error()
@@ -1148,65 +1090,43 @@ def render_start():
         st.session_state.wwyd_error = ""
 
     if not _uid():
-        st.warning("Not logged in — results won't save to your profile.")
+        st.warning("You're not logged in, so results won't save to your profile.")
 
 
     st.html("""
-<div class="enter-card">
-  <div style="background:var(--card); border:1px solid var(--border);
-              border-left:3px solid var(--magenta); border-radius:4px;
-              padding:16px 18px; margin-bottom:10px;">
-    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--magenta); margin-bottom:8px;">
-      <span class="live-dot"></span>Phase 1 · Scenarios
-    </div>
-    <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75; margin:0;">
-      7 AI-generated scenarios — different every time, built fresh for each session.
-      Each one puts you directly inside a moment of desire or decision.
-      After you answer, you'll see how everyone else responded — anonymously.
-    </p>
-  </div>
-  <div style="background:var(--card); border:1px solid var(--border);
-              border-left:3px solid var(--amber); border-radius:4px;
-              padding:16px 18px; margin-bottom:10px;">
-    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--amber); margin-bottom:8px;">
-      Phase 2 · Hidden Desires
-    </div>
-    <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75; margin:0;">
-      10 statements that escalate from curiosity to the specific fantasies most people
-      have never said out loud. The last one is your deepest.
-    </p>
-  </div>
-  <div style="background:var(--card); border:1px solid var(--border);
-              border-left:3px solid var(--cyan); border-radius:4px;
-              padding:16px 18px; margin-bottom:20px;">
-    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--cyan); margin-bottom:8px;">
-      Phase 3 · Your Category Fingerprint
-    </div>
-    <p style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.75; margin:0;">
-      Every real platform category scored against your actual answers.
-      A one-line insight. You pick what goes into your profile.
-    </p>
-  </div>
-  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
-              text-transform:uppercase; color:var(--muted); text-align:center; margin-bottom:14px;">
-    18+ only · Matches who took it too see your result · Scenarios change every time
-  </div>
-</div>
+<ol class="hd" style="list-style:none; padding:0; margin:0 0 18px; counter-reset:phase;">
+  <li style="display:flex; gap:14px; padding:12px 0; border-top:1px solid var(--line);">
+    <b style="font-size:15px; color:var(--bulb); min-width:14px;">1</b>
+    <div><div class="hd-h3" style="margin:0 0 2px;">Scenarios</div>
+      <div class="hd-sub">Seven situations, new every time. Pick what you'd actually do, then see how
+      everyone else answered, anonymously.</div></div>
+  </li>
+  <li style="display:flex; gap:14px; padding:12px 0; border-top:1px solid var(--line);">
+    <b style="font-size:15px; color:var(--bulb); min-width:14px;">2</b>
+    <div><div class="hd-h3" style="margin:0 0 2px;">Hidden desires</div>
+      <div class="hd-sub">Ten statements, from curious to the things most people never say out loud.
+      The last one is your deepest.</div></div>
+  </li>
+  <li style="display:flex; gap:14px; padding:12px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line);">
+    <b style="font-size:15px; color:var(--bulb); min-width:14px;">3</b>
+    <div><div class="hd-h3" style="margin:0 0 2px;">Your profile</div>
+      <div class="hd-sub">Every category scored against your answers, with a one-line read. You choose
+      what goes on your profile.</div></div>
+  </li>
+</ol>
+<div class="hd-note" style="margin-bottom:16px;">18+ only. Your links who took it too see your result.</div>
 """)
     # One question, so the scenarios fit your situation. Gender and who you're into
     # come from your Hidden profile rather than being asked again.
     rel_opts = {"single": "Single", "dating": "Seeing someone casually", "partnered": "In a relationship",
                 "married": "Married", "poly": "Poly / open", "complicated": "It's complicated"}
-    st.html('<div style="font-family:\'DM Sans\',sans-serif; font-size:16px; color:var(--text); '
+    st.html('<div style="font-family:var(--font); font-size:16px; color:var(--text); '
             'margin:6px 0 2px;">One question first: are you seeing anyone?</div>'
-            '<div style="font-family:\'DM Sans\',sans-serif; font-size:12px; color:var(--muted); '
+            '<div style="font-family:var(--font); font-size:12px; color:var(--muted); '
             'margin-bottom:6px;">So the scenarios fit your life. Only used for this quiz.</div>')
     rel = st.radio("Are you seeing anyone?", list(rel_opts), index=None, label_visibility="collapsed",
                    format_func=rel_opts.get, key="start_rel")
-    if st.button("Begin →", use_container_width=True, type="primary", key="start_btn", disabled=rel is None):
+    if st.button("Begin", use_container_width=True, type="primary", key="start_btn", disabled=rel is None):
         _wipe()
         init_state()
         st.session_state.wwyd_profile = {"relationship_status": rel, **_profile_basics()}
@@ -1243,15 +1163,15 @@ def render_profile_intake():
 
     st.html("""
 <div style="border-bottom:1px solid var(--border); padding-bottom:20px; margin-bottom:32px;">
-  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:4px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:8px;">
+  <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+              text-transform:none; color:var(--muted); margin-bottom:8px;">
     One quick step
   </div>
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(32px,7vw,52px);
-              color:var(--text); letter-spacing:3px; line-height:0.95; margin-bottom:8px;">
+  <div style="font-family:var(--font);font-weight:800;font-stretch:118%; font-size:clamp(32px,7vw,52px);
+              color:var(--text); letter-spacing:normal; line-height:0.95; margin-bottom:8px;">
     HELP US KNOW<br><span style="color:var(--magenta);">YOUR WORLD</span>
   </div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted); margin-top:6px;">
+  <div style="font-family:var(--font); font-size:13px; color:var(--muted); margin-top:6px;">
     These answers personalize what you see. Not stored beyond this session.
   </div>
 </div>
@@ -1262,8 +1182,8 @@ def render_profile_intake():
     # Q1: Relationship Status
     st.html("""
 <div style="margin-bottom:28px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--cyan); margin-bottom:12px;">
+  <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+              text-transform:none; color:var(--cyan); margin-bottom:12px;">
     Relationship Status
   </div>
 """)
@@ -1292,8 +1212,8 @@ def render_profile_intake():
     # Q2: Gender Identity
     st.html("""
 <div style="margin-bottom:28px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--magenta); margin-bottom:12px;">
+  <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+              text-transform:none; color:var(--magenta); margin-bottom:12px;">
     Your Gender
   </div>
 """)
@@ -1321,8 +1241,8 @@ def render_profile_intake():
     # Q3: Attraction
     st.html("""
 <div style="margin-bottom:28px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--amber); margin-bottom:12px;">
+  <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+              text-transform:none; color:var(--amber); margin-bottom:12px;">
     Who You're Into
   </div>
 """)
@@ -1351,8 +1271,8 @@ def render_profile_intake():
     if rel_chosen in ("dating", "partnered", "married"):
         st.html("""
 <div style="margin-bottom:28px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--lime); margin-bottom:12px;">
+  <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+              text-transform:none; color:var(--lime); margin-bottom:12px;">
     How Long?
   </div>
 """)
@@ -1378,8 +1298,8 @@ def render_profile_intake():
     # Q5: Comfort with desire talk
     st.html("""
 <div style="margin-bottom:28px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--cyan); margin-bottom:12px;">
+  <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+              text-transform:none; color:var(--cyan); margin-bottom:12px;">
     Being Honest About Desire
   </div>
 """)
@@ -1404,7 +1324,7 @@ def render_profile_intake():
     st.html("</div>")
 
     st.html("<br>")
-    if st.button("Start Quiz →", use_container_width=True, type="primary", key="profile_intake_btn"):
+    if st.button("Start the quiz", use_container_width=True, type="primary", key="profile_intake_btn"):
         st.session_state.wwyd_phase = "loading"
         st.rerun()
 
@@ -1422,8 +1342,8 @@ def _shuffle_opts(q: dict) -> dict:
 
 def render_loading():
     st.html("""
-<div style="font-family:'Bebas Neue',sans-serif; font-size:36px; color:var(--text);
-            letter-spacing:3px; margin-bottom:24px;">BUILDING YOUR QUIZ</div>
+<div style="font-family:var(--font);font-weight:800;font-stretch:118%; font-size:36px; color:var(--text);
+            letter-spacing:normal; margin-bottom:24px;">BUILDING YOUR QUIZ</div>
 """)
     ph_bar    = st.empty()
     ph_status = st.empty()
@@ -1475,13 +1395,13 @@ def render_quiz():
 
     segs = "".join(
         f'<div style="flex:1; height:3px; border-radius:2px; background:'
-        f'{"var(--magenta)" if i < cur else "rgba(255,45,120,0.4)" if i == cur else "var(--border)"}"></div>'
+        f'{"var(--magenta)" if i < cur else "rgba(232,67,90,0.4)" if i == cur else "var(--border)"}"></div>'
         for i in range(total)
     )
 
     st.html(f"""
-<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:6px;">
+<div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+            text-transform:none; color:var(--muted); margin-bottom:6px;">
   Phase 1 · Scenarios · {cur + 1} / {total}
 </div>
 <div style="display:flex; gap:3px; margin-bottom:20px;">{segs}</div>
@@ -1494,23 +1414,23 @@ def render_quiz():
               border-bottom:1px solid var(--border);">
     <div style="width:28px; height:28px; border-radius:50%; background:var(--magenta);
                 color:#fff; display:flex; align-items:center; justify-content:center;
-                font-family:'DM Sans',sans-serif; font-size:12px; font-weight:700; flex-shrink:0;">V</div>
+                font-family:var(--font); font-size:12px; font-weight:700; flex-shrink:0;">V</div>
     <div style="flex:1; min-width:0;">
-      <div style="font-family:'Space Mono',monospace; font-size:10px; color:var(--magenta);">Hidden</div>
-      <div style="font-family:'DM Sans',sans-serif; font-size:10px; color:var(--muted);">anonymous · now</div>
+      <div style="font-family:var(--font); font-size:12px; color:var(--magenta);">Hidden</div>
+      <div style="font-family:var(--font); font-size:12px; color:var(--muted);">anonymous · now</div>
     </div>
-    <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:1px;
+    <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
                 padding:3px 8px; border:1px solid var(--border); color:var(--muted);
-                text-transform:uppercase; border-radius:2px; flex-shrink:0;">Scenario</div>
+                text-transform:none; border-radius:2px; flex-shrink:0;">Scenario</div>
   </div>
   <div style="padding:14px 16px 14px;">
-    <div style="font-family:'DM Sans',sans-serif; font-size:15px; font-weight:500;
+    <div style="font-family:var(--font); font-size:15px; font-weight:500;
                 color:var(--text); line-height:1.5; margin-bottom:10px;">{_html.escape(str(q['title']))}</div>
-    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
+    <div style="font-family:var(--font); font-size:13px; color:var(--soft);
                 line-height:1.85;">{_html.escape(str(q['text']))}</div>
   </div>
 </div>
-<div style="font-family:'DM Sans',sans-serif; font-size:15px; font-style:italic;
+<div style="font-family:var(--font); font-size:15px; font-style:italic;
             color:var(--amber); border-left:3px solid var(--amber); padding-left:14px;
             margin-bottom:18px; line-height:1.6;">{_html.escape(str(q['prompt']))}</div>
 """)
@@ -1540,11 +1460,11 @@ def render_quiz():
     col_back, col_next = st.columns(2)
     with col_back:
         if cur > 0:
-            if st.button("← Back", key="quiz_back", use_container_width=True):
+            if st.button("Back", key="quiz_back", use_container_width=True):
                 st.session_state.wwyd_cur -= 1
                 st.rerun()
     with col_next:
-        btn_label = "Next: Hidden Desires →" if is_last else "Next →"
+        btn_label = "Next: hidden desires" if is_last else "Next"
         answered  = st.session_state.wwyd_answers[cur] is not None
         if st.button(btn_label, key="quiz_next", disabled=not answered,
                      use_container_width=True, type="primary"):
@@ -1562,23 +1482,23 @@ def render_phase_transition():
     line = random.choice(PHASE_TRANSITIONS["to_hidden_desires"])
     st.html(f"""
 <div class="enter-card fade-in" style="text-align:center; padding:60px 20px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:4px;
-              text-transform:uppercase; color:var(--muted); margin-bottom:20px;">
+  <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+              text-transform:none; color:var(--muted); margin-bottom:20px;">
     Phase 1 complete
   </div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:20px; color:var(--text);
+  <div style="font-family:var(--font); font-size:20px; color:var(--text);
               line-height:1.6; max-width:380px; margin:0 auto 32px; font-style:italic;">
     {line}
   </div>
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-              text-transform:uppercase; color:var(--amber); margin-bottom:8px;">
+  <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+              text-transform:none; color:var(--amber); margin-bottom:8px;">
     Phase 2 · Hidden Desires
   </div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted);
+  <div style="font-family:var(--font); font-size:12px; color:var(--muted);
               margin-bottom:32px;">10 statements. They escalate.</div>
 </div>
 """)
-    if st.button("Continue →", use_container_width=True, type="primary", key="transition_btn"):
+    if st.button("Continue", use_container_width=True, type="primary", key="transition_btn"):
         st.session_state.wwyd_phase = "hidden_desires"
         st.rerun()
 
@@ -1604,26 +1524,26 @@ def render_hidden_desires():
 
     segs = "".join(
         f'<div style="flex:1; height:3px; border-radius:2px; background:'
-        f'{"var(--amber)" if i < cur else "rgba(255,179,0,0.4)" if i == cur else "var(--border)"}"></div>'
+        f'{"var(--amber)" if i < cur else "rgba(255,159,46,0.4)" if i == cur else "var(--border)"}"></div>'
         for i in range(total)
     )
     st.html(f"""
-<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:6px;">
+<div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+            text-transform:none; color:var(--muted); margin-bottom:6px;">
   Phase 2 · Hidden Desires · {cur + 1} / {total}
 </div>
 <div style="display:flex; gap:2px; margin-bottom:20px;">{segs}</div>
 <div class="enter-card" style="background:var(--card); border:1px solid var(--border);
             border-top:2px solid {accent}; border-radius:4px; padding:24px 24px 20px; margin-bottom:14px;">
-  <div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:3px;
-              text-transform:uppercase; color:{accent}; margin-bottom:12px; opacity:0.75;">
+  <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+              text-transform:none; color:{accent}; margin-bottom:12px; opacity:0.75;">
     {tier_label}
   </div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:17px; font-style:italic;
+  <div style="font-family:var(--font); font-size:17px; font-style:italic;
               color:var(--text); line-height:1.7; font-weight:300;">{q['text']}</div>
 </div>
-<div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:10px; text-align:center;">
+<div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+            text-transform:none; color:var(--muted); margin-bottom:10px; text-align:center;">
   How much does this resonate?
 </div>
 """)
@@ -1652,18 +1572,18 @@ def render_hidden_desires():
     col_back, col_next = st.columns(2)
     with col_back:
         if cur > 0:
-            if st.button("← Back", key="hd_back", use_container_width=True):
+            if st.button("Back", key="hd_back", use_container_width=True):
                 st.session_state.wwyd_hd_cur -= 1
                 st.rerun()
     with col_next:
         answered = q["id"] in st.session_state.wwyd_hd_answers
         if is_last:
-            if st.button("Build My Profile →", key="hd_next_last",
+            if st.button("Build my profile", key="hd_next_last",
                          disabled=not answered, use_container_width=True, type="primary"):
                 st.session_state.wwyd_phase = "generating_profile"
                 st.rerun()
         else:
-            if st.button("Next →", key="hd_next_mid", disabled=not answered,
+            if st.button("Next", key="hd_next_mid", disabled=not answered,
                          use_container_width=True,
                          type="primary" if answered else "secondary"):
                 st.session_state.wwyd_hd_cur += 1
@@ -1675,9 +1595,9 @@ def render_hidden_desires():
 def render_generating_profile():
     line = random.choice(PHASE_TRANSITIONS["to_profile"])
     st.html(f"""
-<div style="font-family:'Bebas Neue',sans-serif; font-size:36px; color:var(--text);
-            letter-spacing:3px; margin-bottom:8px;">BUILDING YOUR PROFILE</div>
-<div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--muted);
+<div style="font-family:var(--font);font-weight:800;font-stretch:118%; font-size:36px; color:var(--text);
+            letter-spacing:normal; margin-bottom:8px;">BUILDING YOUR PROFILE</div>
+<div style="font-family:var(--font); font-size:13px; color:var(--muted);
             font-style:italic; margin-bottom:24px;">{line}</div>
 """)
     ph_bar    = st.empty()
@@ -1749,43 +1669,43 @@ def render_category_selector():
     result_type = st.session_state.get("wwyd_result_type", {})
     insight     = st.session_state.get("wwyd_insight", "")
 
-    insight_html = ('<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--amber); font-style:italic; line-height:1.6; border-left:2px solid var(--amber); padding-left:12px; margin-bottom:12px;">' + insight + '</div>') if insight else ''
+    insight_html = ('<div style="font-family:var(--font); font-size:13px; color:var(--amber); font-style:italic; line-height:1.6; border-left:2px solid var(--amber); padding-left:12px; margin-bottom:12px;">' + insight + '</div>') if insight else ''
     rt_icon = result_type.get('icon', '')
     rt_name = result_type.get('name', '')
     rt_meta = result_type.get('meta', '')
     sel_count = len(selected)
     st.html(f"""
-<div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:3px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:6px;">
+<div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+            text-transform:none; color:var(--muted); margin-bottom:6px;">
   Phase 3 · Your Category Fingerprint
 </div>
 <div style="background:var(--card); border:1px solid var(--border);
             border-top:2px solid var(--cyan); border-radius:4px; padding:18px 20px; margin-bottom:16px;">
   <div style="display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
     <div style="flex:1; min-width:200px;">
-      <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--text); letter-spacing:2px;">
-        {rt_icon} {rt_name}
+      <div style="font-family:var(--font);font-weight:800;font-stretch:118%; font-size:22px; color:var(--text); letter-spacing:normal;">
+        {rt_name}
       </div>
-      <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--magenta);
-                  letter-spacing:1px; text-transform:uppercase; margin-top:2px;">
+      <div style="font-family:var(--font); font-size:12px; color:var(--magenta);
+                  letter-spacing:normal; text-transform:none; margin-top:2px;">
         {rt_meta}
       </div>
     </div>
     <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px;
                 padding:8px 14px; text-align:center; flex-shrink:0;">
-      <div style="font-family:'Bebas Neue',sans-serif; font-size:28px; color:var(--text);">{pct}</div>
-      <div style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);
-                  text-transform:uppercase; letter-spacing:1px;">openness %</div>
+      <div style="font-family:var(--font);font-weight:800;font-stretch:118%; font-size:28px; color:var(--text);">{pct}</div>
+      <div style="font-family:var(--font); font-size:12px; color:var(--muted);
+                  text-transform:none; letter-spacing:normal;">openness %</div>
     </div>
   </div>
   {insight_html}
-  <div style="font-family:'DM Sans',sans-serif; font-size:12px; color:var(--muted); line-height:1.65;">
+  <div style="font-family:var(--font); font-size:12px; color:var(--muted); line-height:1.65;">
     Every real platform category scored against your answers. Your top 25 are already picked —
     tap to add or remove. This is your profile, not a recommendation.
   </div>
 </div>
-<div style="font-family:'Space Mono',monospace; font-size:8px; letter-spacing:2px;
-            text-transform:uppercase; color:var(--muted); margin-bottom:14px;">
+<div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+            text-transform:none; color:var(--muted); margin-bottom:14px;">
   Tap to add or remove
 </div>
 """)
@@ -1803,7 +1723,7 @@ def render_category_selector():
     st.session_state.wwyd_selected_cats = [n for n in top_names + rest_names if n in selected]
 
     st.html("<br>")
-    if st.button("See My Full Profile →", use_container_width=True, type="primary",
+    if st.button("See my full profile", use_container_width=True, type="primary",
                  disabled=(len(selected) == 0), key="cat_next"):
         _update_selections_in_db(list(selected))
         st.session_state.wwyd_phase = "result"
@@ -1832,18 +1752,18 @@ def _deepest_fantasy(hd_ans: dict, cats: list):
                 + (f'<div class="df-leans">Leans toward · {leans}</div>' if leans else ""))
     st.html(f"""
 <style>
-.df-card {{ background:linear-gradient(160deg,#241018 0%,#131318 100%); border:1px solid rgba(255,45,120,.5);
+.df-card {{ background:linear-gradient(160deg,#22100f 0%,#16130f 100%); border:1px solid rgba(232,67,90,.5);
   border-radius:4px; padding:20px; margin-bottom:12px; }}
-.df-kicker {{ font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px; text-transform:uppercase;
+.df-kicker {{ font-family:var(--font); font-size:12px; letter-spacing:normal; text-transform:none;
   color:var(--magenta); margin-bottom:8px; }}
-.df-name {{ font-family:'Bebas Neue',sans-serif; font-size:34px; letter-spacing:2px; color:var(--text); line-height:1; }}
-.df-sub {{ font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft); line-height:1.7; margin-top:8px; font-style:italic; }}
-.df-leans {{ font-family:'Space Mono',monospace; font-size:10px; color:var(--amber); margin-top:10px; letter-spacing:.5px; }}
-.df-private {{ font-family:'Space Mono',monospace; font-size:8px; color:var(--muted); margin-top:12px;
-  letter-spacing:1px; text-transform:uppercase; }}
+.df-name {{ font-family:var(--font);font-weight:800;font-stretch:118%; font-size:34px; letter-spacing:normal; color:var(--text); line-height:1; }}
+.df-sub {{ font-family:var(--font); font-size:13px; color:var(--soft); line-height:1.7; margin-top:8px; font-style:italic; }}
+.df-leans {{ font-family:var(--font); font-size:12px; color:var(--amber); margin-top:10px; letter-spacing:normal; }}
+.df-private {{ font-family:var(--font); font-size:12px; color:var(--muted); margin-top:12px;
+  letter-spacing:normal; text-transform:none; }}
 </style>
 <div class="df-card enter-card">
-  <div class="df-kicker">🔥 Your deepest fantasy</div>
+  <div class="df-kicker">Your deepest fantasy</div>
   {body}
   <div class="df-private">Only you see this. A match only sees it if they said yes to it too.</div>
 </div>""")
@@ -1861,12 +1781,12 @@ def render_result():
 
     one_line_read_html = (
         '<div style="background:var(--surface); border:1px solid var(--amber); border-radius:3px; padding:14px 16px; margin-top:4px;">'
-        '<div style="font-family:\'Space Mono\',monospace; font-size:8px; letter-spacing:2px; text-transform:uppercase; color:var(--amber); margin-bottom:6px;">One-line read</div>'
-        f'<div style="font-family:\'DM Sans\',sans-serif; font-size:14px; color:var(--text); font-style:italic; line-height:1.65;">{insight}</div>'
+        '<div style="font-family:var(--font); font-size:12px; letter-spacing:normal; text-transform:none; color:var(--amber); margin-bottom:6px;">One-line read</div>'
+        f'<div style="font-family:var(--font); font-size:14px; color:var(--text); font-style:italic; line-height:1.65;">{insight}</div>'
         '</div>'
     ) if insight else ''
     rt_icon = result_type['icon']
-    rt_name = result_type['name'].upper()
+    rt_name = result_type['name']
     rt_meta = result_type['meta']
     rt_hook = result_type.get('hook', '')
     rt_signal = result_type.get('signal', '')
@@ -1874,39 +1794,38 @@ def render_result():
     st.html(f"""
 <div class="enter-card" style="background:var(--card); border:1px solid var(--border);
             border-top:3px solid var(--magenta); border-radius:4px; padding:28px 24px; margin-bottom:14px;">
-  <div style="font-size:42px; margin-bottom:10px;">{rt_icon}</div>
-  <div style="font-family:'Bebas Neue',sans-serif; font-size:clamp(28px,6vw,46px);
-              letter-spacing:3px; color:var(--text); line-height:1.05; margin-bottom:4px;">
+  <div style="font-family:var(--font);font-weight:800;font-stretch:118%; font-size:clamp(28px,6vw,46px);
+              letter-spacing:normal; color:var(--text); line-height:1.05; margin-bottom:4px;">
     {rt_name}
   </div>
-  <div style="font-family:'Space Mono',monospace; font-size:10px; letter-spacing:2px;
-              color:var(--magenta); text-transform:uppercase; margin-bottom:24px;">
+  <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+              color:var(--magenta); text-transform:none; margin-bottom:24px;">
     {rt_meta}
   </div>
   <div style="border-top:1px solid var(--border); padding-top:18px; margin-bottom:16px;">
-    <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text);
+    <div style="font-family:var(--font); font-size:14px; color:var(--text);
                 line-height:1.75; margin-bottom:14px;">{rt_hook}</div>
-    <div style="font-family:'DM Sans',sans-serif; font-size:13px; color:var(--soft);
+    <div style="font-family:var(--font); font-size:13px; color:var(--soft);
                 line-height:1.75; margin-bottom:14px; border-left:2px solid var(--border);
                 padding-left:12px;">{rt_signal}</div>
-    <div style="font-family:'Space Mono',monospace; font-size:10px; color:var(--amber);
-                line-height:1.65; letter-spacing:0.5px;">{rt_tell}</div>
+    <div style="font-family:var(--font); font-size:12px; color:var(--amber);
+                line-height:1.65; letter-spacing:normal;">{rt_tell}</div>
   </div>
   {one_line_read_html}
   <div style="background:var(--surface); border:1px solid var(--border); border-radius:3px;
               padding:14px; margin-top:16px;">
-    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--muted); margin-bottom:8px;">Openness Index</div>
+    <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+                text-transform:none; color:var(--muted); margin-bottom:8px;">Openness Index</div>
     <div style="height:4px; background:var(--border); border-radius:2px; margin-bottom:8px;">
       <div style="width:{pct}%; height:100%;
                   background:linear-gradient(90deg, var(--amber), var(--magenta)); border-radius:2px;"></div>
     </div>
     <div style="display:flex; justify-content:space-between; align-items:center;">
-      <span style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">Closed off</span>
-      <span style="font-family:'Bebas Neue',sans-serif; font-size:32px; color:var(--text);">
+      <span style="font-family:var(--font); font-size:12px; color:var(--muted);">Closed off</span>
+      <span style="font-family:var(--font);font-weight:800;font-stretch:118%; font-size:32px; color:var(--text);">
         {pct}<span style="font-size:14px; color:var(--muted);"> / 100</span>
       </span>
-      <span style="font-family:'Space Mono',monospace; font-size:8px; color:var(--muted);">Wide open</span>
+      <span style="font-family:var(--font); font-size:12px; color:var(--muted);">Wide open</span>
     </div>
   </div>
 </div>
@@ -1921,17 +1840,17 @@ def render_result():
     if strong:
         sigs_html = "".join(
             f'<div style="display:flex; gap:12px; align-items:flex-start; padding:10px 0; border-bottom:1px solid var(--border);">'
-            f'<span style="color:{"var(--magenta)" if hd_ans.get(q["id"])=="strongly" else "var(--amber)"}; flex-shrink:0; margin-top:3px; font-size:10px;">{"★" if hd_ans.get(q["id"])=="strongly" else "◆"}</span>'
-            f'<div style="font-family:\'DM Sans\',sans-serif; font-size:12px; color:var(--soft); line-height:1.7; font-style:italic;">{q["text"]}</div></div>'
+            f'<span style="color:{"var(--magenta)" if hd_ans.get(q["id"])=="strongly" else "var(--amber)"}; flex-shrink:0; margin-top:3px; font-size:12px;">{"★" if hd_ans.get(q["id"])=="strongly" else "◆"}</span>'
+            f'<div style="font-family:var(--font); font-size:12px; color:var(--soft); line-height:1.7; font-style:italic;">{q["text"]}</div></div>'
             for q in strong
         )
         st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:18px; margin-bottom:12px;">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--amber);">Hidden Desire Signals</div>
-    <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);">
+    <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+                text-transform:none; color:var(--amber);">Hidden Desire Signals</div>
+    <div style="font-family:var(--font); font-size:12px; color:var(--muted);">
       {len([q for q in strong if hd_ans.get(q['id'])=='strongly'])} strong · {len([q for q in strong if hd_ans.get(q['id'])=='yes'])} present
     </div>
   </div>
@@ -1944,9 +1863,9 @@ def render_result():
         max_score = ranked_cats[0]["score"] if ranked_cats else 1
         bars_html = "".join(
             f'<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">'
-            f'<div style="font-family:\'Space Mono\',monospace; font-size:9px; color:{"var(--lime)" if c["name"] in sel_cats else "var(--soft)"}; width:150px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-transform:uppercase; letter-spacing:1px;">{"✓ " if c["name"] in sel_cats else ""}{c["name"]}</div>'
+            f'<div style="font-family:var(--font); font-size:12px; color:{"var(--lime)" if c["name"] in sel_cats else "var(--soft)"}; width:150px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-transform:none; letter-spacing:normal;">{"✓ " if c["name"] in sel_cats else ""}{c["name"]}</div>'
             f'<div style="flex:1; height:3px; background:var(--border); border-radius:2px;"><div style="width:{min(100, round(c["score"]/max_score*100))}%; height:100%; background:{"var(--lime)" if c["name"] in sel_cats else "var(--muted)"}; border-radius:2px;"></div></div>'
-            f'<div style="font-family:\'Space Mono\',monospace; font-size:8px; color:var(--muted); width:20px; text-align:right;">{c["score"]}</div>'
+            f'<div style="font-family:var(--font); font-size:12px; color:var(--muted); width:20px; text-align:right;">{c["score"]}</div>'
             f'</div>'
             for c in top10
         )
@@ -1954,9 +1873,9 @@ def render_result():
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:18px; margin-bottom:12px;">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-    <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-                text-transform:uppercase; color:var(--cyan);">Content Fingerprint · Top 10</div>
-    <div style="font-family:'Space Mono',monospace; font-size:9px; color:var(--muted);">{len(sel_cats)} selected</div>
+    <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+                text-transform:none; color:var(--cyan);">Content Fingerprint · Top 10</div>
+    <div style="font-family:var(--font); font-size:12px; color:var(--muted);">{len(sel_cats)} selected</div>
   </div>
   {bars_html}
 </div>
@@ -1965,16 +1884,16 @@ def render_result():
     if recs:
         recs_html = "".join(
             f'<div style="padding:14px 0; border-bottom:1px solid var(--border);">'
-            f'<div style="font-family:\'Space Mono\',monospace; font-size:8px; letter-spacing:2px; text-transform:uppercase; color:var(--magenta); margin-bottom:6px;">0{i+1}</div>'
-            f'<div style="font-family:\'DM Sans\',sans-serif; font-size:13px; color:var(--soft); line-height:1.8;">{r}</div></div>'
+            f'<div style="font-family:var(--font); font-size:12px; letter-spacing:normal; text-transform:none; color:var(--magenta); margin-bottom:6px;">0{i+1}</div>'
+            f'<div style="font-family:var(--font); font-size:13px; color:var(--soft); line-height:1.8;">{r}</div></div>'
             for i, r in enumerate(recs)
         )
         st.html(f"""
 <div style="background:var(--card); border:1px solid var(--border); border-radius:4px;
             padding:18px; margin-bottom:16px;">
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-              text-transform:uppercase; color:var(--magenta); margin-bottom:4px;">Things Worth Exploring</div>
-  <div style="font-family:'DM Sans',sans-serif; font-size:11px; color:var(--muted); margin-bottom:12px;">
+  <div style="font-family:var(--font); font-size:12px; letter-spacing:normal;
+              text-transform:none; color:var(--magenta); margin-bottom:4px;">Things Worth Exploring</div>
+  <div style="font-family:var(--font); font-size:12px; color:var(--muted); margin-bottom:12px;">
     Based on what you actually answered — not just your archetype.
   </div>
   {recs_html}
@@ -1994,13 +1913,13 @@ def render_result():
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("↺ Try Again", use_container_width=True, key="try_again"):
+        if st.button("Try again", use_container_width=True, key="try_again"):
             hard_reset()
     with col2:
-        st.download_button("↓ Save Result", data=share, file_name="rbtl_result.txt",
+        st.download_button("Save result", data=share, file_name="rbtl_result.txt",
                            mime="text/plain", use_container_width=True, key="save_result")
 
-    st.html('<div style="font-family:\'DM Sans\',sans-serif;font-size:13px;color:var(--muted);'
+    st.html('<div style="font-family:var(--font);font-size:13px;color:var(--muted);'
             'text-align:center;margin-top:22px;line-height:1.6;">Matches who\'ve taken the quiz too see '
             'your result, your freak score (Openness Index) and the hidden desires you both said yes to. '
             'Never the rest.<br>To compare with anyone else, get a drop code in <b>Me › Quiz</b>.</div>')

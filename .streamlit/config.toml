@@ -1,9 +1,18 @@
 [theme]
 base = "dark"
-primaryColor = "#c6ff00"
-backgroundColor = "#0a0a0b"
-secondaryBackgroundColor = "#18181d"
-textColor = "#f0f0f5"
+primaryColor = "#ff9f2e"
+backgroundColor = "#000000"
+secondaryBackgroundColor = "#16130f"
+textColor = "#f2ece4"
+borderColor = "#2b2724"
+showWidgetBorder = true
+linkColor = "#ff9f2e"
+linkUnderline = false
+baseRadius = "0.75rem"
+buttonRadius = "full"
+font = "Archivo:https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&display=swap"
+headingFont = "Archivo:https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&display=swap"
+headingFontWeights = [800, 700]
 
 [client]
 toolbarMode = "minimal"
